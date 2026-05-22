@@ -58,7 +58,7 @@ const statusLabels: Record<ServiceStatus, string> = {
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
   starting: "bg-amber-400",
-  running: "bg-emerald-400",
+  running: "bg-cyan-400",
   stopping: "bg-orange-400",
   exited: "bg-sky-400",
   failed: "bg-rose-400"
@@ -250,7 +250,7 @@ export function App() {
       setPortConflicts((current) =>
         current[serviceId] ? { ...current, [serviceId]: false } : current
       );
-      appendLog(serviceId, `\r\n\x1b[32m[manager] started pid ${pid}\x1b[0m\r\n`);
+      appendLog(serviceId, `\r\n\x1b[38;2;34;211;238m[manager] started pid ${pid}\x1b[0m\r\n`);
       refreshHistory(serviceId);
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -279,7 +279,7 @@ export function App() {
         : `code ${code}`;
       appendLog(
         serviceId,
-        `\r\n\x1b[36m[manager] process exited (${description})\x1b[0m\r\n`
+        `\r\n\x1b[38;2;34;211;238m[manager] process exited (${description})\x1b[0m\r\n`
       );
       // Re-probe the port after a short delay so the OS has time to release it.
       scheduleRescan(serviceId);
@@ -369,7 +369,7 @@ export function App() {
       setStatuses((current) => ({ ...current, [service.id]: "starting" }));
       appendLog(
         service.id,
-        `\r\n\x1b[36m[manager] starting ${formatCommand(service)}\x1b[0m\r\n`
+        `\r\n\x1b[38;2;34;211;238m[manager] starting ${formatCommand(service)}\x1b[0m\r\n`
       );
 
       const onOutput = new Channel<ProcessOutputEvent>();
@@ -411,7 +411,7 @@ export function App() {
       }
 
       setStatuses((current) => ({ ...current, [service.id]: "stopping" }));
-      appendLog(service.id, `\r\n\x1b[36m[manager] stop requested\x1b[0m\r\n`);
+      appendLog(service.id, `\r\n\x1b[38;2;34;211;238m[manager] stop requested\x1b[0m\r\n`);
 
       try {
         await invoke("stop_service", { serviceId: service.id });
@@ -514,8 +514,12 @@ export function App() {
     if (selected) clearLog(selected.id);
   }, [selected, clearLog]);
 
-  // Global keyboard shortcuts. Modifier combos are ignored while the user is
-  // typing in a form field; Escape always closes an open form.
+  // Global keyboard shortcuts. Registered in the capture phase so they fire
+  // before a focused terminal — xterm consumes Ctrl-combos and stops their
+  // propagation, so a bubble-phase listener would never see them. For each
+  // shortcut we handle, `stopPropagation` then keeps the key from also
+  // reaching the terminal. Modifier combos are ignored while the user is
+  // typing in a real form field.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -527,6 +531,7 @@ export function App() {
           setEditing(null);
           return;
         }
+        return;
       }
 
       const mod = event.ctrlKey || event.metaKey;
@@ -537,14 +542,8 @@ export function App() {
       // Ctrl/Cmd + Shift + F → global log search.
       if (event.shiftKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
+        event.stopPropagation();
         setSearchOpen(true);
-        return;
-      }
-
-      // Ctrl/Cmd + Shift + B → toggle the right sidebar.
-      if (event.shiftKey && event.key.toLowerCase() === "b") {
-        event.preventDefault();
-        setRightSidebarOpen((open) => !open);
         return;
       }
 
@@ -552,13 +551,31 @@ export function App() {
         return;
       }
 
+      // A real text field swallows the remaining shortcuts — but xterm's
+      // hidden helper textarea is not real input, so shortcuts still work
+      // while a terminal pane is focused.
       const target = event.target as HTMLElement | null;
-      const isTyping =
+      const isFormField =
         target != null &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
-          target.isContentEditable);
-      if (isTyping) {
+          target.isContentEditable) &&
+        !target.classList.contains("xterm-helper-textarea");
+      if (isFormField) {
+        return;
+      }
+
+      // Ctrl/Cmd + ← / → → toggle the left / right side panels.
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        event.stopPropagation();
+        setLeftSidebarOpen((open) => !open);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        event.stopPropagation();
+        setRightSidebarOpen((open) => !open);
         return;
       }
 
@@ -567,6 +584,7 @@ export function App() {
         const service = flatServices[Number(event.key) - 1];
         if (service) {
           event.preventDefault();
+          event.stopPropagation();
           openSingle(service.id);
         }
         return;
@@ -576,34 +594,34 @@ export function App() {
         case "r":
           if (selected) {
             event.preventDefault();
+            event.stopPropagation();
             void manualStart(selected);
           }
           break;
         case "s":
           if (selected) {
             event.preventDefault();
+            event.stopPropagation();
             void stopService(selected);
           }
           break;
         case "k":
           event.preventDefault();
+          event.stopPropagation();
           clearSelectedLog();
           break;
         case "n":
           event.preventDefault();
+          event.stopPropagation();
           setEditing({ mode: "new" });
-          break;
-        case "b":
-          event.preventDefault();
-          setLeftSidebarOpen((open) => !open);
           break;
         default:
           break;
       }
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
     editing,
     searchOpen,
@@ -728,7 +746,7 @@ export function App() {
                         role="button"
                         tabIndex={0}
                         onClick={(event) => {
-                          if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                          if (event.ctrlKey || event.metaKey) {
                             openInSplit(service.id);
                           } else {
                             openSingle(service.id);
@@ -740,12 +758,11 @@ export function App() {
                             openSingle(service.id);
                           }
                         }}
-                        title={`Click to open · ${modKey}/Shift-click to open in split view`}
                         className={`group/card w-full cursor-pointer rounded-md border-l-2 px-3 py-3 text-left transition ${
                           selected?.id === service.id
-                            ? "border-emerald-500 bg-white/10 text-white"
+                            ? "border-cyan-500 bg-white/10 text-white"
                             : isOpen
-                            ? "border-emerald-500/40 text-zinc-300 hover:bg-white/5 hover:text-white"
+                            ? "border-cyan-500/40 text-zinc-300 hover:bg-white/5 hover:text-white"
                             : "border-transparent text-zinc-300 hover:bg-white/5 hover:text-white"
                         }`}
                       >
@@ -791,7 +808,7 @@ export function App() {
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-16 items-center justify-between border-b border-white/10 px-5">
-          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+B)`}>
+          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+←)`}>
             <Button
               variant="ghost"
               size="icon"
@@ -814,7 +831,7 @@ export function App() {
             </Tooltip>
             <span className="mx-1 h-5 w-px bg-white/10" />
             <Tooltip
-              label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+Shift+B)`}
+              label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+→)`}
               side="bottom"
             >
               <Button
@@ -962,7 +979,7 @@ export function App() {
           className="group/lh absolute inset-y-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize"
           style={{ left: `${leftWidth}px` }}
         >
-          <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover/lh:bg-emerald-500/60" />
+          <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover/lh:bg-cyan-500/60" />
         </div>
       ) : null}
       {rightSidebarOpen ? (
@@ -974,7 +991,7 @@ export function App() {
           className="group/rh absolute inset-y-0 z-20 w-1.5 translate-x-1/2 cursor-col-resize"
           style={{ right: `${rightWidth}px` }}
         >
-          <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover/rh:bg-emerald-500/60" />
+          <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover/rh:bg-cyan-500/60" />
         </div>
       ) : null}
     </main>

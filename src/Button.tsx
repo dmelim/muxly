@@ -5,7 +5,7 @@ import type { ButtonHTMLAttributes } from "react";
  * whole app stays visually consistent.
  *
  * Variants:
- *  - primary      emerald solid — the main action (Start)
+ *  - primary      cyan solid — the main action (Start)
  *  - secondary    subtle filled — neutral actions (Stop, Clear)
  *  - ghost        transparent until hover — low-emphasis actions (Edit)
  *  - destructive  rose tint — deletes
@@ -27,10 +27,10 @@ export type ButtonSize = "xs" | "sm" | "md" | "icon";
 const BASE =
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md " +
   "font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 " +
-  "focus-visible:ring-emerald-400/40 disabled:cursor-not-allowed disabled:opacity-50";
+  "focus-visible:ring-cyan-400/40 disabled:cursor-not-allowed disabled:opacity-50";
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-emerald-500 text-emerald-950 hover:bg-emerald-400",
+  primary: "bg-cyan-500 text-cyan-950 hover:bg-cyan-400",
   secondary: "bg-white/10 text-zinc-100 hover:bg-white/15",
   ghost: "text-zinc-300 hover:bg-white/10 hover:text-white",
   destructive: "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25",

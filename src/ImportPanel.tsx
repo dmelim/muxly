@@ -181,7 +181,7 @@ export function ImportPanel({ existingIds, onImport, onCancel }: Props) {
                         {row.source}
                       </span>
                       {row.recommended ? (
-                        <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-emerald-300">
+                        <span className="shrink-0 rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-cyan-300">
                           suggested
                         </span>
                       ) : null}

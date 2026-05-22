@@ -11,7 +11,7 @@ import { Tooltip } from "./Tooltip";
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
   starting: "bg-amber-400",
-  running: "bg-emerald-400",
+  running: "bg-cyan-400",
   stopping: "bg-orange-400",
   exited: "bg-sky-400",
   failed: "bg-rose-400"
@@ -27,7 +27,7 @@ const TERMINAL_OPTIONS = {
   theme: {
     background: "#101215",
     foreground: "#d4d4d8",
-    cursor: "#22c55e",
+    cursor: "#22d3ee",
     selectionBackground: "#3f3f46"
   }
 } as const;
@@ -78,10 +78,19 @@ export function TerminalPanes({
         <Fragment key={service.id}>
           {index > 0 ? (
             <Separator className="group/sep relative w-1.5 cursor-col-resize bg-transparent">
-              <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/10 transition-colors group-hover/sep:bg-emerald-500/50" />
+              <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/10 transition-colors group-hover/sep:bg-cyan-500/50" />
             </Separator>
           ) : null}
-          <Panel minSize="15%" className="flex min-h-0 flex-col overflow-hidden">
+          {/* react-resizable-panels forces `overflow: auto` inline on the
+              panel's inner div, which makes it a scroll container. The library
+              spreads the `style` prop *after* its own overflow, so this is the
+              intended way to override it — the pane must clip, not scroll;
+              xterm owns its own scrolling. */}
+          <Panel
+            minSize="15%"
+            className="flex min-h-0 flex-col overflow-hidden"
+            style={{ overflow: "hidden" }}
+          >
             <PaneView
               service={service}
               status={statuses[service.id] ?? "stopped"}
@@ -182,7 +191,7 @@ function PaneView({
       terminal.open(host);
       safeFit();
 
-      terminal.writeln(`\x1b[1;32m${service.name}\x1b[0m`);
+      terminal.writeln(`\x1b[1;38;2;34;211;238m${service.name}\x1b[0m`);
       terminal.writeln(`cwd: ${service.cwd}`);
       terminal.writeln(`cmd: ${formatCommand(service)}`);
       terminal.writeln("");
@@ -217,7 +226,7 @@ function PaneView({
     <div
       onMouseDown={onFocus}
       className={`flex min-h-0 flex-1 flex-col ${
-        focused ? "ring-1 ring-inset ring-emerald-500/30" : ""
+        focused ? "ring-1 ring-inset ring-cyan-500/30" : ""
       }`}
     >
       <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
@@ -243,7 +252,7 @@ function PaneView({
           ) : (
             <PaneIconButton
               label="Start"
-              accent="text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300"
+              accent="text-cyan-400 hover:bg-cyan-500/15 hover:text-cyan-300"
               disabled={status === "running" || status === "starting"}
               onClick={onStart}
             >

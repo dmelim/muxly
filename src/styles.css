@@ -71,14 +71,27 @@ button {
   height: 100%;
 }
 
-/* xterm hardcodes `background-color: #000` on the viewport and leaves
-   `overflow-x` at the UA default. Match the terminal theme so the partial
-   row below the last line isn't a pure-black strip, and never scroll
-   horizontally — terminal output wraps, it must not scroll sideways. */
+/* xterm hardcodes `background-color: #000` on the viewport. Match the
+   terminal theme so the partial row below the last line isn't a pure-black
+   strip. */
 .xterm .xterm-viewport {
   background-color: #101215;
   overflow-x: hidden;
   border-radius: 6px;
+}
+
+/* xterm 6.0 scrolls via VS Code's ScrollableElement, not native overflow.
+   The rendered grid (`.xterm-screen`) often ends up a hair wider than its
+   container — scrollbar-gutter rounding — which makes a horizontal scrollbar
+   appear. Terminal output wraps, so horizontal scrolling is never wanted:
+   hide that scrollbar outright. Vertical scrolling is unaffected. */
+.xterm .xterm-scrollable-element > .scrollbar.horizontal {
+  display: none !important;
+}
+
+/* Drop the scrollbar arrow buttons — the slider alone is cleaner. */
+.xterm .xterm-scrollable-element > .scrollbar > .scra {
+  display: none !important;
 }
 
 .form-input {
@@ -94,7 +107,7 @@ button {
 }
 
 .form-input:focus {
-  border-color: rgba(16, 185, 129, 0.6);
+  border-color: rgba(6, 182, 212, 0.6);
   background: rgba(0, 0, 0, 0.4);
 }
 
