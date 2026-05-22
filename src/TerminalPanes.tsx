@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useRef } from "react";
-import type { MutableRefObject } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { ServiceConfig, ServiceStatus } from "./types";
 import { formatCommand } from "./types";
-import { CloseIcon } from "./icons";
+import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, StopIcon } from "./icons";
+import { Tooltip } from "./Tooltip";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -37,22 +38,31 @@ type TerminalPanesProps = {
   /** The focused pane's service id — drives the toolbar/inspector. */
   focusedId: string | null;
   statuses: Record<string, ServiceStatus>;
+  /** Live PIDs, keyed by service id — a present pid means the process runs. */
+  pids: Record<string, number>;
   /** App-owned registry so log streaming can reach each pane's terminal. */
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   /** App-owned per-service log ring buffers, replayed when a pane mounts. */
   logsRef: MutableRefObject<Record<string, string[]>>;
   onFocus: (serviceId: string) => void;
   onClose: (serviceId: string) => void;
+  onStart: (service: ServiceConfig) => void;
+  onStop: (service: ServiceConfig) => void;
+  onClear: (serviceId: string) => void;
 };
 
 export function TerminalPanes({
   paneServices,
   focusedId,
   statuses,
+  pids,
   terminalsRef,
   logsRef,
   onFocus,
-  onClose
+  onClose,
+  onStart,
+  onStop,
+  onClear
 }: TerminalPanesProps) {
   if (paneServices.length === 0) {
     return (
@@ -75,12 +85,16 @@ export function TerminalPanes({
             <PaneView
               service={service}
               status={statuses[service.id] ?? "stopped"}
+              running={pids[service.id] != null}
               focused={service.id === focusedId}
               showClose={paneServices.length > 1}
               terminalsRef={terminalsRef}
               logsRef={logsRef}
               onFocus={() => onFocus(service.id)}
               onClose={() => onClose(service.id)}
+              onStart={() => onStart(service)}
+              onStop={() => onStop(service)}
+              onClear={() => onClear(service.id)}
             />
           </Panel>
         </Fragment>
@@ -92,23 +106,32 @@ export function TerminalPanes({
 type PaneViewProps = {
   service: ServiceConfig;
   status: ServiceStatus;
+  /** True while the process has a live PID — gates the Stop button. */
+  running: boolean;
   focused: boolean;
   showClose: boolean;
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   logsRef: MutableRefObject<Record<string, string[]>>;
   onFocus: () => void;
   onClose: () => void;
+  onStart: () => void;
+  onStop: () => void;
+  onClear: () => void;
 };
 
 function PaneView({
   service,
   status,
+  running,
   focused,
   showClose,
   terminalsRef,
   logsRef,
   onFocus,
-  onClose
+  onClose,
+  onStart,
+  onStop,
+  onClear
 }: PaneViewProps) {
   // `wrapRef` is the flex-sized box the ResizeObserver watches. `hostRef` is a
   // plain child that xterm renders into. Keeping them separate is what stops
@@ -197,7 +220,7 @@ function PaneView({
         focused ? "ring-1 ring-inset ring-emerald-500/30" : ""
       }`}
     >
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-white/10 px-3">
+      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className={`size-2 rounded-full ${statusDots[status]}`} />
           <span
@@ -208,23 +231,89 @@ function PaneView({
             {service.name}
           </span>
         </span>
-        {showClose ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose();
-            }}
-            className="rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
-            aria-label={`Close ${service.name} pane`}
+        <span className="flex shrink-0 items-center gap-0.5">
+          {status === "failed" || status === "exited" ? (
+            <PaneIconButton
+              label="Restart"
+              accent="text-amber-400 hover:bg-amber-500/15 hover:text-amber-300"
+              onClick={onStart}
+            >
+              <RestartIcon className="size-3.5" />
+            </PaneIconButton>
+          ) : (
+            <PaneIconButton
+              label="Start"
+              accent="text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300"
+              disabled={status === "running" || status === "starting"}
+              onClick={onStart}
+            >
+              <PlayIcon className="size-3.5" />
+            </PaneIconButton>
+          )}
+          <PaneIconButton
+            label="Stop"
+            accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+            disabled={!running}
+            onClick={onStop}
           >
-            <CloseIcon className="size-3.5" />
-          </button>
-        ) : null}
+            <StopIcon className="size-3.5" />
+          </PaneIconButton>
+          <PaneIconButton
+            label="Clear log"
+            accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+            onClick={onClear}
+          >
+            <ClearIcon className="size-3.5 rotate-12" />
+          </PaneIconButton>
+          {showClose ? (
+            <>
+              <span className="mx-0.5 h-4 w-px bg-white/10" />
+              <PaneIconButton
+                label={`Close ${service.name} pane`}
+                accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+                onClick={onClose}
+              >
+                <CloseIcon className="size-3.5" />
+              </PaneIconButton>
+            </>
+          ) : null}
+        </span>
       </div>
-      <div ref={wrapRef} className="min-h-0 flex-1 p-3">
-        <div ref={hostRef} className="h-full w-full" />
+      <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden p-3">
+        <div ref={hostRef} className="h-full w-full overflow-hidden" />
       </div>
     </div>
+  );
+}
+
+type PaneIconButtonProps = {
+  label: string;
+  accent: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+};
+
+/**
+ * Compact icon button for a pane header. Stops click propagation so it doesn't
+ * read as a generic pane click — but mousedown still bubbles, so acting on a
+ * pane's control also focuses that pane, which is the behaviour we want.
+ */
+function PaneIconButton({ label, accent, disabled, onClick, children }: PaneIconButtonProps) {
+  return (
+    <Tooltip label={label}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+        aria-label={label}
+        className={`rounded p-1 transition disabled:pointer-events-none disabled:opacity-30 ${accent}`}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }

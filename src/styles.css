@@ -51,10 +51,15 @@
   background: transparent;
 }
 
+/* The app owns all scrolling through its own panels — the document root must
+   never scroll. `overflow: hidden` here (not just on `body`) suppresses the
+   horizontal bar that would otherwise appear if `body` ever exceeded the
+   window. The Tauri window enforces a 1024px minimum size, so the layout
+   never needs a `min-width` of its own. */
+html,
 body {
   margin: 0;
-  min-width: 1024px;
-  min-height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -66,7 +71,13 @@ button {
   height: 100%;
 }
 
-.xterm-viewport {
+/* xterm hardcodes `background-color: #000` on the viewport and leaves
+   `overflow-x` at the UA default. Match the terminal theme so the partial
+   row below the last line isn't a pure-black strip, and never scroll
+   horizontally — terminal output wraps, it must not scroll sideways. */
+.xterm .xterm-viewport {
+  background-color: #101215;
+  overflow-x: hidden;
   border-radius: 6px;
 }
 

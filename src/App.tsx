@@ -21,12 +21,10 @@ import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
 import { TerminalPanes } from "./TerminalPanes";
 import {
-  ClearIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PlayIcon,
   PlusIcon,
-  RestartIcon,
   SearchIcon,
   SplitIcon,
   StopIcon
@@ -425,14 +423,6 @@ export function App() {
     [appendLog, pids]
   );
 
-  const startSelected = () => {
-    if (selected) manualStart(selected);
-  };
-
-  const stopSelected = () => {
-    if (selected) stopService(selected);
-  };
-
   const startGroup = (groupName: string) => {
     services
       .filter((service) => groupKey(service) === groupName)
@@ -513,14 +503,16 @@ export function App() {
     [leftWidth, rightWidth]
   );
 
-  const clearSelectedLog = useCallback(() => {
-    if (!selected) {
-      return;
-    }
+  // Drop one service's buffered log and wipe its terminal (if a pane is open).
+  const clearLog = useCallback((serviceId: string) => {
+    logsRef.current[serviceId] = [];
+    terminalsRef.current.get(serviceId)?.clear();
+  }, []);
 
-    logsRef.current[selected.id] = [];
-    terminalsRef.current.get(selected.id)?.clear();
-  }, [selected]);
+  // The Ctrl+K shortcut clears whichever pane is focused.
+  const clearSelectedLog = useCallback(() => {
+    if (selected) clearLog(selected.id);
+  }, [selected, clearLog]);
 
   // Global keyboard shortcuts. Modifier combos are ignored while the user is
   // typing in a form field; Escape always closes an open form.
@@ -626,7 +618,7 @@ export function App() {
   return (
     <>
     <main
-      className="relative grid h-screen grid-rows-1 bg-[#101215] text-zinc-100"
+      className="relative grid h-screen grid-rows-1 overflow-hidden bg-[#101215] text-zinc-100"
       style={{
         gridTemplateColumns: `${leftSidebarOpen ? `${leftWidth}px` : "0"} 1fr ${
           rightSidebarOpen ? `${rightWidth}px` : "0"
@@ -799,22 +791,16 @@ export function App() {
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-16 items-center justify-between border-b border-white/10 px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+B)`}>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setLeftSidebarOpen((open) => !open)}
-                aria-label="Toggle services sidebar"
-              >
-                <PanelLeftIcon className="size-4" />
-              </Button>
-            </Tooltip>
-            <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold">{selected?.name ?? "No service"}</h2>
-              <p className="truncate font-mono text-xs text-zinc-500">{selected?.cwd ?? ""}</p>
-            </div>
-          </div>
+          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+B)`}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setLeftSidebarOpen((open) => !open)}
+              aria-label="Toggle services sidebar"
+            >
+              <PanelLeftIcon className="size-4" />
+            </Button>
+          </Tooltip>
           <div className="flex items-center gap-2">
             <Tooltip label="Search all logs (Ctrl+Shift+F)">
               <Button
@@ -824,55 +810,6 @@ export function App() {
                 aria-label="Search all logs"
               >
                 <SearchIcon className="size-4" />
-              </Button>
-            </Tooltip>
-            <span className="mx-1 h-5 w-px bg-white/10" />
-            {selected && (statuses[selected.id] === "failed" || statuses[selected.id] === "exited") ? (
-              <Tooltip
-                label={`Restart (${modKey}+R) — last exit: ${lastExit[selected.id] ?? "unknown"}`}
-              >
-                <Button
-                  variant="warning"
-                  size="icon"
-                  onClick={startSelected}
-                  aria-label="Restart service"
-                >
-                  <RestartIcon className="size-4" />
-                </Button>
-              </Tooltip>
-            ) : (
-              <Tooltip label={`Start (${modKey}+R)`}>
-                <Button
-                  variant="primary"
-                  size="icon"
-                  onClick={startSelected}
-                  disabled={!selected || statuses[selected.id] === "running" || statuses[selected.id] === "starting"}
-                  aria-label="Start service"
-                >
-                  <PlayIcon className="size-4" />
-                </Button>
-              </Tooltip>
-            )}
-            <Tooltip label={`Stop (${modKey}+S)`}>
-              <Button
-                variant="secondary"
-                size="icon"
-                onClick={stopSelected}
-                disabled={!selected || !pids[selected.id]}
-                aria-label="Stop service"
-              >
-                <StopIcon className="size-4" />
-              </Button>
-            </Tooltip>
-            <Tooltip label={`Clear log (${modKey}+K)`}>
-              <Button
-                variant="secondary"
-                size="icon"
-                onClick={clearSelectedLog}
-                disabled={!selected}
-                aria-label="Clear log"
-              >
-                <ClearIcon className="size-4 rotate-12" />
               </Button>
             </Tooltip>
             <span className="mx-1 h-5 w-px bg-white/10" />
@@ -896,10 +833,14 @@ export function App() {
           paneServices={paneServices}
           focusedId={selected?.id ?? null}
           statuses={statuses}
+          pids={pids}
           terminalsRef={terminalsRef}
           logsRef={logsRef}
           onFocus={setSelectedId}
           onClose={closePane}
+          onStart={manualStart}
+          onStop={stopService}
+          onClear={clearLog}
         />
       </section>
 
