@@ -1,0 +1,28 @@
+[
+  {
+    "id": "sample-node",
+    "name": "Sample Node Loop",
+    "program": "node",
+    "args": [
+      "-e",
+      "let n=0; setInterval(() => console.log(`[sample] tick ${++n}`), 1000)"
+    ],
+    "cwd": ".",
+    "env": {},
+    "port": null,
+    "group": "samples"
+  },
+  {
+    "id": "sample-error",
+    "name": "Sample Error Stream",
+    "program": "node",
+    "args": [
+      "-e",
+      "let n=0; setInterval(() => { console.error(`[stderr] warning ${++n}`); console.log(`[stdout] ok ${n}`); }, 1500)"
+    ],
+    "cwd": ".",
+    "env": {},
+    "port": null,
+    "group": "samples"
+  }
+]
