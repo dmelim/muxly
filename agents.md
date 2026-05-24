@@ -9,6 +9,10 @@ If I reference an existing file and request a change (e.g., "update", "change", 
 If the intent is unclear (e.g., could be either a new file or a modification), ask for clarification before proceeding.
 Never overwrite or modify files silently when there is ambiguity.
 
+When adding a new Markdown or documentation-adjacent file under `docs/`, confirm
+whether it should be committed to the repository or kept local/untracked before
+creating or linking it.
+
 When asked to create a script, create a Bash script for Git Bash unless another shell is explicitly requested.
 
 Whenever making changes, check `CHANGELOG.md` and add an appropriate entry for the change.

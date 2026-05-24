@@ -13,6 +13,12 @@ services.json
 history.db
 *.db-shm
 *.db-wal
+polish.md
+
+# Local docs: only public repo docs are allowlisted.
+docs/*
+!docs/design.md
+!docs/services-config.md
 
 # Environment and local overrides
 .env

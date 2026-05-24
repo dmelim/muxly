@@ -175,7 +175,7 @@ in the center, service details and actions on the right.
 
 - No production build (`tauri build`) has been verified yet.
 
-[Unreleased]: https://example.com/muxly/compare/v0.1.0...HEAD
-[0.1.0]: https://example.com/muxly/releases/tag/v0.1.0
+[Unreleased]: https://github.com/dmelim/muxly/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/dmelim/muxly/releases/tag/v0.1.0
 
 
