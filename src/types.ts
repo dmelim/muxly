@@ -3,6 +3,7 @@ export type ServiceStatus = "stopped" | "starting" | "running" | "stopping" | "e
 export type ServiceConfig = {
   id: string;
   name: string;
+  icon?: ServiceIcon | null;
   program: string;
   args: string[];
   cwd: string;
@@ -10,6 +11,17 @@ export type ServiceConfig = {
   port?: number | null;
   group?: string | null;
   autoRestart: boolean;
+};
+
+export type ServiceIcon =
+  | { type: "emoji"; value: string }
+  | { type: "builtin"; value: string }
+  | { type: "image"; path: string };
+
+export type AppSettings = {
+  editorCommand: string;
+  hiddenProjectNames: Record<string, boolean>;
+  projectNameAliases: Record<string, string>;
 };
 
 export type ProcessOutputEvent = {

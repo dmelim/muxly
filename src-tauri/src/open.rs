@@ -8,6 +8,7 @@
 use crate::{
     error::AppError,
     services::{config::resolve_cwd, config::ServicesConfigDir},
+    settings::default_editor_command,
 };
 use std::{
     path::{Path, PathBuf},
@@ -15,17 +16,19 @@ use std::{
 };
 use tauri::State;
 
-/// Open the given path in the user's editor of choice. For now this assumes
-/// VS Code is on PATH via the `code` launcher. Returns a `ProcessStop`-flavored
-/// error if the launcher cannot be invoked so the frontend can surface a
-/// useful message ("install the `code` command from VS Code's command palette").
+/// Open the given path in the user's editor of choice.
 #[tauri::command]
 pub fn open_in_editor(
     config_dir: State<'_, ServicesConfigDir>,
     cwd: String,
+    editor_command: Option<String>,
 ) -> Result<(), AppError> {
     let path = resolve(&cwd, &config_dir)?;
-    let program = if cfg!(windows) { "code.cmd" } else { "code" };
+    let program = editor_command
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_editor_command());
 
     Command::new(program)
         .arg(&path)

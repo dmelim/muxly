@@ -7,15 +7,18 @@ mod net;
 mod open;
 mod process;
 mod services;
+mod settings;
 
 use commands::{
-    app_version, check_port, load_services, save_services, start_service, stop_service,
+    app_version, check_port, load_services, resolve_icon_image, save_services, start_service,
+    stop_service,
 };
 use history::{get_service_history, HistoryDb};
 use import::scan_importable;
 use open::{open_in_editor, open_in_file_manager, open_url};
 use process::{ProcessRegistry, ProcessTerminator};
 use services::config::ServicesConfigDir;
+use settings::{load_settings, save_settings};
 use std::{
     sync::mpsc,
     thread,
@@ -26,6 +29,7 @@ use tauri::{Manager, WindowEvent};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(ProcessRegistry::default())
         .manage(ServicesConfigDir::default())
         .setup(|app| {
@@ -51,6 +55,9 @@ pub fn run() {
             app_version,
             check_port,
             load_services,
+            load_settings,
+            save_settings,
+            resolve_icon_image,
             save_services,
             start_service,
             stop_service,

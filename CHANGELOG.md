@@ -24,6 +24,46 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- Service groups in the sidebar can now be collapsed and expanded from their
+  group headers.
+- Each project group name can now be hidden behind a persisted random alias
+  from its sidebar group header.
+- Service-form icon selection now offers a searchable grid of built-in icons
+  with tooltip names, plus a Frimousse-powered emoji picker for emoji icons.
+- The emoji picker now includes category shortcut icons that scroll directly
+  to smileys, people, nature, food, travel, activities, objects, symbols, and
+  flags.
+
+### Fixed
+
+- Service icon status dots are no longer clipped by the icon badge container.
+- Long project group names now show their full value in a tooltip when the
+  sidebar header truncates them.
+- xterm scrollbar arrow controls are now fully hidden so stray arrow glyphs no
+  longer appear in terminal corners.
+- Service-form icon dropdowns now use a custom dark menu with restrained hover
+  states instead of the browser's native select rendering.
+- Service-form icon dropdown selected rows now use a quieter hover-like fill
+  instead of an accent-colored selected state.
+- The emoji picker popup is no longer clipped when opened from the compact
+  value field.
+
+### Changed
+
+- The built-in icon picker now opens as a compact popover instead of expanding
+  the full icon grid inline in the form.
+- Removed the redundant "Workspace" eyebrow from the services sidebar header.
+- Sidebar service cards no longer use a cyan left-border accent to mark
+  selected/open state. Any card whose service is open in a terminal pane now
+  gets the tinted card background, with a small cyan `square-terminal` icon
+  pinned to the card's top-right corner. The "open in split view" hover
+  affordance moved to the card's bottom-right corner so the open-in-pane
+  indicator and the split button no longer overlap.
+
+## [0.2.0] - 2026-05-24
+
+### Added
+
 - Added the PolyForm Noncommercial 1.0.0 license for source-available non-commercial use.
 
 - Added Muxly app icons generated from the project logo and configured them for Tauri bundling.
@@ -52,6 +92,12 @@ section, and tag the commit `vX.Y.Z`.
   and component specs.
 - `README.md` — project overview, feature summary, setup instructions, and
   keyboard-shortcut reference.
+- **Custom service icons** — service configs can define emoji, built-in, or
+  local image icons that render in the sidebar and inspector.
+- **Configurable editor command** — the details panel can save the command used
+  by "Open in editor" to app settings.
+- **Window state persistence** — the desktop window restores its last size and
+  position on launch.
 
 ### Changed
 
@@ -175,7 +221,8 @@ in the center, service details and actions on the right.
 
 - No production build (`tauri build`) has been verified yet.
 
-[Unreleased]: https://github.com/dmelim/muxly/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dmelim/muxly/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dmelim/muxly/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dmelim/muxly/releases/tag/v0.1.0
 
 

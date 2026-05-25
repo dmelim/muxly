@@ -61,6 +61,28 @@ export function SearchIcon({ className }: IconProps) {
   );
 }
 
+/** Eye — privacy visible/off toggle. */
+export function EyeIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M2.1 12S5.6 5 12 5s9.9 7 9.9 7-3.5 7-9.9 7-9.9-7-9.9-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+/** Eye off — privacy hidden/on toggle. */
+export function EyeOffIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M10.7 5.1A10.8 10.8 0 0 1 12 5c6.4 0 9.9 7 9.9 7a18.3 18.3 0 0 1-2.3 3.3" />
+      <path d="M6.6 6.6A18 18 0 0 0 2.1 12S5.6 19 12 19a10.9 10.9 0 0 0 5.4-1.4" />
+      <path d="m2 2 20 20" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    </svg>
+  );
+}
+
 /** Two columns — open in split view. */
 export function SplitIcon({ className }: IconProps) {
   return (
@@ -97,6 +119,15 @@ export function PlusIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
       <path d="M5 12h14" />
       <path d="M12 5v14" />
+    </svg>
+  );
+}
+
+/** Chevron right — collapsed/expanded disclosure. */
+export function ChevronRightIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="m9 18 6-6-6-6" />
     </svg>
   );
 }

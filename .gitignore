@@ -10,6 +10,7 @@ target/
 
 # Local app/runtime data
 services.json
+settings.json
 history.db
 *.db-shm
 *.db-wal

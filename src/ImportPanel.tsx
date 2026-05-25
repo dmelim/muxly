@@ -113,6 +113,7 @@ export function ImportPanel({ existingIds, onImport, onCancel }: Props) {
         .map((row) => ({
           id: row.id.trim(),
           name: row.name,
+          icon: null,
           program: row.program,
           args: row.args,
           cwd: row.cwd,

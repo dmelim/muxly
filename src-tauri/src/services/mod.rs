@@ -8,6 +8,8 @@ use std::collections::{HashMap, HashSet};
 pub struct ServiceConfig {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub icon: Option<ServiceIcon>,
     pub program: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -23,6 +25,14 @@ pub struct ServiceConfig {
     /// written before this field existed.
     #[serde(default)]
     pub auto_restart: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ServiceIcon {
+    Emoji { value: String },
+    Builtin { value: String },
+    Image { path: String },
 }
 
 pub fn validate_services(services: &[ServiceConfig]) -> Result<(), Vec<String>> {
@@ -45,6 +55,18 @@ pub fn validate_services(services: &[ServiceConfig]) -> Result<(), Vec<String>> 
 
         if service.program.trim().is_empty() {
             problems.push(format!("{label}: program must not be empty"));
+        }
+
+        if let Some(icon) = &service.icon {
+            match icon {
+                ServiceIcon::Emoji { value }
+                | ServiceIcon::Builtin { value }
+                | ServiceIcon::Image { path: value } => {
+                    if value.trim().is_empty() {
+                        problems.push(format!("{label}: icon value must not be empty"));
+                    }
+                }
+            }
         }
 
         if service.cwd.trim().is_empty() {
@@ -81,6 +103,7 @@ mod tests {
         ServiceConfig {
             id: id.to_string(),
             name: format!("Service {id}"),
+            icon: None,
             program: "npm".to_string(),
             args: vec!["run".to_string(), "dev".to_string()],
             cwd: ".".to_string(),

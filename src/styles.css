@@ -89,9 +89,12 @@ button {
   display: none !important;
 }
 
-/* Drop the scrollbar arrow buttons — the slider alone is cleaner. */
-.xterm .xterm-scrollable-element > .scrollbar > .scra {
+/* Drop xterm's VS Code scrollbar arrow controls — the slider alone is cleaner. */
+.xterm .xterm-scrollable-element .scrollbar .scra,
+.xterm .xterm-scrollable-element .scrollbar .scra::before,
+.xterm .xterm-scrollable-element .scrollbar .scra::after {
   display: none !important;
+  content: none !important;
 }
 
 .form-input {

@@ -8,8 +8,10 @@ import type {
   ProcessFailedEvent,
   ProcessOutputEvent,
   ProcessStartedEvent,
+  AppSettings,
   ServiceConfig,
   ServiceHistory,
+  ServiceIcon,
   ServiceStatus
 } from "./types";
 import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } from "./events";
@@ -20,7 +22,12 @@ import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
 import { TerminalPanes } from "./TerminalPanes";
+import { aliasProjectName } from "./privacyNames";
+import { BuiltinServiceIcon } from "./serviceIcons";
 import {
+  ChevronRightIcon,
+  EyeIcon,
+  EyeOffIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PlayIcon,
@@ -64,6 +71,15 @@ const statusDots: Record<ServiceStatus, string> = {
   failed: "bg-rose-400"
 };
 
+// Pre-load placeholder — the Rust backend's `load_settings` runs on mount and
+// overrides `editorCommand` with the real per-OS default (`code.cmd` on
+// Windows, `code` elsewhere) or the user's saved value.
+const DEFAULT_SETTINGS: AppSettings = {
+  editorCommand: "code",
+  hiddenProjectNames: {},
+  projectNameAliases: {}
+};
+
 export function App() {
   const [services, setServices] = useState<ServiceConfig[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -96,6 +112,11 @@ export function App() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(340);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [editorDraft, setEditorDraft] = useState(DEFAULT_SETTINGS.editorCommand);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   // Open panes resolved to live ServiceConfigs (deleted services drop out).
   const paneServices = useMemo(
@@ -117,11 +138,31 @@ export function App() {
     [selectedId, services, paneServices]
   );
 
+  const groupedServices = useMemo(() => groupServices(services), [services]);
+  const groupNames = useMemo(
+    () => groupedServices.map(([groupName]) => groupName),
+    [groupedServices]
+  );
+  const projectNameAliases = useMemo(
+    () => ensureProjectAliases(groupNames, settings),
+    [groupNames, settings]
+  );
+  const displayProjectName = useCallback(
+    (groupName: string) =>
+      settings.hiddenProjectNames[groupName]
+        ? projectNameAliases[groupName] ?? groupName
+        : groupName,
+    [projectNameAliases, settings.hiddenProjectNames]
+  );
+
   // Services in the same order the sidebar renders them (grouped), so the
   // Ctrl+1..9 shortcuts line up with what the user sees.
   const flatServices = useMemo(
-    () => groupServices(services).flatMap(([, list]) => list),
-    [services]
+    () =>
+      groupedServices.flatMap(([groupName, list]) =>
+        collapsedGroups[groupName] ? [] : list
+      ),
+    [collapsedGroups, groupedServices]
   );
 
   // Below this sidebar width, switch space-hungry controls to compact icons.
@@ -149,6 +190,70 @@ export function App() {
 
   useEffect(() => {
     servicesRef.current = services;
+  }, [services]);
+
+  useEffect(() => {
+    invoke<AppSettings>("load_settings")
+      .then((loaded) => {
+        setSettings(loaded);
+        setEditorDraft(loaded.editorCommand);
+      })
+      .catch(() => {
+        /* default settings stay in place */
+      });
+  }, []);
+
+  const persistSettings = useCallback(
+    async (nextSettings: AppSettings, syncEditorDraft = true) => {
+      const saved = await invoke<AppSettings>("save_settings", { settings: nextSettings });
+      setSettings(saved);
+      if (syncEditorDraft) {
+        setEditorDraft(saved.editorCommand);
+      }
+      return saved;
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (sameAliases(settings.projectNameAliases, projectNameAliases)) {
+      return;
+    }
+
+    void persistSettings({ ...settings, projectNameAliases }, false).catch((error) => {
+      setSettingsMessage(errorMessage(error));
+    });
+  }, [persistSettings, projectNameAliases, settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const imageServices = services.filter((service) => service.icon?.type === "image");
+
+    Promise.all(
+      imageServices.map(async (service) => {
+        const icon = service.icon as Extract<ServiceIcon, { type: "image" }>;
+        try {
+          const dataUrl = await invoke<string>("resolve_icon_image", {
+            cwd: service.cwd,
+            path: icon.path
+          });
+          return [service.id, dataUrl] as const;
+        } catch {
+          return [service.id, null] as const;
+        }
+      })
+    ).then((resolved) => {
+      if (cancelled) return;
+      const next: Record<string, string | null> = {};
+      for (const [serviceId, dataUrl] of resolved) {
+        next[serviceId] = dataUrl;
+      }
+      setIconImages(next);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [services]);
 
   // Run-history is non-critical; a failed fetch is silently ignored.
@@ -472,6 +577,13 @@ export function App() {
       });
   };
 
+  const toggleGroupCollapsed = useCallback((groupName: string) => {
+    setCollapsedGroups((current) => ({
+      ...current,
+      [groupName]: !current[groupName]
+    }));
+  }, []);
+
   // Drag-resize a sidebar. Listens on window so the drag continues even when
   // the pointer leaves the thin handle.
   const startSidebarDrag = useCallback(
@@ -513,6 +625,32 @@ export function App() {
   const clearSelectedLog = useCallback(() => {
     if (selected) clearLog(selected.id);
   }, [selected, clearLog]);
+
+  const toggleProjectNamePrivacy = useCallback((groupName: string) => {
+    const hidden = !settings.hiddenProjectNames[groupName];
+    const nextSettings = {
+      ...settings,
+      hiddenProjectNames: {
+        ...settings.hiddenProjectNames,
+        [groupName]: hidden
+      },
+      projectNameAliases: hidden ? projectNameAliases : settings.projectNameAliases
+    };
+
+    void persistSettings(nextSettings, false).catch((error) => {
+      setSettingsMessage(errorMessage(error));
+    });
+  }, [persistSettings, projectNameAliases, settings]);
+
+  const saveEditorSettings = useCallback(async () => {
+    setSettingsMessage(null);
+    try {
+      await persistSettings({ ...settings, editorCommand: editorDraft });
+      setSettingsMessage("Saved");
+    } catch (error) {
+      setSettingsMessage(errorMessage(error));
+    }
+  }, [editorDraft, persistSettings, settings]);
 
   // Global keyboard shortcuts. Registered in the capture phase so they fire
   // before a focused terminal — xterm consumes Ctrl-combos and stops their
@@ -649,8 +787,7 @@ export function App() {
         }`}
       >
         <div className="border-b border-white/10 px-5 py-4">
-          <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Workspace</p>
-          <h1 className="mt-1 text-xl font-semibold tracking-normal">Muxly</h1>
+          <h1 className="text-xl font-semibold tracking-normal">Muxly</h1>
           <p className="mt-2 line-clamp-2 text-xs text-zinc-500">{managerMessage}</p>
           <div className="mt-3 flex gap-2">
             {compactSidebar ? (
@@ -693,43 +830,80 @@ export function App() {
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3">
-          {groupServices(services).map(([groupName, groupServicesList]) => {
+          {groupedServices.map(([groupName, groupServicesList]) => {
             const anyRunning = groupServicesList.some((service) => {
               const status = statuses[service.id];
               return status === "running" || status === "starting";
             });
+            const collapsed = collapsedGroups[groupName] ?? false;
+            const groupHidden = settings.hiddenProjectNames[groupName] ?? false;
+            const displayGroupName = displayProjectName(groupName);
 
             return (
               <div key={groupName} className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2 px-2 pt-1">
-                  <h2 className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                    {groupName}
-                  </h2>
+                  <Tooltip label={displayGroupName} className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroupCollapsed(groupName)}
+                      aria-expanded={!collapsed}
+                      aria-label={`${collapsed ? "Expand" : "Collapse"} ${displayGroupName}`}
+                      className="group/header flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                    >
+                      <ChevronRightIcon
+                        className={`size-3 shrink-0 transition-transform ${
+                          collapsed ? "" : "rotate-90"
+                        }`}
+                      />
+                      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.18em]">
+                        {displayGroupName}
+                      </span>
+                    </button>
+                  </Tooltip>
                   <div className="flex shrink-0 gap-0.5">
-                    <Tooltip label={`Start all in ${groupName}`}>
+                    <Tooltip label={groupHidden ? "Show project name" : "Hide project name"}>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => toggleProjectNamePrivacy(groupName)}
+                        aria-label={
+                          groupHidden
+                            ? `Show project name for ${displayGroupName}`
+                            : `Hide project name for ${displayGroupName}`
+                        }
+                        aria-pressed={groupHidden}
+                      >
+                        {groupHidden ? (
+                          <EyeOffIcon className="size-3.5" />
+                        ) : (
+                          <EyeIcon className="size-3.5" />
+                        )}
+                      </Button>
+                    </Tooltip>
+                    <Tooltip label={`Start all in ${displayGroupName}`}>
                       <Button
                         variant="ghost"
                         size="xs"
                         onClick={() => startGroup(groupName)}
-                        aria-label={`Start all services in ${groupName}`}
+                        aria-label={`Start all services in ${displayGroupName}`}
                       >
                         <PlayIcon className="size-3.5" />
                       </Button>
                     </Tooltip>
-                    <Tooltip label={`Stop all in ${groupName}`}>
+                    <Tooltip label={`Stop all in ${displayGroupName}`}>
                       <Button
                         variant="ghost"
                         size="xs"
                         onClick={() => stopGroup(groupName)}
                         disabled={!anyRunning}
-                        aria-label={`Stop all running services in ${groupName}`}
+                        aria-label={`Stop all running services in ${displayGroupName}`}
                       >
                         <StopIcon className="size-3.5" />
                       </Button>
                     </Tooltip>
                   </div>
                 </div>
-                <div className="space-y-1.5">
+                <div className={collapsed ? "hidden" : "space-y-1.5"}>
                   {groupServicesList.map((service) => {
                     const status = statuses[service.id] ?? "stopped";
                     const isOpen = paneIds.includes(service.id);
@@ -758,44 +932,69 @@ export function App() {
                             openSingle(service.id);
                           }
                         }}
-                        className={`group/card w-full cursor-pointer rounded-md border-l-2 px-3 py-3 text-left transition ${
-                          selected?.id === service.id
-                            ? "border-cyan-500 bg-white/10 text-white"
-                            : isOpen
-                            ? "border-cyan-500/40 text-zinc-300 hover:bg-white/5 hover:text-white"
-                            : "border-transparent text-zinc-300 hover:bg-white/5 hover:text-white"
+                        className={`group/card relative w-full cursor-pointer rounded-md px-3 py-3 text-left transition ${
+                          selected?.id === service.id || isOpen
+                            ? "bg-white/10 text-white"
+                            : "text-zinc-300 hover:bg-white/5 hover:text-white"
                         }`}
                       >
                         <span className="flex items-center justify-between gap-3">
                           <span className="flex min-w-0 items-center gap-3">
-                            <span className={`size-2.5 rounded-full ${statusDots[status]}`} />
+                            <ServiceIconBadge
+                              service={service}
+                              imageSrc={iconImages[service.id]}
+                              status={status}
+                            />
                             <span className="truncate text-sm font-medium">{service.name}</span>
                           </span>
-                          <span className="flex shrink-0 items-center gap-1.5">
-                            <Tooltip label="Open in split view">
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openInSplit(service.id);
-                                }}
-                                aria-label={`Open ${service.name} in split view`}
-                                className="rounded p-1 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 focus-visible:opacity-100 group-hover/card:opacity-100"
-                              >
-                                <SplitIcon className="size-3.5" />
-                              </button>
-                            </Tooltip>
-                            <span className="text-xs text-zinc-500">{statusLabels[status]}</span>
-                          </span>
+                          {!isOpen ? (
+                            <span className="shrink-0 text-xs text-zinc-500">
+                              {statusLabels[status]}
+                            </span>
+                          ) : null}
                         </span>
-                        <span className="mt-1 block truncate pl-5 font-mono text-xs text-zinc-500">
+                        <span className="mt-1 block truncate pl-10 font-mono text-xs text-zinc-500">
                           {formatCommand(service)}
                         </span>
                         {showConflict ? (
-                          <span className="mt-1 block pl-5 text-[11px] text-amber-300">
+                          <span className="mt-1 block pl-10 text-[11px] text-amber-300">
                             ⚠ port {service.port} in use
                           </span>
                         ) : null}
+                        {isOpen ? (
+                          <Tooltip
+                            label="Open in a pane"
+                            className="absolute top-2 right-2 text-cyan-400"
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="size-4"
+                              aria-hidden="true"
+                            >
+                              <path d="m7 11 2-2-2-2" />
+                              <path d="M11 13h4" />
+                              <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                            </svg>
+                          </Tooltip>
+                        ) : null}
+                        <Tooltip label="Open in split view" className="absolute bottom-2 right-2">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openInSplit(service.id);
+                            }}
+                            aria-label={`Open ${service.name} in split view`}
+                            className="rounded p-1 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 focus-visible:opacity-100 group-hover/card:opacity-100"
+                          >
+                            <SplitIcon className="size-3.5" />
+                          </button>
+                        </Tooltip>
                       </div>
                     );
                   })}
@@ -908,9 +1107,11 @@ export function App() {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => openInEditor(selected.cwd, selected.id, appendLog)}
+                onClick={() =>
+                  openInEditor(selected.cwd, selected.id, settings.editorCommand, appendLog)
+                }
               >
-                Open in VS Code
+                Open in editor
               </Button>
               <Button
                 variant="secondary"
@@ -930,6 +1131,14 @@ export function App() {
               ) : null}
             </div>
             <dl className="space-y-5">
+              <Detail label="Icon">
+                <ServiceIconBadge
+                  service={selected}
+                  imageSrc={iconImages[selected.id]}
+                  status={statuses[selected.id] ?? "stopped"}
+                  large
+                />
+              </Detail>
               <Detail label="Status">{statusLabels[statuses[selected.id] ?? "stopped"]}</Detail>
               <Detail label="PID">{pids[selected.id] ?? "None"}</Detail>
               <Detail label="Last Exit">{lastExit[selected.id] ?? "None"}</Detail>
@@ -941,7 +1150,9 @@ export function App() {
               <Detail label="Working Dir">
                 <span className="font-mono text-xs text-zinc-300">{selected.cwd}</span>
               </Detail>
-              <Detail label="Group">{selected.group ?? "None"}</Detail>
+              <Detail label="Group">
+                {selected.group ? displayProjectName(groupKey(selected)) : "None"}
+              </Detail>
               <Detail label="Port">{selected.port ?? "None"}</Detail>
               <Detail label="Env">
                 {Object.keys(selected.env).length === 0
@@ -949,6 +1160,33 @@ export function App() {
                   : `${Object.keys(selected.env).length} variables`}
               </Detail>
             </dl>
+
+            <div className="border-t border-white/10 pt-5">
+              <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Editor</p>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={editorDraft}
+                  onChange={(event) => {
+                    setEditorDraft(event.target.value);
+                    setSettingsMessage(null);
+                  }}
+                  className="form-input font-mono text-xs"
+                  placeholder="code"
+                  aria-label="Editor command"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={saveEditorSettings}
+                  disabled={editorDraft.trim() === settings.editorCommand}
+                >
+                  Save
+                </Button>
+              </div>
+              {settingsMessage ? (
+                <p className="mt-1.5 text-[11px] text-zinc-500">{settingsMessage}</p>
+              ) : null}
+            </div>
 
             <div className="border-t border-white/10 pt-5">
               <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Run history</p>
@@ -1033,13 +1271,92 @@ function groupServices(services: ServiceConfig[]): Array<[string, ServiceConfig[
   return order.map((name) => [name, byGroup.get(name)!]);
 }
 
+function ensureProjectAliases(groupNames: string[], settings: AppSettings) {
+  let aliases = settings.projectNameAliases;
+
+  for (const groupName of groupNames) {
+    if (aliases[groupName]) continue;
+    if (aliases === settings.projectNameAliases) {
+      aliases = { ...settings.projectNameAliases };
+    }
+    aliases[groupName] = aliasProjectName(groupName, {
+      ...settings,
+      projectNameAliases: aliases
+    });
+  }
+
+  return aliases;
+}
+
+function sameAliases(left: Record<string, string>, right: Record<string, string>) {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([key, value]) => right[key] === value);
+}
+
+function ServiceIconBadge({
+  service,
+  imageSrc,
+  status,
+  large = false
+}: {
+  service: ServiceConfig;
+  imageSrc?: string | null;
+  status: ServiceStatus;
+  large?: boolean;
+}) {
+  const size = large ? "size-10" : "size-7";
+  const dotSize = large ? "size-2.5" : "size-2";
+  return (
+    <span
+      className={`relative inline-flex ${size} shrink-0 items-center justify-center rounded-md border border-white/10 bg-black/25 text-zinc-300`}
+      aria-hidden="true"
+    >
+      <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]">
+        <ServiceIconContent icon={service.icon} imageSrc={imageSrc} large={large} />
+      </span>
+      <span
+        className={`absolute -bottom-px -right-px ${dotSize} rounded-full ring-2 ring-[#15181d] ${
+          statusDots[status]
+        }`}
+      />
+    </span>
+  );
+}
+
+function ServiceIconContent({
+  icon,
+  imageSrc,
+  large
+}: {
+  icon?: ServiceIcon | null;
+  imageSrc?: string | null;
+  large: boolean;
+}) {
+  if (icon?.type === "emoji") {
+    return <span className={large ? "text-lg" : "text-sm"}>{icon.value}</span>;
+  }
+  if (icon?.type === "image" && imageSrc) {
+    return <img src={imageSrc} alt="" className="h-full w-full object-cover" />;
+  }
+  if (icon?.type === "builtin") {
+    return <BuiltinServiceIcon name={icon.value} className={large ? "size-5" : "size-4"} />;
+  }
+  return <BuiltinServiceIcon name="terminal" className={large ? "size-5" : "size-4"} />;
+}
+
 async function openInEditor(
   cwd: string,
   serviceId: string,
+  editorCommand: string,
   appendLog: (id: string, chunk: string) => void
 ) {
   try {
-    await invoke("open_in_editor", { cwd });
+    await invoke("open_in_editor", { cwd, editorCommand });
   } catch (error) {
     appendLog(serviceId, `\r\n\x1b[31m[manager] open in editor failed: ${errorMessage(error)}\x1b[0m\r\n`);
   }
@@ -1119,4 +1436,3 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
     </div>
   );
 }
-

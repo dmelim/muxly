@@ -2,6 +2,7 @@
   {
     "id": "sample-node",
     "name": "Sample Node Loop",
+    "icon": { "type": "builtin", "value": "terminal" },
     "program": "node",
     "args": [
       "-e",
@@ -15,6 +16,7 @@
   {
     "id": "sample-error",
     "name": "Sample Error Stream",
+    "icon": { "type": "emoji", "value": "⚠" },
     "program": "node",
     "args": [
       "-e",

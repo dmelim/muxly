@@ -25,6 +25,8 @@ Built with Tauri 2, React, TypeScript, and xterm.js.
   panes; each pane has its own controls.
 - **Service groups** — group related services and start or stop a whole group
   at once.
+- **Custom service icons** — use emoji, built-in icons, or local images to
+  make larger workspaces easier to scan.
 - **Import** — scan a project folder for `package.json` scripts and `Procfile`
   entries; long-running ones are pre-selected.
 - **Process-tree termination** — child processes die with their service
@@ -35,8 +37,10 @@ Built with Tauri 2, React, TypeScript, and xterm.js.
 - **Global log search** — search every service's log buffer at once.
 - **Live config reload** — edits to `services.json` (from an editor, a script,
   or an AI agent) apply instantly.
-- **Workspace actions** — open a service's folder in VS Code or the file
-  manager, or open its port in the browser.
+- **Workspace actions** — open a service's folder in your configured editor
+  or the file manager, or open its port in the browser.
+- **Window state persistence** — Muxly reopens at the previous window size and
+  position.
 
 ## Getting started
 
