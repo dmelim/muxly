@@ -50,6 +50,12 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Changed
 
+- Sidebar group headers now tint the start/stop-all icons cyan and rose so the
+  bulk actions are easier to scan against the neutral header row.
+- The run-history SQLite table is pruned on startup to keep the most recent
+  200 runs per service, bounding `history.db` growth over time.
+- Removed the unused `md` button size; the `Button` default size is now `sm`,
+  matching what the UI actually uses.
 - The built-in icon picker now opens as a compact popover instead of expanding
   the full icon grid inline in the form.
 - Removed the redundant "Workspace" eyebrow from the services sidebar header.

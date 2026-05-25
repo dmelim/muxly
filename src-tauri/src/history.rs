@@ -14,6 +14,10 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+/// Cap on how many `runs` rows we keep per service. Older rows are pruned
+/// on startup so the history table cannot grow without bound.
+const MAX_RUNS_PER_SERVICE: i64 = 200;
+
 /// SQLite connection guarded for cross-thread use. Stored as Tauri state.
 pub struct HistoryDb(Mutex<Connection>);
 
@@ -61,6 +65,20 @@ impl HistoryDb {
                     ON runs (service_id, started_at);",
             )
             .map_err(|error| AppError::Database(error.to_string()))?;
+
+        // Keep the table bounded: prune all but the most recent
+        // `MAX_RUNS_PER_SERVICE` rows per service. Best-effort; a failure here
+        // must not block startup.
+        let _ = connection.execute(
+            "DELETE FROM runs WHERE id IN (
+                SELECT id FROM runs AS r
+                WHERE (
+                    SELECT COUNT(*) FROM runs
+                    WHERE service_id = r.service_id AND started_at > r.started_at
+                ) >= ?1
+             )",
+            rusqlite::params![MAX_RUNS_PER_SERVICE],
+        );
 
         Ok(Self(Mutex::new(connection)))
     }

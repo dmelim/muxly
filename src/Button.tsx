@@ -22,7 +22,7 @@ export type ButtonVariant =
   | "link"
   | "dashed";
 
-export type ButtonSize = "xs" | "sm" | "md" | "icon";
+export type ButtonSize = "xs" | "sm" | "icon";
 
 const BASE =
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md " +
@@ -43,7 +43,6 @@ const VARIANTS: Record<ButtonVariant, string> = {
 const SIZES: Record<ButtonSize, string> = {
   xs: "px-2 py-1 text-xs",
   sm: "px-3 py-1.5 text-xs",
-  md: "px-3 py-2 text-sm",
   // Square, for icon-only buttons. Pair with an explicitly-sized icon child.
   icon: "size-7"
 };
@@ -55,7 +54,7 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 export function Button({
   variant = "secondary",
-  size = "md",
+  size = "sm",
   type = "button",
   className = "",
   ...props

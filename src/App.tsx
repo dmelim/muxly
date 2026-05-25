@@ -886,6 +886,7 @@ export function App() {
                         size="xs"
                         onClick={() => startGroup(groupName)}
                         aria-label={`Start all services in ${displayGroupName}`}
+                        className="text-cyan-400/80 hover:text-cyan-300"
                       >
                         <PlayIcon className="size-3.5" />
                       </Button>
@@ -897,6 +898,7 @@ export function App() {
                         onClick={() => stopGroup(groupName)}
                         disabled={!anyRunning}
                         aria-label={`Stop all running services in ${displayGroupName}`}
+                        className="text-rose-400/80 hover:text-rose-300 disabled:text-zinc-500"
                       >
                         <StopIcon className="size-3.5" />
                       </Button>
