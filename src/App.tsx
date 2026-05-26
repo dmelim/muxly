@@ -124,6 +124,32 @@ export function App() {
   // top edge; state lives here so it survives toggle/remount of the drawer.
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(288);
+  // Drag-to-reorder state. `dragId` is the service currently being dragged;
+  // `dropIndicator` is where the cyan "drop here" line / highlight is shown.
+  // - "before-service": insert source just above this service (joining its group)
+  // - "end-of-group": append source to the end of this group (and update its group field)
+  // The ref mirrors `dragId` so the dragover handlers (which fire between
+  // dragstart and React's next render) can read the active source
+  // synchronously and call preventDefault — without it, the OS shows the
+  // "forbidden" cursor on the very first dragover events.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<
+    | { kind: "before-service"; serviceId: string }
+    | { kind: "end-of-group"; groupName: string }
+    | null
+  >(null);
+
+  const beginDrag = useCallback((serviceId: string) => {
+    dragIdRef.current = serviceId;
+    setDragId(serviceId);
+  }, []);
+
+  const endDrag = useCallback(() => {
+    dragIdRef.current = null;
+    setDragId(null);
+    setDropIndicator(null);
+  }, []);
 
   // Open panes resolved to live ServiceConfigs (deleted services drop out).
   const paneServices = useMemo(
@@ -576,6 +602,62 @@ export function App() {
     setEditing(null);
   };
 
+  // Reorder a service via drag-and-drop. Mutates the flat services array (the
+  // sidebar groups are derived from order + each service's `group` field) and
+  // persists by calling save_services + reloading. Moving across groups also
+  // rewrites the dragged service's `group` to match the target group.
+  const reorderService = useCallback(
+    async (
+      sourceId: string,
+      target:
+        | { kind: "before-service"; serviceId: string }
+        | { kind: "end-of-group"; groupName: string }
+    ) => {
+      const source = services.find((s) => s.id === sourceId);
+      if (!source) return;
+
+      const without = services.filter((s) => s.id !== sourceId);
+      let newGroup: string | null = source.group ?? null;
+      let insertAt: number;
+
+      if (target.kind === "before-service") {
+        if (target.serviceId === sourceId) return;
+        const targetIndex = without.findIndex((s) => s.id === target.serviceId);
+        if (targetIndex === -1) return;
+        // Join the target's group so cross-group drag-onto-card moves the service.
+        newGroup = without[targetIndex].group ?? null;
+        insertAt = targetIndex;
+      } else {
+        newGroup = target.groupName === "Ungrouped" ? null : target.groupName;
+        // Insert after the last service already in that group; if the group
+        // is now empty (it only contained the dragged source) fall back to
+        // appending at the end so the service still lands somewhere sane.
+        let lastIndex = -1;
+        without.forEach((s, i) => {
+          if (groupKey(s) === target.groupName) lastIndex = i;
+        });
+        insertAt = lastIndex === -1 ? without.length : lastIndex + 1;
+      }
+
+      const updatedSource: ServiceConfig = { ...source, group: newGroup };
+      const next = [
+        ...without.slice(0, insertAt),
+        updatedSource,
+        ...without.slice(insertAt)
+      ];
+
+      if (sameServiceOrder(services, next)) return;
+
+      try {
+        await invoke("save_services", { services: next });
+        await reloadServices();
+      } catch (error) {
+        setManagerMessage(errorMessage(error));
+      }
+    },
+    [services, reloadServices]
+  );
+
   const stopGroup = (groupName: string) => {
     services
       .filter((service) => groupKey(service) === groupName)
@@ -886,7 +968,23 @@ export function App() {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3">
+        <div
+          onDragEnter={(event) => {
+            // HTML5 DnD requires preventDefault on BOTH dragenter and dragover
+            // to fully suppress the OS forbidden-cursor — handling only
+            // dragover leaves a flash every time the cursor crosses an element
+            // boundary (between cards, into a header, etc.).
+            if (dragIdRef.current) event.preventDefault();
+          }}
+          onDragOver={(event) => {
+            // Safety net: keep the OS "move" cursor (not the forbidden icon)
+            // anywhere inside the sidebar while a drag is in progress, even in
+            // the gaps between cards and group headers. Specific targets below
+            // still set the visual drop indicator.
+            if (dragIdRef.current) event.preventDefault();
+          }}
+          className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
+        >
           {groupedServices.map(([groupName, groupServicesList]) => {
             const anyRunning = groupServicesList.some((service) => {
               const status = statuses[service.id];
@@ -896,9 +994,44 @@ export function App() {
             const groupHidden = settings.hiddenProjectNames[groupName] ?? false;
             const displayGroupName = displayProjectName(groupName);
 
+            const headerHighlighted =
+              dropIndicator?.kind === "end-of-group" &&
+              dropIndicator.groupName === groupName;
+
             return (
               <div key={groupName} className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2 px-2 pt-1">
+                <div
+                  onDragOver={(event) => {
+                    if (!dragIdRef.current) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setDropIndicator((current) =>
+                      current?.kind === "end-of-group" && current.groupName === groupName
+                        ? current
+                        : { kind: "end-of-group", groupName }
+                    );
+                  }}
+                  onDragLeave={(event) => {
+                    // Only clear if leaving the header for something outside it —
+                    // moving across child elements inside still fires dragleave.
+                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                    setDropIndicator((current) =>
+                      current?.kind === "end-of-group" && current.groupName === groupName
+                        ? null
+                        : current
+                    );
+                  }}
+                  onDrop={(event) => {
+                    const sourceId = dragIdRef.current;
+                    if (!sourceId) return;
+                    event.preventDefault();
+                    endDrag();
+                    void reorderService(sourceId, { kind: "end-of-group", groupName });
+                  }}
+                  className={`flex items-center justify-between gap-2 rounded px-2 pt-1 transition ${
+                    headerHighlighted ? "bg-cyan-400/15" : ""
+                  }`}
+                >
                   <Tooltip label={displayGroupName} className="min-w-0">
                     <button
                       type="button"
@@ -973,9 +1106,56 @@ export function App() {
                       status !== "starting" &&
                       status !== "stopping";
 
+                    const showDropLine =
+                      dropIndicator?.kind === "before-service" &&
+                      dropIndicator.serviceId === service.id &&
+                      dragId !== service.id;
+                    const isDragging = dragId === service.id;
+
                     return (
+                      <div key={service.id} className="relative">
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none absolute -top-1 left-0 right-0 h-0.5 rounded-full bg-cyan-400 transition-opacity ${
+                            showDropLine ? "opacity-100" : "opacity-0"
+                          }`}
+                        />
                       <div
-                        key={service.id}
+                        draggable
+                        onDragStart={(event) => {
+                          beginDrag(service.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          // Some platforms require a data payload for drag to initiate.
+                          try {
+                            event.dataTransfer.setData("text/plain", service.id);
+                          } catch {
+                            /* Safari may throw on some MIME types — ignore. */
+                          }
+                        }}
+                        onDragEnd={endDrag}
+                        onDragOver={(event) => {
+                          const sourceId = dragIdRef.current;
+                          if (!sourceId || sourceId === service.id) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                          setDropIndicator((current) =>
+                            current?.kind === "before-service" && current.serviceId === service.id
+                              ? current
+                              : { kind: "before-service", serviceId: service.id }
+                          );
+                        }}
+                        onDrop={(event) => {
+                          const sourceId = dragIdRef.current;
+                          if (!sourceId || sourceId === service.id) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          endDrag();
+                          void reorderService(sourceId, {
+                            kind: "before-service",
+                            serviceId: service.id
+                          });
+                        }}
                         role="button"
                         tabIndex={0}
                         onClick={(event) => {
@@ -992,6 +1172,8 @@ export function App() {
                           }
                         }}
                         className={`group/card relative w-full cursor-pointer rounded-md px-3 py-3 text-left transition ${
+                          isDragging ? "opacity-40 " : ""
+                        }${
                           selected?.id === service.id || isOpen
                             ? "bg-white/10 text-white"
                             : "text-zinc-300 hover:bg-white/5 hover:text-white"
@@ -1054,6 +1236,7 @@ export function App() {
                             <SplitIcon className="size-3.5" />
                           </button>
                         </Tooltip>
+                      </div>
                       </div>
                     );
                   })}
@@ -1363,6 +1546,17 @@ function ensureProjectAliases(groupNames: string[], settings: AppSettings) {
   }
 
   return aliases;
+}
+
+// True iff two service lists describe the same order *and* same group membership.
+// Used to skip a save_services round-trip when a drag drops a service back
+// where it already was.
+function sameServiceOrder(left: ServiceConfig[], right: ServiceConfig[]) {
+  if (left.length !== right.length) return false;
+  return left.every(
+    (service, i) =>
+      service.id === right[i].id && (service.group ?? null) === (right[i].group ?? null)
+  );
 }
 
 function sameAliases(left: Record<string, string>, right: Record<string, string>) {

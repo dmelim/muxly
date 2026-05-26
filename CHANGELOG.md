@@ -24,6 +24,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- Services in the sidebar can now be reordered by drag-and-drop. Dragging a
+  service onto another card inserts it just above (joining that card's group);
+  dragging onto a group header appends it to the end of that group, updating
+  the service's `group` in `services.json`.
 - Service groups in the sidebar can now be collapsed and expanded from their
   group headers.
 - Each project group name can now be hidden behind a persisted random alias
