@@ -132,6 +132,16 @@ export function ChevronRightIcon({ className }: IconProps) {
   );
 }
 
+/** Terminal prompt glyph — toggle the bottom shell drawer. */
+export function TerminalIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="m4 17 6-6-6-6" />
+      <path d="M12 19h8" />
+    </svg>
+  );
+}
+
 /** X — close. */
 export function CloseIcon({ className }: IconProps) {
   return (

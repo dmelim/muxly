@@ -6,17 +6,19 @@ mod import;
 mod net;
 mod open;
 mod process;
+mod pty;
 mod services;
 mod settings;
 
 use commands::{
-    app_version, check_port, load_services, resolve_icon_image, save_services, start_service,
-    stop_service,
+    app_version, check_port, load_services, pty_close, pty_open, pty_resize, pty_write,
+    resolve_icon_image, save_services, start_service, stop_service,
 };
 use history::{get_service_history, HistoryDb};
 use import::scan_importable;
 use open::{open_in_editor, open_in_file_manager, open_url};
 use process::{ProcessRegistry, ProcessTerminator};
+use pty::PtyRegistry;
 use services::config::ServicesConfigDir;
 use settings::{load_settings, save_settings};
 use std::{
@@ -31,6 +33,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(ProcessRegistry::default())
+        .manage(PtyRegistry::default())
         .manage(ServicesConfigDir::default())
         .setup(|app| {
             // The history DB lives in the app data directory, which needs the
@@ -45,6 +48,11 @@ pub fn run() {
             if matches!(event, WindowEvent::CloseRequested { .. }) {
                 let registry = window.state::<ProcessRegistry>();
                 let terminators = registry.running_terminators();
+
+                // Kill any open interactive shells synchronously — they don't
+                // need the graceful-shutdown dance services get, and we don't
+                // want orphan PTY children outliving the window.
+                window.state::<PtyRegistry>().close_all();
 
                 thread::spawn(move || {
                     terminate_with_timeout(terminators, Duration::from_secs(3));
@@ -65,7 +73,11 @@ pub fn run() {
             open_in_file_manager,
             open_url,
             scan_importable,
-            get_service_history
+            get_service_history,
+            pty_open,
+            pty_write,
+            pty_resize,
+            pty_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

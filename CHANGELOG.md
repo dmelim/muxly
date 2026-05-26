@@ -33,6 +33,16 @@ section, and tag the commit `vX.Y.Z`.
 - The emoji picker now includes category shortcut icons that scroll directly
   to smileys, people, nature, food, travel, activities, objects, symbols, and
   flags.
+- URLs printed in a service's terminal output (e.g. `http://localhost:3000`)
+  are now clickable and open in the system browser.
+- A built-in interactive shell drawer (`Ctrl/Cmd+↓` or the terminal icon in
+  the top toolbar) opens an interactive PTY (powershell on Windows, `$SHELL`
+  elsewhere) rooted at the user's home directory — useful for ad-hoc commands
+  without leaving the app.
+- `Ctrl/Cmd+W` closes the focused service pane (does not affect the built-in
+  shell drawer).
+- The bottom shell drawer's height is now drag-resizable from its top edge
+  (clamped between 120px and ~80% of the window height).
 
 ### Fixed
 

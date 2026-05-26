@@ -1,8 +1,9 @@
 use crate::{
     error::AppError,
-    events::ProcessOutputEvent,
+    events::{ProcessOutputEvent, PtyOutputEvent},
     net::is_port_available,
     process::{spawn_process, ProcessRegistry},
+    pty::{self, PtyRegistry},
     services::{
         config::{load_service_config, resolve_cwd, save_service_config, ServicesConfigDir},
         ServiceConfig,
@@ -96,6 +97,45 @@ pub fn stop_service(
             })?;
 
     terminator.terminate()
+}
+
+/// Open an interactive shell PTY. The frontend chooses `pty_id` so multiple
+/// shells can coexist without coordination round-trips.
+#[tauri::command]
+pub fn pty_open(
+    app: AppHandle,
+    registry: State<'_, PtyRegistry>,
+    pty_id: String,
+    rows: u16,
+    cols: u16,
+    cwd: Option<String>,
+    on_output: Channel<PtyOutputEvent>,
+) -> Result<(), AppError> {
+    pty::open_pty(app, &registry, pty_id, rows, cols, cwd, on_output)
+}
+
+#[tauri::command]
+pub fn pty_write(
+    registry: State<'_, PtyRegistry>,
+    pty_id: String,
+    data: String,
+) -> Result<(), AppError> {
+    pty::write_pty(&registry, &pty_id, data)
+}
+
+#[tauri::command]
+pub fn pty_resize(
+    registry: State<'_, PtyRegistry>,
+    pty_id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), AppError> {
+    pty::resize_pty(&registry, &pty_id, rows, cols)
+}
+
+#[tauri::command]
+pub fn pty_close(registry: State<'_, PtyRegistry>, pty_id: String) -> Result<(), AppError> {
+    pty::close_pty(&registry, &pty_id)
 }
 
 fn resolve_icon_path(

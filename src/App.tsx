@@ -22,6 +22,7 @@ import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
 import { TerminalPanes } from "./TerminalPanes";
+import { BottomTerminal } from "./BottomTerminal";
 import { aliasProjectName } from "./privacyNames";
 import { BuiltinServiceIcon } from "./serviceIcons";
 import {
@@ -34,7 +35,8 @@ import {
   PlusIcon,
   SearchIcon,
   SplitIcon,
-  StopIcon
+  StopIcon,
+  TerminalIcon
 } from "./icons";
 
 type EditTarget =
@@ -117,6 +119,11 @@ export function App() {
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  // The bottom shell drawer. Hidden by default — opened from the header button
+  // or with Ctrl/Cmd+↓. Height is user-draggable from a handle on the drawer's
+  // top edge; state lives here so it survives toggle/remount of the drawer.
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(288);
 
   // Open panes resolved to live ServiceConfigs (deleted services drop out).
   const paneServices = useMemo(
@@ -584,6 +591,37 @@ export function App() {
     }));
   }, []);
 
+  // Drag-resize the bottom terminal drawer. Mirrors `startSidebarDrag`: window-
+  // level listeners so the drag survives the cursor leaving the thin handle,
+  // and a body-level cursor + user-select lock for the duration of the drag.
+  // The drawer grows as the handle is dragged upward — `delta` is inverted.
+  const startTerminalDrag = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = terminalHeight;
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "row-resize";
+
+      const onMove = (move: MouseEvent) => {
+        const delta = move.clientY - startY;
+        // Cap at ~80% of viewport so the drawer can never eat the whole window
+        // — the service panes still need to be visible to be useful.
+        const maxHeight = Math.max(160, Math.round(window.innerHeight * 0.8));
+        setTerminalHeight(clamp(startHeight - delta, 120, maxHeight));
+      };
+      const onUp = () => {
+        document.body.style.userSelect = "";
+        document.body.style.cursor = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [terminalHeight]
+  );
+
   // Drag-resize a sidebar. Listens on window so the drag continues even when
   // the pointer leaves the thin handle.
   const startSidebarDrag = useCallback(
@@ -716,6 +754,13 @@ export function App() {
         setRightSidebarOpen((open) => !open);
         return;
       }
+      // Ctrl/Cmd + ↓ → toggle the bottom shell drawer.
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        setTerminalOpen((open) => !open);
+        return;
+      }
 
       // Ctrl/Cmd + 1..9 → open the Nth visible service as the sole pane.
       if (/^[1-9]$/.test(event.key)) {
@@ -729,6 +774,16 @@ export function App() {
       }
 
       switch (event.key.toLowerCase()) {
+        case "w":
+          // Close the focused service pane. Only acts when the focused service
+          // actually has an open pane — otherwise the shortcut is a no-op
+          // rather than silently closing whatever happens to be leftmost.
+          if (selected && paneIds.includes(selected.id)) {
+            event.preventDefault();
+            event.stopPropagation();
+            closePane(selected.id);
+          }
+          break;
         case "r":
           if (selected) {
             event.preventDefault();
@@ -768,7 +823,9 @@ export function App() {
     manualStart,
     stopService,
     clearSelectedLog,
-    openSingle
+    openSingle,
+    paneIds,
+    closePane
   ]);
 
   return (
@@ -1020,6 +1077,18 @@ export function App() {
             </Button>
           </Tooltip>
           <div className="flex items-center gap-2">
+            <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+↓)`}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setTerminalOpen((open) => !open)}
+                aria-label="Toggle terminal"
+                aria-pressed={terminalOpen}
+                className={terminalOpen ? "text-cyan-400" : ""}
+              >
+                <TerminalIcon className="size-4" />
+              </Button>
+            </Tooltip>
             <Tooltip label="Search all logs (Ctrl+Shift+F)">
               <Button
                 variant="ghost"
@@ -1059,6 +1128,12 @@ export function App() {
           onStart={manualStart}
           onStop={stopService}
           onClear={clearLog}
+        />
+        <BottomTerminal
+          open={terminalOpen}
+          height={terminalHeight}
+          onClose={() => setTerminalOpen(false)}
+          onResizeStart={startTerminalDrag}
         />
       </section>
 

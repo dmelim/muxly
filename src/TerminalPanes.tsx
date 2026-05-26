@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef } from "react";
 import type { MutableRefObject, ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { ServiceConfig, ServiceStatus } from "./types";
@@ -16,6 +18,10 @@ const statusDots: Record<ServiceStatus, string> = {
   exited: "bg-sky-400",
   failed: "bg-rose-400"
 };
+
+// Mirrors the shortcut label used in App.tsx — `Ctrl` on Linux/Windows, `⌘` on
+// macOS — so the close-pane tooltip reads naturally on whichever platform.
+const MOD_KEY = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
 
 const TERMINAL_OPTIONS = {
   convertEol: true,
@@ -162,6 +168,18 @@ function PaneView({
     const terminal = new Terminal(TERMINAL_OPTIONS);
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        // Go through the Rust `open_url` command (same one the inspector's
+        // "Open localhost:N" button uses). `window.open` inside a Tauri
+        // webview isn't reliably routed to the system browser across OSes —
+        // the OS-shell call is.
+        event.preventDefault();
+        void invoke("open_url", { url: uri }).catch(() => {
+          /* nothing useful to surface to the user here */
+        });
+      })
+    );
 
     let resizeObserver: ResizeObserver | null = null;
     let disposed = false;
@@ -278,7 +296,7 @@ function PaneView({
             <>
               <span className="mx-0.5 h-4 w-px bg-white/10" />
               <PaneIconButton
-                label={`Close ${service.name} pane`}
+                label={`Close (${MOD_KEY}+W)`}
                 accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
                 onClick={onClose}
               >
