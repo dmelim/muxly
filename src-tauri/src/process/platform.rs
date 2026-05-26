@@ -1,8 +1,11 @@
 use crate::error::AppError;
+use parking_lot::Mutex;
+use portable_pty::ChildKiller;
 use std::process::{Child, Command};
+use std::sync::Arc;
 
 #[cfg(windows)]
-use std::{os::windows::io::AsRawHandle, sync::Arc};
+use std::os::windows::io::AsRawHandle;
 
 #[cfg(windows)]
 use windows_sys::Win32::{
@@ -27,12 +30,23 @@ extern "system" {
     fn NtResumeProcess(handle: HANDLE) -> i32;
 }
 
+/// A PTY child's killer handle, wrapped so it satisfies `Clone` (needed for
+/// `running_terminators()` snapshots) and can be invoked from any thread. The
+/// `Arc<Mutex<...>>` mirrors the pattern used for live shells in `pty.rs` —
+/// `ChildKiller::kill` takes `&mut self`, so the mutex is required.
+pub type PtyKillHandle = Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>;
+
 #[derive(Debug, Clone)]
 pub enum ProcessTerminator {
     #[cfg(windows)]
     Job(Arc<JobObject>),
     #[cfg(not(windows))]
     ProcessGroup(u32),
+    /// Service spawned through `portable_pty`. The PTY child doesn't belong to
+    /// our Job Object / process group, so we kill it directly through its own
+    /// killer handle. Grandchildren forked by a PTY child are not tracked —
+    /// dev servers don't typically fork, so this is acceptable.
+    Pty(PtyKillHandle),
 }
 
 impl ProcessTerminator {
@@ -42,6 +56,10 @@ impl ProcessTerminator {
             Self::Job(job) => job.terminate(),
             #[cfg(not(windows))]
             Self::ProcessGroup(pid) => terminate_process_tree(*pid),
+            Self::Pty(handle) => handle
+                .lock()
+                .kill()
+                .map_err(|err| AppError::ProcessStop(format!("pty kill failed: {err}"))),
         }
     }
 }

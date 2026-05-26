@@ -24,6 +24,16 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- Services can now be spawned attached to a **pseudo-terminal** via a new
+  per-service `usePty` flag (toggled in the service form as "Run in
+  pseudo-terminal"). Required for dev servers whose hot-reload loop depends
+  on a real TTY — Vite, WXT, Next, Astro, SvelteKit, Nuxt, and similar tools
+  silently exit with code 0 mid-rebuild when given plain pipes, because
+  their stdin keypress handler (the keep-alive that pins the event loop
+  across HMR cycles) is gated on `process.stdin.isTTY`. PTY-backed services
+  emit the same lifecycle events as pipe-backed ones, so terminal-pane
+  rendering, history, and termination flow unchanged. Off by default;
+  existing `services.json` files continue to use the pipe path.
 - A new full-screen **Settings** view (gear icon in the top toolbar, `Esc` to
   close) exposes the editor command, auto-restart max-attempts and window,
   per-service log retention, and a master "hide all project names" toggle.

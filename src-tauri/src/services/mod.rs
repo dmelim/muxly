@@ -25,6 +25,14 @@ pub struct ServiceConfig {
     /// written before this field existed.
     #[serde(default)]
     pub auto_restart: bool,
+    /// When true, the service is spawned attached to a pseudo-terminal instead
+    /// of the default pipe-based spawn. Required for dev servers (Vite, WXT,
+    /// etc.) whose hot-reload loop depends on `process.stdin.isTTY` being true
+    /// to install the keypress keep-alive that pins the event loop across
+    /// rebuilds. Without a TTY, the dev server can exit cleanly after the
+    /// first HMR cycle. Defaults to false so existing configs are unaffected.
+    #[serde(default)]
+    pub use_pty: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -111,6 +119,7 @@ mod tests {
             port: Some(3000),
             group: None,
             auto_restart: false,
+            use_pty: false,
         }
     }
 

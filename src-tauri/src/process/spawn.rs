@@ -26,6 +26,13 @@ pub fn spawn_process(
     service: ServiceConfig,
     on_output: Channel<ProcessOutputEvent>,
 ) -> Result<(), AppError> {
+    // PTY-backed services go through a parallel spawn path so the child sees
+    // a real TTY (see `spawn_pty.rs`). All other lifecycle handling — events,
+    // registry, history, terminate-on-window-close — is shared.
+    if service.use_pty {
+        return super::spawn_service_pty(app, registry, config_dir, service, on_output);
+    }
+
     if registry.is_running(&service.id) {
         return Err(AppError::AlreadyRunning {
             service_name: service.name,

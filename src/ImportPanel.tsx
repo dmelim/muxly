@@ -120,7 +120,8 @@ export function ImportPanel({ existingIds, onImport, onCancel }: Props) {
           env: {},
           port: null,
           group,
-          autoRestart: false
+          autoRestart: false,
+          usePty: false
         }));
       await onImport(services);
     } catch (caught) {

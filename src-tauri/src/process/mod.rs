@@ -1,11 +1,13 @@
 mod platform;
 mod spawn;
+mod spawn_pty;
 
 use parking_lot::Mutex;
 use std::collections::HashMap;
 
 pub use platform::{configure_process_group, resolve_program, resume_child, ProcessTerminator};
 pub use spawn::spawn_process;
+pub use spawn_pty::spawn_service_pty;
 
 #[derive(Debug, Clone)]
 pub struct RunningProcess {

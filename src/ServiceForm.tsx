@@ -19,6 +19,7 @@ export type ServiceFormDraft = {
   port: string; // string for input control
   group: string;
   autoRestart: boolean;
+  usePty: boolean;
 };
 
 type Props = {
@@ -217,6 +218,23 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
             </span>
             <span className="block text-[11px] text-zinc-500">
               Re-spawn automatically if the process exits with an error (max 3 tries per minute)
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={draft.usePty}
+            onChange={(e) => setDraft({ ...draft, usePty: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block text-xs font-medium uppercase tracking-wider text-zinc-400">
+              Run in pseudo-terminal
+            </span>
+            <span className="block text-[11px] text-zinc-500">
+              Enable for dev servers with hot reload (Vite, WXT, Next.js). Without a TTY they can exit mid-rebuild. Output may include raw ANSI colour codes.
             </span>
           </span>
         </label>
@@ -743,6 +761,7 @@ function toDraft(service: ServiceConfig | null): ServiceFormDraft {
       port: "",
       group: "",
       autoRestart: false,
+      usePty: false,
       iconType: "none",
       iconValue: ""
     };
@@ -761,7 +780,8 @@ function toDraft(service: ServiceConfig | null): ServiceFormDraft {
       .join("\n"),
     port: service.port != null ? String(service.port) : "",
     group: service.group ?? "",
-    autoRestart: service.autoRestart
+    autoRestart: service.autoRestart,
+    usePty: service.usePty
   };
 }
 
@@ -801,7 +821,8 @@ function fromDraft(draft: ServiceFormDraft): ServiceConfig {
     env,
     port: Number.isFinite(port) ? port : null,
     group: groupValue || null,
-    autoRestart: draft.autoRestart
+    autoRestart: draft.autoRestart,
+    usePty: draft.usePty
   };
 }
 
