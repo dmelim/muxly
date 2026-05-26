@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf};
 use tauri::{AppHandle, Manager};
 
+// Defaults match the constants previously hard-coded in App.tsx so existing
+// settings files (which won't have these keys) keep behaving identically.
+pub const DEFAULT_AUTO_RESTART_MAX_ATTEMPTS: u32 = 3;
+pub const DEFAULT_AUTO_RESTART_WINDOW_MS: u64 = 60_000;
+pub const DEFAULT_MAX_LOG_CHUNKS: u32 = 5_000;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -14,6 +20,12 @@ pub struct AppSettings {
     pub hidden_project_names: BTreeMap<String, bool>,
     #[serde(default)]
     pub project_name_aliases: BTreeMap<String, String>,
+    #[serde(default = "default_auto_restart_max_attempts")]
+    pub auto_restart_max_attempts: u32,
+    #[serde(default = "default_auto_restart_window_ms")]
+    pub auto_restart_window_ms: u64,
+    #[serde(default = "default_max_log_chunks")]
+    pub max_log_chunks: u32,
 }
 
 impl Default for AppSettings {
@@ -23,8 +35,23 @@ impl Default for AppSettings {
             hide_project_names: false,
             hidden_project_names: BTreeMap::new(),
             project_name_aliases: BTreeMap::new(),
+            auto_restart_max_attempts: DEFAULT_AUTO_RESTART_MAX_ATTEMPTS,
+            auto_restart_window_ms: DEFAULT_AUTO_RESTART_WINDOW_MS,
+            max_log_chunks: DEFAULT_MAX_LOG_CHUNKS,
         }
     }
+}
+
+fn default_auto_restart_max_attempts() -> u32 {
+    DEFAULT_AUTO_RESTART_MAX_ATTEMPTS
+}
+
+fn default_auto_restart_window_ms() -> u64 {
+    DEFAULT_AUTO_RESTART_WINDOW_MS
+}
+
+fn default_max_log_chunks() -> u32 {
+    DEFAULT_MAX_LOG_CHUNKS
 }
 
 #[tauri::command]
@@ -49,6 +76,9 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     if settings.editor_command.trim().is_empty() {
         settings.editor_command = default_editor_command().to_string();
     }
+    settings.auto_restart_max_attempts = settings.auto_restart_max_attempts.min(20);
+    settings.auto_restart_window_ms = settings.auto_restart_window_ms.clamp(1_000, 3_600_000);
+    settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
     migrate_global_project_privacy(&mut settings);
 
     Ok(settings)
@@ -62,6 +92,12 @@ pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSet
     } else {
         settings.editor_command = settings.editor_command.trim().to_string();
     }
+    // Clamp the numeric knobs to sensible bounds — saves us from a
+    // typo'd "0 ms window" bricking auto-restart or a runaway log buffer
+    // eating memory.
+    settings.auto_restart_max_attempts = settings.auto_restart_max_attempts.min(20);
+    settings.auto_restart_window_ms = settings.auto_restart_window_ms.clamp(1_000, 3_600_000);
+    settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
 
     let path = settings_path(&app)?;
     let parent = path.parent().ok_or_else(|| {

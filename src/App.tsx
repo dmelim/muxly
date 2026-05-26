@@ -23,6 +23,7 @@ import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
 import { TerminalPanes } from "./TerminalPanes";
 import { BottomTerminal } from "./BottomTerminal";
+import { SettingsView } from "./SettingsView";
 import { aliasProjectName } from "./privacyNames";
 import { BuiltinServiceIcon } from "./serviceIcons";
 import {
@@ -34,6 +35,7 @@ import {
   PlayIcon,
   PlusIcon,
   SearchIcon,
+  SettingsIcon,
   SplitIcon,
   StopIcon,
   TerminalIcon
@@ -44,12 +46,11 @@ type EditTarget =
   | { mode: "new" }
   | { mode: "import" };
 
-const MAX_LOG_CHUNKS = 5000;
-
-// Auto-restart guardrails: at most AUTO_RESTART_MAX crashes within
-// AUTO_RESTART_WINDOW_MS before we give up, with a short delay between tries.
-const AUTO_RESTART_MAX = 3;
-const AUTO_RESTART_WINDOW_MS = 60_000;
+// Auto-restart guardrails: per-service we re-spawn at most
+// `settings.autoRestartMaxAttempts` times within
+// `settings.autoRestartWindowMs` (both user-tunable via the Settings panel),
+// pausing AUTO_RESTART_DELAY_MS between tries. Log retention
+// (`settings.maxLogChunks`) is similarly user-tunable.
 const AUTO_RESTART_DELAY_MS = 1_000;
 
 // Shorthand shown in shortcut tooltips. macOS uses ⌘, everything else Ctrl.
@@ -79,7 +80,12 @@ const statusDots: Record<ServiceStatus, string> = {
 const DEFAULT_SETTINGS: AppSettings = {
   editorCommand: "code",
   hiddenProjectNames: {},
-  projectNameAliases: {}
+  projectNameAliases: {},
+  // Mirrors the Rust defaults — kept in sync manually. The real values
+  // arrive via `load_settings` on mount; these only apply until then.
+  autoRestartMaxAttempts: 3,
+  autoRestartWindowMs: 60_000,
+  maxLogChunks: 5_000
 };
 
 export function App() {
@@ -115,8 +121,11 @@ export function App() {
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(340);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [editorDraft, setEditorDraft] = useState(DEFAULT_SETTINGS.editorCommand);
-  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  // Mirrors `settings` so listeners with empty-deps useEffect closures
+  // (process-exit auto-restart, output chunk buffering) read the latest
+  // user-tunable values without having to re-mount on every settings change.
+  const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   // The bottom shell drawer. Hidden by default — opened from the header button
@@ -229,20 +238,22 @@ export function App() {
     invoke<AppSettings>("load_settings")
       .then((loaded) => {
         setSettings(loaded);
-        setEditorDraft(loaded.editorCommand);
       })
       .catch(() => {
         /* default settings stay in place */
       });
   }, []);
 
+  // Keep the ref synced with the live settings so closures captured by the
+  // long-lived event listeners always see the latest user-tunable values.
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
   const persistSettings = useCallback(
-    async (nextSettings: AppSettings, syncEditorDraft = true) => {
+    async (nextSettings: AppSettings) => {
       const saved = await invoke<AppSettings>("save_settings", { settings: nextSettings });
       setSettings(saved);
-      if (syncEditorDraft) {
-        setEditorDraft(saved.editorCommand);
-      }
       return saved;
     },
     []
@@ -253,8 +264,10 @@ export function App() {
       return;
     }
 
-    void persistSettings({ ...settings, projectNameAliases }, false).catch((error) => {
-      setSettingsMessage(errorMessage(error));
+    void persistSettings({ ...settings, projectNameAliases }).catch((error) => {
+      // Background alias-sync — surface to the dev console rather than the UI;
+      // the user didn't initiate this and there's no obvious place to display it.
+      console.warn("Failed to persist project name aliases:", errorMessage(error));
     });
   }, [persistSettings, projectNameAliases, settings]);
 
@@ -451,18 +464,24 @@ export function App() {
       const service = servicesRef.current.find((s) => s.id === serviceId);
       if (!service || !service.autoRestart) return;
 
+      // Read user-tunable guardrails from the ref so changes in Settings take
+      // effect immediately without needing to remount the listener.
+      const { autoRestartMaxAttempts: maxAttempts, autoRestartWindowMs: windowMs } =
+        settingsRef.current;
+      if (maxAttempts <= 0) return;
+
       const now = Date.now();
       const record = autoRestartRef.current[serviceId] ?? { count: 0, lastAt: 0 };
       // A quiet period resets the budget — a service that ran fine for a while
       // and then crashed gets a fresh set of retries.
-      if (now - record.lastAt > AUTO_RESTART_WINDOW_MS) {
+      if (now - record.lastAt > windowMs) {
         record.count = 0;
       }
 
-      if (record.count >= AUTO_RESTART_MAX) {
+      if (record.count >= maxAttempts) {
         appendLog(
           serviceId,
-          `\r\n\x1b[31m[manager] auto-restart gave up after ${AUTO_RESTART_MAX} attempts\x1b[0m\r\n`
+          `\r\n\x1b[31m[manager] auto-restart gave up after ${maxAttempts} attempts\x1b[0m\r\n`
         );
         return;
       }
@@ -472,7 +491,7 @@ export function App() {
       autoRestartRef.current[serviceId] = record;
       appendLog(
         serviceId,
-        `\r\n\x1b[33m[manager] auto-restarting (attempt ${record.count}/${AUTO_RESTART_MAX})\x1b[0m\r\n`
+        `\r\n\x1b[33m[manager] auto-restarting (attempt ${record.count}/${maxAttempts})\x1b[0m\r\n`
       );
       window.setTimeout(() => {
         void startServiceRef.current(service);
@@ -488,8 +507,9 @@ export function App() {
     const chunks = logsRef.current[serviceId] ?? [];
     chunks.push(chunk);
 
-    if (chunks.length > MAX_LOG_CHUNKS) {
-      chunks.splice(0, chunks.length - MAX_LOG_CHUNKS);
+    const limit = settingsRef.current.maxLogChunks;
+    if (chunks.length > limit) {
+      chunks.splice(0, chunks.length - limit);
     }
 
     logsRef.current[serviceId] = chunks;
@@ -757,20 +777,10 @@ export function App() {
       projectNameAliases: hidden ? projectNameAliases : settings.projectNameAliases
     };
 
-    void persistSettings(nextSettings, false).catch((error) => {
-      setSettingsMessage(errorMessage(error));
+    void persistSettings(nextSettings).catch((error) => {
+      console.warn("Failed to toggle project name privacy:", errorMessage(error));
     });
   }, [persistSettings, projectNameAliases, settings]);
-
-  const saveEditorSettings = useCallback(async () => {
-    setSettingsMessage(null);
-    try {
-      await persistSettings({ ...settings, editorCommand: editorDraft });
-      setSettingsMessage("Saved");
-    } catch (error) {
-      setSettingsMessage(errorMessage(error));
-    }
-  }, [editorDraft, persistSettings, settings]);
 
   // Global keyboard shortcuts. Registered in the capture phase so they fire
   // before a focused terminal — xterm consumes Ctrl-combos and stops their
@@ -787,6 +797,10 @@ export function App() {
         }
         if (editing) {
           setEditing(null);
+          return;
+        }
+        if (settingsOpen) {
+          setSettingsOpen(false);
           return;
         }
         return;
@@ -907,7 +921,8 @@ export function App() {
     clearSelectedLog,
     openSingle,
     paneIds,
-    closePane
+    closePane,
+    settingsOpen
   ]);
 
   return (
@@ -1282,6 +1297,18 @@ export function App() {
                 <SearchIcon className="size-4" />
               </Button>
             </Tooltip>
+            <Tooltip label={settingsOpen ? "Close settings" : "Settings"}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSettingsOpen((open) => !open)}
+                aria-label="Toggle settings"
+                aria-pressed={settingsOpen}
+                className={settingsOpen ? "text-cyan-400" : ""}
+              >
+                <SettingsIcon className="size-4" />
+              </Button>
+            </Tooltip>
             <span className="mx-1 h-5 w-px bg-white/10" />
             <Tooltip
               label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+→)`}
@@ -1299,25 +1326,44 @@ export function App() {
           </div>
         </header>
 
-        <TerminalPanes
-          paneServices={paneServices}
-          focusedId={selected?.id ?? null}
-          statuses={statuses}
-          pids={pids}
-          terminalsRef={terminalsRef}
-          logsRef={logsRef}
-          onFocus={setSelectedId}
-          onClose={closePane}
-          onStart={manualStart}
-          onStop={stopService}
-          onClear={clearLog}
-        />
-        <BottomTerminal
-          open={terminalOpen}
-          height={terminalHeight}
-          onClose={() => setTerminalOpen(false)}
-          onResizeStart={startTerminalDrag}
-        />
+        {/*
+          Keep the terminal panes / bottom drawer mounted while Settings is
+          open and just hide them — unmounting would dispose every xterm
+          instance and wipe scrollback, which is a noticeable UX regression.
+        */}
+        <div
+          className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${
+            settingsOpen ? "hidden" : ""
+          }`}
+        >
+          <TerminalPanes
+            paneServices={paneServices}
+            focusedId={selected?.id ?? null}
+            statuses={statuses}
+            pids={pids}
+            terminalsRef={terminalsRef}
+            logsRef={logsRef}
+            onFocus={setSelectedId}
+            onClose={closePane}
+            onStart={manualStart}
+            onStop={stopService}
+            onClear={clearLog}
+          />
+          <BottomTerminal
+            open={terminalOpen}
+            height={terminalHeight}
+            onClose={() => setTerminalOpen(false)}
+            onResizeStart={startTerminalDrag}
+          />
+        </div>
+        {settingsOpen ? (
+          <SettingsView
+            settings={settings}
+            services={services}
+            onClose={() => setSettingsOpen(false)}
+            onSave={(next) => persistSettings(next)}
+          />
+        ) : null}
       </section>
 
       <aside
@@ -1420,33 +1466,6 @@ export function App() {
                   : `${Object.keys(selected.env).length} variables`}
               </Detail>
             </dl>
-
-            <div className="border-t border-white/10 pt-5">
-              <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Editor</p>
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={editorDraft}
-                  onChange={(event) => {
-                    setEditorDraft(event.target.value);
-                    setSettingsMessage(null);
-                  }}
-                  className="form-input font-mono text-xs"
-                  placeholder="code"
-                  aria-label="Editor command"
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={saveEditorSettings}
-                  disabled={editorDraft.trim() === settings.editorCommand}
-                >
-                  Save
-                </Button>
-              </div>
-              {settingsMessage ? (
-                <p className="mt-1.5 text-[11px] text-zinc-500">{settingsMessage}</p>
-              ) : null}
-            </div>
 
             <div className="border-t border-white/10 pt-5">
               <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Run history</p>

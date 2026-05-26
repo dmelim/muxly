@@ -24,6 +24,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- A new full-screen **Settings** view (gear icon in the top toolbar, `Esc` to
+  close) exposes the editor command, auto-restart max-attempts and window,
+  per-service log retention, and a master "hide all project names" toggle.
+  The editor command was moved here from the Details inspector.
 - Services in the sidebar can now be reordered by drag-and-drop. Dragging a
   service onto another card inserts it just above (joining that card's group);
   dragging onto a group header appends it to the end of that group, updating
