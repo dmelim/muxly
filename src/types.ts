@@ -35,6 +35,10 @@ export type AppSettings = {
   maxLogChunks: number;
   // Max columns shown in the terminal-pane grid before wrapping to a new row.
   paneGridColumns: number;
+  // Prepend a dim [HH:MM:SS] marker to the start of every line of service
+  // output. Cosmetic only — does not change what is stored in the log
+  // buffer beyond the inserted marker.
+  showTimestamps: boolean;
 };
 
 export type ProcessOutputEvent = {

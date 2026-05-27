@@ -6,7 +6,7 @@ type Props = {
   services: ServiceConfig[];
   /** Snapshot of per-service log chunks (logsRef.current). */
   logs: Record<string, string[]>;
-  onJump: (serviceId: string) => void;
+  onJump: (serviceId: string, query: string) => void;
   onClose: () => void;
 };
 
@@ -97,7 +97,7 @@ export function GlobalSearch({ services, logs, onJump, onClose }: Props) {
         className="flex max-h-[68vh] w-[640px] flex-col overflow-hidden rounded-lg border border-white/10 bg-[#15181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="border-b border-white/10 p-3">
+        <div className="p-3">
           <input
             ref={inputRef}
             value={query}
@@ -114,8 +114,9 @@ export function GlobalSearch({ services, logs, onJump, onClose }: Props) {
           </p>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {trimmed.length >= MIN_QUERY && results.length === 0 ? (
+        {trimmed.length >= MIN_QUERY ? (
+        <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/10 p-2">
+          {results.length === 0 ? (
             <p className="px-2 py-3 text-xs text-zinc-500">No matches.</p>
           ) : null}
 
@@ -135,7 +136,7 @@ export function GlobalSearch({ services, logs, onJump, onClose }: Props) {
                     <button
                       type="button"
                       onClick={() => {
-                        onJump(result.serviceId);
+                        onJump(result.serviceId, trimmed);
                         onClose();
                       }}
                       className="block w-full truncate rounded px-2 py-1 text-left font-mono text-xs text-zinc-400 hover:bg-white/10 hover:text-zinc-100"
@@ -149,6 +150,7 @@ export function GlobalSearch({ services, logs, onJump, onClose }: Props) {
             </div>
           ))}
         </div>
+        ) : null}
       </div>
     </div>
   );

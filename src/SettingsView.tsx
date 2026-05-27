@@ -265,6 +265,33 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
                 aria-label="Max log chunks per service"
               />
             </FormRow>
+            <label className="flex cursor-pointer items-start gap-3 pt-1">
+              <input
+                type="checkbox"
+                checked={settings.showTimestamps}
+                onChange={(event) => {
+                  setSaveMessage(null);
+                  void onSave({ ...settings, showTimestamps: event.target.checked }).catch(
+                    (error) => {
+                      setSaveMessage(
+                        error instanceof Error ? error.message : String(error)
+                      );
+                    }
+                  );
+                }}
+                className="mt-0.5 size-4 cursor-pointer accent-cyan-500"
+                aria-label="Prepend timestamps to log lines"
+              />
+              <span className="text-sm">
+                <span className="block text-zinc-200">Prepend timestamps</span>
+                <span className="mt-0.5 block text-xs text-zinc-500">
+                  Adds a dim <code className="font-mono">[HH:MM:SS]</code>{" "}
+                  marker to the start of every line of service output. Applies
+                  to new output only — existing log lines keep whatever marker
+                  (or lack of one) they had when they arrived.
+                </span>
+              </span>
+            </label>
           </Section>
 
           <Section

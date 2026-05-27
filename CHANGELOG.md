@@ -24,6 +24,45 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- **Per-line timestamps** in service-pane output. Every new line is
+  prefixed with a dim `[HH:MM:SS]` marker so you can correlate events
+  during a long run or across multiple panes. Streamed chunks that arrive
+  mid-line don't get a second marker — line-start tracking is kept per
+  service so a buffered write split across packet boundaries still
+  produces one marker per visible line. Toggle from
+  Settings → Logs → *Prepend timestamps*; defaults to on.
+- **Port-conflict recovery banner.** When a service exits abnormally and
+  another process is still listening on its configured port (a common
+  scenario with `next dev`, Vite, etc. — "Port X is in use by process Y"),
+  the pane now shows an amber banner with two actions:
+  - **Stop pid N and restart** — Muxly kills the foreign PID via
+    `taskkill /F /T` (Windows) or `kill -TERM` (Unix), waits ~600ms for
+    the socket to release, then re-spawns the service.
+  - **Adopt running instance** — Muxly treats the foreign PID as if it
+    were this service: status dot turns cyan, an "adopted · pid N" badge
+    appears in the pane header, the Stop button kills that PID, and the
+    Details inspector shows "Adopted (external pid N)". Muxly does not
+    capture the adopted process's stdout/stderr (it didn't spawn it), so
+    the pane log stays at the message that announced the adoption.
+    Adoptions auto-clear when the port stops being held by the adopted
+    PID, and the badge has its own ✕ to release the adoption without
+    killing the process.
+
+  Backed by two new Tauri commands: `find_port_holder(port)` (uses
+  `netstat -ano` / `lsof -t` / `ss -lntp`) and `kill_pid(pid)`.
+- **Decoded process exit codes.** When a service exits abnormally we now
+  decode the OS-level exit status alongside the raw number — most usefully
+  on Windows, where the kernel returns NTSTATUS values (e.g.
+  `-1073741502` is now shown as `code -1073741502 (0xC0000142,
+  STATUS_DLL_INIT_FAILED — a DLL failed to initialise during process
+  startup…)`). Abnormal exits also colour the banner red so the diagnostic
+  stands out from routine lifecycle messages. The Details inspector's
+  *Last Exit* row gets the compact form
+  (`-1073741502 (STATUS_DLL_INIT_FAILED)`).
+- Clicking a hit in the global search modal now **flashes the destination
+  pane** with a short amber background pulse and **opens the in-pane
+  search bar pre-filled with the query**, so the matched phrase is
+  highlighted in the terminal as soon as you land on the service.
 - **Wrapping pane grid** — open terminal panes now lay out as a grid that
   wraps to a new row after a configurable column cap (Settings → Layout →
   *Pane grid columns*, default 5). Replaces the previous purely horizontal
@@ -78,6 +117,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- The global search modal (`Ctrl+Shift+F`) no longer shows an empty results
+  panel — and the divider beneath the input — while the query field is
+  empty. The results panel only renders once the query reaches the
+  minimum-length threshold.
 - Release builds on Windows no longer open an extra black console window
   alongside the app. The Tauri scaffold's
   `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`
@@ -97,6 +140,9 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Changed
 
+- The in-pane search bar's match decorations switched from cyan to amber so
+  hits stand out against the cyan focus ring / cursor / status indicators
+  used elsewhere in the chrome.
 - Clicking a service in the sidebar now **replaces the focused pane only**
   instead of wiping the whole layout. With panes 1,2,3 open and pane 2
   focused, clicking 4 yields 1,4,3. **Shift+click** adds the service as an

@@ -25,6 +25,7 @@ import { TerminalPanes } from "./TerminalPanes";
 import { BottomTerminal } from "./BottomTerminal";
 import { SettingsView } from "./SettingsView";
 import { aliasProjectName } from "./privacyNames";
+import { describeExitCode, shortExitCode } from "./exitCodes";
 import { BuiltinServiceIcon } from "./serviceIcons";
 import {
   ChevronRightIcon,
@@ -86,7 +87,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoRestartMaxAttempts: 3,
   autoRestartWindowMs: 60_000,
   maxLogChunks: 5_000,
-  paneGridColumns: 5
+  paneGridColumns: 5,
+  showTimestamps: true
 };
 
 export function App() {
@@ -101,6 +103,13 @@ export function App() {
   // One xterm terminal per open pane, keyed by service id.
   const terminalsRef = useRef<Map<string, Terminal>>(new Map());
   const logsRef = useRef<Record<string, string[]>>({});
+  // Per-service line-start tracker for the timestamp annotator. `true` means
+  // the next non-newline byte we append begins a fresh line and should get a
+  // [HH:MM:SS] marker; flips to false after one is emitted and back to true
+  // after every `\n`. Lives in a ref so streamed chunks (which can arrive
+  // partway through a line) keep their state across renders without
+  // invalidating any memos.
+  const lineStateRef = useRef<Record<string, boolean>>({});
   const outputChannelsRef = useRef<Record<string, Channel<ProcessOutputEvent>>>({});
   // Kept in sync with `services` so closures captured by the long-lived event
   // listeners (which only mount once) always see the latest config.
@@ -115,12 +124,43 @@ export function App() {
   // Only meaningful when the service is not running — we never flag our own
   // listener as a "conflict".
   const [portConflicts, setPortConflicts] = useState<Record<string, boolean>>({});
+  // After a service exits non-zero and we can still see something listening
+  // on its configured port, we resolve the holder PID and surface a
+  // "stop-and-restart / adopt" banner in the pane. Cleared when the user
+  // takes either action or when the service starts successfully.
+  const [portBlockers, setPortBlockers] = useState<
+    Record<string, { pid: number; port: number }>
+  >({});
+  // Services the user has chosen to "adopt" — i.e. treat the external
+  // process holding the port as if it were this service. We don't own its
+  // stdout/stderr but we do show it as running and route Stop to kill the
+  // adopted PID. Periodically reconciled against the live port holder so an
+  // externally-killed dev server doesn't stay stuck in "Adopted".
+  const [adoptedPids, setAdoptedPids] = useState<
+    Record<string, { pid: number; port: number }>
+  >({});
   const [history, setHistory] = useState<Record<string, ServiceHistory>>({});
   const [searchOpen, setSearchOpen] = useState(false);
   // Service id whose in-pane find bar is currently shown — null when closed.
   // Only one pane shows the bar at a time; switching focus or closing the
   // pane clears it.
   const [searchPaneId, setSearchPaneId] = useState<string | null>(null);
+  // When the global search modal jumps to a result, we hand the query off
+  // to the destination pane so its in-pane search bar opens pre-filled and
+  // its xterm SearchAddon highlights the matched line. Cleared after the
+  // pane consumes it.
+  const [paneSearchSeed, setPaneSearchSeed] = useState<{
+    serviceId: string;
+    query: string;
+    // Bump counter so the same query → same pane jump still re-triggers the
+    // SearchAddon and re-runs the flash animation when re-clicked.
+    nonce: number;
+  } | null>(null);
+  // Service id whose pane should briefly flash amber to confirm the jump.
+  // Auto-clears after ~1.2s so the .pane-flash class can be re-applied on
+  // the next jump.
+  const [flashServiceId, setFlashServiceId] = useState<string | null>(null);
+  const [flashNonce, setFlashNonce] = useState(0);
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [leftWidth, setLeftWidth] = useState(300);
@@ -250,6 +290,32 @@ export function App() {
       setSelectedId(serviceId);
     },
     [selectedId]
+  );
+
+  // Auto-clear the flash so the CSS animation can re-fire on the next jump
+  // (re-adding the same class to an element doesn't restart its animation).
+  useEffect(() => {
+    if (!flashServiceId) return;
+    const timer = window.setTimeout(() => setFlashServiceId(null), 1200);
+    return () => window.clearTimeout(timer);
+  }, [flashServiceId, flashNonce]);
+
+  // Called from the global search modal when the user clicks a result.
+  // Ensures the service is visible as a pane (adds one if needed), focuses
+  // it, opens its in-pane search bar pre-filled with the query, and flashes
+  // the pane to confirm the jump.
+  const jumpToSearchResult = useCallback(
+    (serviceId: string, query: string) => {
+      setPaneIds((current) =>
+        current.includes(serviceId) ? current : [...current, serviceId]
+      );
+      setSelectedId(serviceId);
+      setSearchPaneId(serviceId);
+      setPaneSearchSeed({ serviceId, query, nonce: Date.now() });
+      setFlashServiceId(serviceId);
+      setFlashNonce((n) => n + 1);
+    },
+    []
   );
 
   const closePane = useCallback((serviceId: string) => {
@@ -429,6 +495,20 @@ export function App() {
       setPortConflicts((current) =>
         current[serviceId] ? { ...current, [serviceId]: false } : current
       );
+      // Our process is now the live owner — any "blocker" / "adopted"
+      // bookkeeping from before is obsolete and must not stick around.
+      setPortBlockers((current) => {
+        if (!current[serviceId]) return current;
+        const next = { ...current };
+        delete next[serviceId];
+        return next;
+      });
+      setAdoptedPids((current) => {
+        if (!current[serviceId]) return current;
+        const next = { ...current };
+        delete next[serviceId];
+        return next;
+      });
       appendLog(serviceId, `\r\n\x1b[38;2;34;211;238m[manager] started pid ${pid}\x1b[0m\r\n`);
       refreshHistory(serviceId);
     }).then((unlisten) => unlisteners.push(unlisten));
@@ -449,16 +529,17 @@ export function App() {
       });
       setLastExit((current) => ({
         ...current,
-        [serviceId]: requested ? "stopped" : code === null ? "signal" : `${code}`
+        [serviceId]: shortExitCode(code, requested)
       }));
-      const description = requested
-        ? "stopped by user"
-        : code === null
-        ? "signal"
-        : `code ${code}`;
+      const description = describeExitCode(code, requested);
+      // Failed exits get a red banner so a decoded NTSTATUS reads as the
+      // diagnostic it is, rather than getting lost in the same cyan colour
+      // we use for routine lifecycle events ("starting", "stopped").
+      const isError = !requested && code !== 0 && code !== null;
+      const colour = isError ? "\x1b[31m" : "\x1b[38;2;34;211;238m";
       appendLog(
         serviceId,
-        `\r\n\x1b[38;2;34;211;238m[manager] process exited (${description})\x1b[0m\r\n`
+        `\r\n${colour}[manager] process exited (${description})\x1b[0m\r\n`
       );
       // Re-probe the port after a short delay so the OS has time to release it.
       scheduleRescan(serviceId);
@@ -470,6 +551,32 @@ export function App() {
       } else {
         // Clean exit or user stop — reset the crash budget.
         delete autoRestartRef.current[serviceId];
+      }
+
+      // Abnormal exit + a configured port still held by *someone else* =
+      // likely "another instance is already running" (Next, Vite,
+      // `vite preview`, etc.). Resolve the holder and surface the banner
+      // so the user can stop-and-restart or adopt without leaving the app.
+      const service = servicesRef.current.find((s) => s.id === serviceId);
+      const nonZero = !requested && code !== 0 && code !== null;
+      if (nonZero && service && service.port != null) {
+        const port = service.port;
+        // Tiny delay so we re-probe after the OS has had a moment to settle
+        // — without it, our own freshly-released listener can briefly
+        // re-bind and we'd report ourselves as the blocker.
+        window.setTimeout(() => {
+          invoke<number | null>("find_port_holder", { port })
+            .then((pid) => {
+              if (!pid) return;
+              setPortBlockers((current) => ({
+                ...current,
+                [serviceId]: { pid, port }
+              }));
+            })
+            .catch(() => {
+              /* No netstat/lsof available — silent fallback. */
+            });
+        }, 400);
       }
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -532,8 +639,15 @@ export function App() {
   }, []);
 
   const appendLog = useCallback((serviceId: string, chunk: string) => {
+    // Apply the [HH:MM:SS] annotation *before* the chunk lands in the
+    // in-memory buffer so the replay on pane mount renders with the same
+    // marks the live terminal saw — the buffer is the source of truth.
+    const annotated = settingsRef.current.showTimestamps
+      ? annotateChunkWithTimestamps(serviceId, chunk, lineStateRef.current)
+      : chunk;
+
     const chunks = logsRef.current[serviceId] ?? [];
-    chunks.push(chunk);
+    chunks.push(annotated);
 
     const limit = settingsRef.current.maxLogChunks;
     if (chunks.length > limit) {
@@ -542,7 +656,7 @@ export function App() {
 
     logsRef.current[serviceId] = chunks;
     // Write live to the pane showing this service, if one is open.
-    terminalsRef.current.get(serviceId)?.write(chunk);
+    terminalsRef.current.get(serviceId)?.write(annotated);
   }, []);
 
   const startService = useCallback(
@@ -590,8 +704,146 @@ export function App() {
     [startService]
   );
 
+  // Kill the foreign process holding our port, then re-spawn the service.
+  // We clear the blocker eagerly so the banner disappears immediately — if
+  // the kill actually failed, the start attempt below will fail and a fresh
+  // blocker entry will repopulate from the exit handler.
+  const stopBlockerAndRestart = useCallback(
+    async (service: ServiceConfig) => {
+      const blocker = portBlockers[service.id];
+      if (!blocker) return;
+      try {
+        await invoke("kill_pid", { pid: blocker.pid });
+        appendLog(
+          service.id,
+          `\r\n\x1b[38;2;34;211;238m[manager] stopped blocking process pid ${blocker.pid} on port ${blocker.port}\x1b[0m\r\n`
+        );
+        setPortBlockers((current) => {
+          if (!current[service.id]) return current;
+          const next = { ...current };
+          delete next[service.id];
+          return next;
+        });
+        // Give the OS a beat to release the listening socket before we try
+        // to bind to it ourselves. Without this `next dev` (and friends)
+        // often races us and re-reports the conflict.
+        window.setTimeout(() => {
+          void manualStart(service);
+        }, 600);
+      } catch (error) {
+        appendLog(
+          service.id,
+          `\r\n\x1b[31m[manager] failed to stop pid ${blocker.pid}: ${errorMessage(
+            error
+          )}\x1b[0m\r\n`
+        );
+      }
+    },
+    // appendLog and manualStart are defined further down in this component;
+    // they're stable across renders, so safe to omit. portBlockers needs to
+    // be a dep so we read the latest blocker entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [portBlockers]
+  );
+
+  // Treat the external process holding our port as "this service is running".
+  // We don't own its IO, but state, status colour, and the Open-URL button
+  // all stop lying about what's actually live on the port.
+  const adoptRunningInstance = useCallback(
+    (service: ServiceConfig) => {
+      const blocker = portBlockers[service.id];
+      if (!blocker) return;
+      setAdoptedPids((current) => ({ ...current, [service.id]: blocker }));
+      setPortBlockers((current) => {
+        const next = { ...current };
+        delete next[service.id];
+        return next;
+      });
+      appendLog(
+        service.id,
+        `\r\n\x1b[38;2;34;211;238m[manager] adopted external pid ${blocker.pid} on port ${blocker.port} (stdout/stderr not captured)\x1b[0m\r\n`
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [portBlockers]
+  );
+
+  // Drop the adoption mapping without killing the adopted process — used by
+  // the "✕" affordance on the adopted badge. The service goes back to
+  // looking exited, which is accurate.
+  const releaseAdopted = useCallback((serviceId: string) => {
+    setAdoptedPids((current) => {
+      if (!current[serviceId]) return current;
+      const next = { ...current };
+      delete next[serviceId];
+      return next;
+    });
+  }, []);
+
+  // Reconcile every adopted entry against the live port holder every few
+  // seconds. If the port is now free, or held by a different PID, the
+  // adoption is stale and we drop it so the UI stops claiming the service
+  // is running.
+  useEffect(() => {
+    const ids = Object.keys(adoptedPids);
+    if (ids.length === 0) return;
+    const handle = window.setInterval(() => {
+      ids.forEach((serviceId) => {
+        const entry = adoptedPids[serviceId];
+        if (!entry) return;
+        invoke<number | null>("find_port_holder", { port: entry.port })
+          .then((pid) => {
+            if (pid === entry.pid) return;
+            setAdoptedPids((current) => {
+              if (current[serviceId]?.pid !== entry.pid) return current;
+              const next = { ...current };
+              delete next[serviceId];
+              return next;
+            });
+            appendLog(
+              serviceId,
+              `\r\n\x1b[33m[manager] adopted process pid ${entry.pid} is no longer listening on port ${entry.port}\x1b[0m\r\n`
+            );
+          })
+          .catch(() => {
+            /* keep adoption if we can't probe right now */
+          });
+      });
+    }, 4_000);
+    return () => window.clearInterval(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adoptedPids]);
+
   const stopService = useCallback(
     async (service: ServiceConfig) => {
+      // Adopted services: route Stop to taskkill/kill on the foreign PID
+      // rather than the (non-existent) one we spawned.
+      const adopted = adoptedPids[service.id];
+      if (adopted) {
+        try {
+          await invoke("kill_pid", { pid: adopted.pid });
+          appendLog(
+            service.id,
+            `\r\n\x1b[38;2;34;211;238m[manager] killed adopted pid ${adopted.pid}\x1b[0m\r\n`
+          );
+          setAdoptedPids((current) => {
+            if (!current[service.id]) return current;
+            const next = { ...current };
+            delete next[service.id];
+            return next;
+          });
+          setStatuses((current) => ({ ...current, [service.id]: "stopped" }));
+        } catch (error) {
+          appendLog(
+            service.id,
+            `\r\n\x1b[31m[manager] failed to kill adopted pid ${adopted.pid}: ${errorMessage(
+              error
+            )}\x1b[0m\r\n`
+          );
+        }
+        return;
+      }
+
       if (!pids[service.id]) {
         return;
       }
@@ -606,7 +858,7 @@ export function App() {
         appendLog(service.id, `\r\n\x1b[31m[manager] ${errorMessage(error)}\x1b[0m\r\n`);
       }
     },
-    [appendLog, pids]
+    [appendLog, pids, adoptedPids]
   );
 
   const startGroup = (groupName: string) => {
@@ -786,6 +1038,9 @@ export function App() {
   // Drop one service's buffered log and wipe its terminal (if a pane is open).
   const clearLog = useCallback((serviceId: string) => {
     logsRef.current[serviceId] = [];
+    // Force the next appended chunk to be treated as the start of a fresh
+    // line so it picks up a timestamp even mid-stream.
+    lineStateRef.current[serviceId] = true;
     terminalsRef.current.get(serviceId)?.clear();
   }, []);
 
@@ -829,6 +1084,7 @@ export function App() {
           // (e.g. user clicked back into the terminal but still wants Esc
           // to dismiss the bar).
           setSearchPaneId(null);
+          setPaneSearchSeed(null);
           return;
         }
         if (editing) {
@@ -1396,16 +1652,33 @@ export function App() {
             terminalsRef={terminalsRef}
             logsRef={logsRef}
             searchPaneId={searchPaneId}
+            searchSeed={paneSearchSeed}
+            flashServiceId={flashServiceId}
+            flashNonce={flashNonce}
+            portBlockers={portBlockers}
+            adoptedPids={adoptedPids}
+            onStopBlockerAndRestart={stopBlockerAndRestart}
+            onAdoptRunningInstance={adoptRunningInstance}
+            onReleaseAdopted={releaseAdopted}
             onFocus={setSelectedId}
             onClose={(id) => {
               if (searchPaneId === id) setSearchPaneId(null);
+              if (paneSearchSeed?.serviceId === id) setPaneSearchSeed(null);
               closePane(id);
             }}
             onStart={manualStart}
             onStop={stopService}
             onClear={clearLog}
-            onOpenSearch={(id) => setSearchPaneId(id)}
-            onCloseSearch={() => setSearchPaneId(null)}
+            onOpenSearch={(id) => {
+              // User-initiated Ctrl+F should never re-use a stale seed from a
+              // previous global-search jump.
+              if (paneSearchSeed?.serviceId !== id) setPaneSearchSeed(null);
+              setSearchPaneId(id);
+            }}
+            onCloseSearch={() => {
+              setSearchPaneId(null);
+              setPaneSearchSeed(null);
+            }}
           />
           <BottomTerminal
             open={terminalOpen}
@@ -1503,8 +1776,14 @@ export function App() {
                   large
                 />
               </Detail>
-              <Detail label="Status">{statusLabels[statuses[selected.id] ?? "stopped"]}</Detail>
-              <Detail label="PID">{pids[selected.id] ?? "None"}</Detail>
+              <Detail label="Status">
+                {adoptedPids[selected.id]
+                  ? `Adopted (external pid ${adoptedPids[selected.id].pid})`
+                  : statusLabels[statuses[selected.id] ?? "stopped"]}
+              </Detail>
+              <Detail label="PID">
+                {pids[selected.id] ?? adoptedPids[selected.id]?.pid ?? "None"}
+              </Detail>
               <Detail label="Last Exit">{lastExit[selected.id] ?? "None"}</Detail>
               <Detail label="Command">
                 <span className="block rounded-md bg-black/20 p-3 font-mono text-xs text-zinc-300">
@@ -1574,7 +1853,7 @@ export function App() {
       <GlobalSearch
         services={services}
         logs={logsRef.current}
-        onJump={(serviceId) => setSelectedId(serviceId)}
+        onJump={jumpToSearchResult}
         onClose={() => setSearchOpen(false)}
       />
     ) : null}
@@ -1584,6 +1863,58 @@ export function App() {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+// Walk `chunk` and inject a dim [HH:MM:SS] marker at the start of every
+// new line. Uses an external `lineState` map so streamed output (which
+// often arrives split across chunk boundaries) only gets one marker per
+// line, even when the line spans many chunks.
+//
+// Rules:
+//   - A `\n` marks "the next non-newline byte begins a new line".
+//   - A bare `\r` is treated as a carriage return *without* line break
+//     (matches xterm semantics — many CLIs use `\r` to redraw progress
+//     bars in place). We never inject a marker after a bare `\r`.
+//   - Empty lines (`\n\n`) stay empty — markers only precede content.
+//   - ANSI escape sequences are passed through unchanged; the marker has
+//     its own self-contained `\x1b[…m…\x1b[0m` wrapper so it never bleeds
+//     into the colour state of the surrounding text.
+function annotateChunkWithTimestamps(
+  serviceId: string,
+  chunk: string,
+  lineState: Record<string, boolean>
+): string {
+  // Default to "at line start" for a service we've never seen — the first
+  // byte ever appended is, by definition, the start of the first line.
+  if (lineState[serviceId] === undefined) {
+    lineState[serviceId] = true;
+  }
+
+  let out = "";
+  for (let i = 0; i < chunk.length; i++) {
+    const ch = chunk[i];
+    if (lineState[serviceId] && ch !== "\n" && ch !== "\r") {
+      out += formatTimestamp();
+      lineState[serviceId] = false;
+    }
+    out += ch;
+    if (ch === "\n") {
+      lineState[serviceId] = true;
+    }
+  }
+  return out;
+}
+
+function formatTimestamp(): string {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  // 256-colour 245 is a neutral mid-grey that's readable against the
+  // pane's near-black background without competing with the foreground
+  // text. Trailing space keeps the marker visually separate from the
+  // first character of the line.
+  return `\x1b[38;5;245m[${hh}:${mm}:${ss}]\x1b[0m `;
 }
 
 function groupKey(service: ServiceConfig) {

@@ -54,6 +54,21 @@ type TerminalPanesProps = {
   logsRef: MutableRefObject<Record<string, string[]>>;
   /** Service id whose in-pane search bar should be visible, or null. */
   searchPaneId: string | null;
+  /** When set, the named pane opens its search bar pre-filled with `query`
+   * — used by the global search modal to highlight the jumped-to phrase.
+   * `nonce` lets the same query→same pane jump re-trigger the search. */
+  searchSeed: { serviceId: string; query: string; nonce: number } | null;
+  /** Service id whose pane should briefly flash amber (jump confirmation). */
+  flashServiceId: string | null;
+  /** Bumps every time a jump is dispatched, even to the same pane — used
+   * to re-fire the flash animation on consecutive clicks of the same hit. */
+  flashNonce: number;
+  /** Per-service "another process owns my port" record, surfaced as a
+   * banner inside the pane with stop-and-restart / adopt actions. */
+  portBlockers: Record<string, { pid: number; port: number }>;
+  /** Per-service "this foreign process is acting as the service" record.
+   * Drives the adopted badge in the pane header. */
+  adoptedPids: Record<string, { pid: number; port: number }>;
   onFocus: (serviceId: string) => void;
   onClose: (serviceId: string) => void;
   onStart: (service: ServiceConfig) => void;
@@ -61,6 +76,9 @@ type TerminalPanesProps = {
   onClear: (serviceId: string) => void;
   onOpenSearch: (serviceId: string) => void;
   onCloseSearch: () => void;
+  onStopBlockerAndRestart: (service: ServiceConfig) => void;
+  onAdoptRunningInstance: (service: ServiceConfig) => void;
+  onReleaseAdopted: (serviceId: string) => void;
 };
 
 export function TerminalPanes({
@@ -72,13 +90,21 @@ export function TerminalPanes({
   terminalsRef,
   logsRef,
   searchPaneId,
+  searchSeed,
+  flashServiceId,
+  flashNonce,
+  portBlockers,
+  adoptedPids,
   onFocus,
   onClose,
   onStart,
   onStop,
   onClear,
   onOpenSearch,
-  onCloseSearch
+  onCloseSearch,
+  onStopBlockerAndRestart,
+  onAdoptRunningInstance,
+  onReleaseAdopted
 }: TerminalPanesProps) {
   if (paneServices.length === 0) {
     return (
@@ -101,30 +127,126 @@ export function TerminalPanes({
         gridAutoRows: "minmax(0, 1fr)"
       }}
     >
-      {paneServices.map((service) => (
-        <div
-          key={service.id}
-          className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-white/5"
+      {paneServices.map((service) => {
+        const seed =
+          searchSeed && searchSeed.serviceId === service.id ? searchSeed : null;
+        const flashing = flashServiceId === service.id;
+        return (
+          <PaneShell key={service.id} flashing={flashing} flashNonce={flashNonce}>
+            <PaneView
+              service={service}
+              status={statuses[service.id] ?? "stopped"}
+              running={pids[service.id] != null || adoptedPids[service.id] != null}
+              focused={service.id === focusedId}
+              showClose={paneServices.length > 1}
+              searchOpen={service.id === searchPaneId}
+              searchSeed={seed}
+              blocker={portBlockers[service.id] ?? null}
+              adopted={adoptedPids[service.id] ?? null}
+              terminalsRef={terminalsRef}
+              logsRef={logsRef}
+              onFocus={() => onFocus(service.id)}
+              onClose={() => onClose(service.id)}
+              onStart={() => onStart(service)}
+              onStop={() => onStop(service)}
+              onClear={() => onClear(service.id)}
+              onOpenSearch={() => onOpenSearch(service.id)}
+              onCloseSearch={onCloseSearch}
+              onStopBlockerAndRestart={() => onStopBlockerAndRestart(service)}
+              onAdoptRunningInstance={() => onAdoptRunningInstance(service)}
+              onReleaseAdopted={() => onReleaseAdopted(service.id)}
+            />
+          </PaneShell>
+        );
+      })}
+    </div>
+  );
+}
+
+// Thin wrapper around each pane that runs a one-shot amber background
+// flash via the Web Animations API. Using WAAPI (instead of a CSS class)
+// keeps consecutive jumps to the *same* pane working: each flashNonce
+// bump re-runs the effect even when `flashing` itself doesn't change,
+// and `element.animate()` always restarts the animation regardless of
+// the prior state. Doing this in a wrapper component (not a key on the
+// pane div) keeps the inner terminal and its scrollback intact.
+function PaneShell({
+  flashing,
+  flashNonce,
+  children
+}: {
+  flashing: boolean;
+  flashNonce: number;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!flashing) return;
+    const node = ref.current;
+    if (!node) return;
+    const animation = node.animate(
+      [
+        { backgroundColor: "rgba(251, 191, 36, 0.28)" },
+        { backgroundColor: "transparent" }
+      ],
+      { duration: 1200, easing: "ease-out" }
+    );
+    return () => animation.cancel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flashing, flashNonce]);
+
+  return (
+    <div
+      ref={ref}
+      className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-white/5"
+    >
+      {children}
+    </div>
+  );
+}
+
+// Amber recovery banner inside a pane when its configured port is held by
+// a foreign process. Offers two actions: kill-and-restart (we own the
+// process going forward) and adopt (treat the foreign PID as the service
+// for status purposes, without capturing its IO).
+function PortBlockerBanner({
+  pid,
+  port,
+  onStopBlockerAndRestart,
+  onAdoptRunningInstance
+}: {
+  pid: number;
+  port: number;
+  onStopBlockerAndRestart: () => void;
+  onAdoptRunningInstance: () => void;
+}) {
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+      // Don't let clicks inside the banner steal pane focus from a Stop
+      // button two pixels away.
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="font-medium">Port {port} is already in use</span>
+        <span className="text-amber-200/70"> · pid {pid} owns it now.</span>
+      </span>
+      <span className="flex shrink-0 gap-1.5">
+        <button
+          type="button"
+          onClick={onStopBlockerAndRestart}
+          className="rounded border border-amber-400/50 bg-amber-500/20 px-2 py-1 text-[11px] font-medium text-amber-50 transition hover:bg-amber-500/30"
         >
-          <PaneView
-            service={service}
-            status={statuses[service.id] ?? "stopped"}
-            running={pids[service.id] != null}
-            focused={service.id === focusedId}
-            showClose={paneServices.length > 1}
-            searchOpen={service.id === searchPaneId}
-            terminalsRef={terminalsRef}
-            logsRef={logsRef}
-            onFocus={() => onFocus(service.id)}
-            onClose={() => onClose(service.id)}
-            onStart={() => onStart(service)}
-            onStop={() => onStop(service)}
-            onClear={() => onClear(service.id)}
-            onOpenSearch={() => onOpenSearch(service.id)}
-            onCloseSearch={onCloseSearch}
-          />
-        </div>
-      ))}
+          Stop pid {pid} and restart
+        </button>
+        <button
+          type="button"
+          onClick={onAdoptRunningInstance}
+          className="rounded border border-cyan-400/40 bg-cyan-500/10 px-2 py-1 text-[11px] font-medium text-cyan-100 transition hover:bg-cyan-500/20"
+        >
+          Adopt running instance
+        </button>
+      </span>
     </div>
   );
 }
@@ -138,6 +260,13 @@ type PaneViewProps = {
   showClose: boolean;
   /** Whether the in-pane search bar should be shown for this pane. */
   searchOpen: boolean;
+  /** Pre-fill the in-pane search bar with this query — non-null when the
+   * global search modal jumped to this pane. */
+  searchSeed: { query: string; nonce: number } | null;
+  /** Foreign-process port conflict info; non-null shows the recovery banner. */
+  blocker: { pid: number; port: number } | null;
+  /** Adopted foreign process info; non-null shows the adopted header badge. */
+  adopted: { pid: number; port: number } | null;
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   logsRef: MutableRefObject<Record<string, string[]>>;
   onFocus: () => void;
@@ -147,6 +276,9 @@ type PaneViewProps = {
   onClear: () => void;
   onOpenSearch: () => void;
   onCloseSearch: () => void;
+  onStopBlockerAndRestart: () => void;
+  onAdoptRunningInstance: () => void;
+  onReleaseAdopted: () => void;
 };
 
 function PaneView({
@@ -156,6 +288,9 @@ function PaneView({
   focused,
   showClose,
   searchOpen,
+  searchSeed,
+  blocker,
+  adopted,
   terminalsRef,
   logsRef,
   onFocus,
@@ -164,7 +299,10 @@ function PaneView({
   onStop,
   onClear,
   onOpenSearch,
-  onCloseSearch
+  onCloseSearch,
+  onStopBlockerAndRestart,
+  onAdoptRunningInstance,
+  onReleaseAdopted
 }: PaneViewProps) {
   // `wrapRef` is the flex-sized box the ResizeObserver watches. `hostRef` is a
   // plain child that xterm renders into. Keeping them separate is what stops
@@ -273,7 +411,14 @@ function PaneView({
     >
       <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span className={`size-2 rounded-full ${statusDots[status]}`} />
+          {/* Adopted services show a cyan dot regardless of the underlying
+              ServiceStatus, since the foreign process is what's actually
+              listening on the port right now. */}
+          <span
+            className={`size-2 rounded-full ${
+              adopted ? "bg-cyan-400" : statusDots[status]
+            }`}
+          />
           <span
             className={`truncate text-xs font-medium ${
               focused ? "text-zinc-100" : "text-zinc-400"
@@ -281,6 +426,22 @@ function PaneView({
           >
             {service.name}
           </span>
+          {adopted ? (
+            <Tooltip label="External process adopted — Muxly did not spawn this PID, so its stdout/stderr are not captured.">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReleaseAdopted();
+                }}
+                aria-label="Release adopted process (does not kill it)"
+                className="flex shrink-0 items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                <span>adopted · pid {adopted.pid}</span>
+                <CloseIcon className="size-2.5 opacity-70" />
+              </button>
+            </Tooltip>
+          ) : null}
         </span>
         <span className="flex shrink-0 items-center gap-0.5">
           {status === "failed" || status === "exited" ? (
@@ -341,10 +502,22 @@ function PaneView({
           ) : null}
         </span>
       </div>
+      {blocker ? (
+        <PortBlockerBanner
+          pid={blocker.pid}
+          port={blocker.port}
+          onStopBlockerAndRestart={onStopBlockerAndRestart}
+          onAdoptRunningInstance={onAdoptRunningInstance}
+        />
+      ) : null}
       <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3">
         <div ref={hostRef} className="h-full w-full overflow-hidden" />
         {searchOpen && searchAddon ? (
-          <PaneSearchBar searchAddon={searchAddon} onClose={onCloseSearch} />
+          <PaneSearchBar
+            searchAddon={searchAddon}
+            seed={searchSeed}
+            onClose={onCloseSearch}
+          />
         ) : null}
       </div>
     </div>
@@ -357,28 +530,44 @@ function PaneView({
 // jumps to the next match, Shift+Enter jumps to the previous.
 function PaneSearchBar({
   searchAddon,
+  seed,
   onClose
 }: {
   searchAddon: SearchAddon;
+  seed: { query: string; nonce: number } | null;
   onClose: () => void;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(seed?.query ?? "");
+
+  // When a new seed arrives (e.g. another global-search jump to this same
+  // pane while the bar is already open), adopt its query so the highlight
+  // moves to the freshly chosen phrase.
+  useEffect(() => {
+    if (seed && seed.query) {
+      setQuery(seed.query);
+    }
+    // We key on `nonce` so consecutive jumps with the same query still
+    // re-run the live-search effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.nonce]);
   const [results, setResults] = useState<{ resultIndex: number; resultCount: number }>({
     resultIndex: -1,
     resultCount: 0
   });
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Decoration colours pull from the brand cyan to match the rest of the UI.
+  // Amber decorations — distinct from the cyan brand accent used for focus
+  // rings/status indicators, so a highlighted phrase reads clearly as
+  // "search hit" rather than blending into the rest of the UI chrome.
   const searchOptions = {
     caseSensitive: false,
     decorations: {
-      matchBackground: "#22d3ee33",
-      matchBorder: "#22d3ee99",
-      matchOverviewRuler: "#22d3ee",
-      activeMatchBackground: "#22d3ee",
-      activeMatchBorder: "#67e8f9",
-      activeMatchColorOverviewRuler: "#67e8f9"
+      matchBackground: "#fbbf2433",
+      matchBorder: "#fbbf2499",
+      matchOverviewRuler: "#fbbf24",
+      activeMatchBackground: "#fbbf24",
+      activeMatchBorder: "#fde68a",
+      activeMatchColorOverviewRuler: "#fde68a"
     }
   } as const;
 

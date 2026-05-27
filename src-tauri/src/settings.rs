@@ -9,6 +9,7 @@ pub const DEFAULT_AUTO_RESTART_MAX_ATTEMPTS: u32 = 3;
 pub const DEFAULT_AUTO_RESTART_WINDOW_MS: u64 = 60_000;
 pub const DEFAULT_MAX_LOG_CHUNKS: u32 = 5_000;
 pub const DEFAULT_PANE_GRID_COLUMNS: u32 = 5;
+pub const DEFAULT_SHOW_TIMESTAMPS: bool = true;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +30,8 @@ pub struct AppSettings {
     pub max_log_chunks: u32,
     #[serde(default = "default_pane_grid_columns")]
     pub pane_grid_columns: u32,
+    #[serde(default = "default_show_timestamps")]
+    pub show_timestamps: bool,
 }
 
 impl Default for AppSettings {
@@ -42,6 +45,7 @@ impl Default for AppSettings {
             auto_restart_window_ms: DEFAULT_AUTO_RESTART_WINDOW_MS,
             max_log_chunks: DEFAULT_MAX_LOG_CHUNKS,
             pane_grid_columns: DEFAULT_PANE_GRID_COLUMNS,
+            show_timestamps: DEFAULT_SHOW_TIMESTAMPS,
         }
     }
 }
@@ -60,6 +64,10 @@ fn default_max_log_chunks() -> u32 {
 
 fn default_pane_grid_columns() -> u32 {
     DEFAULT_PANE_GRID_COLUMNS
+}
+
+fn default_show_timestamps() -> bool {
+    DEFAULT_SHOW_TIMESTAMPS
 }
 
 #[tauri::command]
