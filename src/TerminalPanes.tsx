@@ -1,13 +1,13 @@
-import { Fragment, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
-import { Group, Panel, Separator } from "react-resizable-panels";
 import type { ServiceConfig, ServiceStatus } from "./types";
 import { formatCommand } from "./types";
-import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, StopIcon } from "./icons";
+import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 
 const statusDots: Record<ServiceStatus, string> = {
@@ -46,15 +46,21 @@ type TerminalPanesProps = {
   statuses: Record<string, ServiceStatus>;
   /** Live PIDs, keyed by service id — a present pid means the process runs. */
   pids: Record<string, number>;
+  /** Max columns before the pane grid wraps to a new row. */
+  gridColumns: number;
   /** App-owned registry so log streaming can reach each pane's terminal. */
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   /** App-owned per-service log ring buffers, replayed when a pane mounts. */
   logsRef: MutableRefObject<Record<string, string[]>>;
+  /** Service id whose in-pane search bar should be visible, or null. */
+  searchPaneId: string | null;
   onFocus: (serviceId: string) => void;
   onClose: (serviceId: string) => void;
   onStart: (service: ServiceConfig) => void;
   onStop: (service: ServiceConfig) => void;
   onClear: (serviceId: string) => void;
+  onOpenSearch: (serviceId: string) => void;
+  onCloseSearch: () => void;
 };
 
 export function TerminalPanes({
@@ -62,13 +68,17 @@ export function TerminalPanes({
   focusedId,
   statuses,
   pids,
+  gridColumns,
   terminalsRef,
   logsRef,
+  searchPaneId,
   onFocus,
   onClose,
   onStart,
   onStop,
-  onClear
+  onClear,
+  onOpenSearch,
+  onCloseSearch
 }: TerminalPanesProps) {
   if (paneServices.length === 0) {
     return (
@@ -78,43 +88,44 @@ export function TerminalPanes({
     );
   }
 
+  // The grid is column-capped, not column-fixed: with fewer panes than the
+  // cap we use one column per pane so each one stays as wide as possible
+  // instead of leaving empty cells. Past the cap we wrap to a new row.
+  const cols = Math.max(1, Math.min(gridColumns, paneServices.length));
+
   return (
-    <Group orientation="horizontal" className="min-h-0 flex-1">
-      {paneServices.map((service, index) => (
-        <Fragment key={service.id}>
-          {index > 0 ? (
-            <Separator className="group/sep relative w-1.5 cursor-col-resize bg-transparent">
-              <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/10 transition-colors group-hover/sep:bg-cyan-500/50" />
-            </Separator>
-          ) : null}
-          {/* react-resizable-panels forces `overflow: auto` inline on the
-              panel's inner div, which makes it a scroll container. The library
-              spreads the `style` prop *after* its own overflow, so this is the
-              intended way to override it — the pane must clip, not scroll;
-              xterm owns its own scrolling. */}
-          <Panel
-            minSize="15%"
-            className="flex min-h-0 flex-col overflow-hidden"
-            style={{ overflow: "hidden" }}
-          >
-            <PaneView
-              service={service}
-              status={statuses[service.id] ?? "stopped"}
-              running={pids[service.id] != null}
-              focused={service.id === focusedId}
-              showClose={paneServices.length > 1}
-              terminalsRef={terminalsRef}
-              logsRef={logsRef}
-              onFocus={() => onFocus(service.id)}
-              onClose={() => onClose(service.id)}
-              onStart={() => onStart(service)}
-              onStop={() => onStop(service)}
-              onClear={() => onClear(service.id)}
-            />
-          </Panel>
-        </Fragment>
+    <div
+      className="grid min-h-0 flex-1 gap-1.5 p-1.5"
+      style={{
+        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+        gridAutoRows: "minmax(0, 1fr)"
+      }}
+    >
+      {paneServices.map((service) => (
+        <div
+          key={service.id}
+          className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-white/5"
+        >
+          <PaneView
+            service={service}
+            status={statuses[service.id] ?? "stopped"}
+            running={pids[service.id] != null}
+            focused={service.id === focusedId}
+            showClose={paneServices.length > 1}
+            searchOpen={service.id === searchPaneId}
+            terminalsRef={terminalsRef}
+            logsRef={logsRef}
+            onFocus={() => onFocus(service.id)}
+            onClose={() => onClose(service.id)}
+            onStart={() => onStart(service)}
+            onStop={() => onStop(service)}
+            onClear={() => onClear(service.id)}
+            onOpenSearch={() => onOpenSearch(service.id)}
+            onCloseSearch={onCloseSearch}
+          />
+        </div>
       ))}
-    </Group>
+    </div>
   );
 }
 
@@ -125,6 +136,8 @@ type PaneViewProps = {
   running: boolean;
   focused: boolean;
   showClose: boolean;
+  /** Whether the in-pane search bar should be shown for this pane. */
+  searchOpen: boolean;
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   logsRef: MutableRefObject<Record<string, string[]>>;
   onFocus: () => void;
@@ -132,6 +145,8 @@ type PaneViewProps = {
   onStart: () => void;
   onStop: () => void;
   onClear: () => void;
+  onOpenSearch: () => void;
+  onCloseSearch: () => void;
 };
 
 function PaneView({
@@ -140,13 +155,16 @@ function PaneView({
   running,
   focused,
   showClose,
+  searchOpen,
   terminalsRef,
   logsRef,
   onFocus,
   onClose,
   onStart,
   onStop,
-  onClear
+  onClear,
+  onOpenSearch,
+  onCloseSearch
 }: PaneViewProps) {
   // `wrapRef` is the flex-sized box the ResizeObserver watches. `hostRef` is a
   // plain child that xterm renders into. Keeping them separate is what stops
@@ -155,6 +173,9 @@ function PaneView({
   // self-sustaining loop.
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  // The SearchAddon is held in state (not just a ref) so the PaneSearchBar
+  // re-renders once it becomes available after the deferred terminal open.
+  const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
 
   // One terminal per pane, created once. The pane is keyed by service id in the
   // parent, so this component instance maps 1:1 to a service for its lifetime.
@@ -167,7 +188,9 @@ function PaneView({
 
     const terminal = new Terminal(TERMINAL_OPTIONS);
     const fitAddon = new FitAddon();
+    const search = new SearchAddon();
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(search);
     terminal.loadAddon(
       new WebLinksAddon((event, uri) => {
         // Go through the Rust `open_url` command (same one the inspector's
@@ -198,10 +221,9 @@ function PaneView({
     };
 
     // Defer open/fit/write to the next frame. A pane's mount effect runs
-    // *before* react-resizable-panels' parent effect has applied the final
-    // panel widths — fitting and writing here would size the terminal wrong
-    // and the replayed log would render garbled. By the next frame the layout
-    // has settled.
+    // before the parent grid has applied final cell widths — fitting and
+    // writing here would size the terminal wrong and the replayed log would
+    // render garbled. By the next frame the layout has settled.
     setupRaf = requestAnimationFrame(() => {
       if (disposed) {
         return;
@@ -219,6 +241,7 @@ function PaneView({
 
       // Register only after the replay, so live output appends in order.
       terminalsRef.current.set(service.id, terminal);
+      setSearchAddon(search);
 
       // Debounce fits to one per frame — extra insurance against rapid
       // resize bursts (e.g. while dragging a pane divider).
@@ -235,6 +258,7 @@ function PaneView({
       cancelAnimationFrame(fitRaf);
       resizeObserver?.disconnect();
       terminalsRef.current.delete(service.id);
+      setSearchAddon(null);
       terminal.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -286,6 +310,17 @@ function PaneView({
             <StopIcon className="size-3.5" />
           </PaneIconButton>
           <PaneIconButton
+            label={`Find in pane (${MOD_KEY}+F)`}
+            accent={
+              searchOpen
+                ? "text-cyan-400 bg-cyan-500/15 hover:bg-cyan-500/20"
+                : "text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+            }
+            onClick={searchOpen ? onCloseSearch : onOpenSearch}
+          >
+            <SearchIcon className="size-3.5" />
+          </PaneIconButton>
+          <PaneIconButton
             label="Clear log"
             accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
             onClick={onClear}
@@ -306,9 +341,167 @@ function PaneView({
           ) : null}
         </span>
       </div>
-      <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden p-3">
+      <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3">
         <div ref={hostRef} className="h-full w-full overflow-hidden" />
+        {searchOpen && searchAddon ? (
+          <PaneSearchBar searchAddon={searchAddon} onClose={onCloseSearch} />
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+// In-pane find. xterm's SearchAddon owns the actual matching/decoration work;
+// this is just a small overlay that drives it and surfaces the live result
+// count via `onDidChangeResults`. Esc closes (clearing decorations), Enter
+// jumps to the next match, Shift+Enter jumps to the previous.
+function PaneSearchBar({
+  searchAddon,
+  onClose
+}: {
+  searchAddon: SearchAddon;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ resultIndex: number; resultCount: number }>({
+    resultIndex: -1,
+    resultCount: 0
+  });
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Decoration colours pull from the brand cyan to match the rest of the UI.
+  const searchOptions = {
+    caseSensitive: false,
+    decorations: {
+      matchBackground: "#22d3ee33",
+      matchBorder: "#22d3ee99",
+      matchOverviewRuler: "#22d3ee",
+      activeMatchBackground: "#22d3ee",
+      activeMatchBorder: "#67e8f9",
+      activeMatchColorOverviewRuler: "#67e8f9"
+    }
+  } as const;
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  useEffect(() => {
+    const handle = searchAddon.onDidChangeResults((event) => {
+      setResults({ resultIndex: event.resultIndex, resultCount: event.resultCount });
+    });
+    return () => handle.dispose();
+  }, [searchAddon]);
+
+  // When the bar unmounts (pane lost focus + closed, Esc, X), clear the
+  // decorations so stale highlights don't linger on the terminal.
+  useEffect(() => {
+    return () => {
+      searchAddon.clearDecorations();
+    };
+  }, [searchAddon]);
+
+  // Live-search as the user types — incremental mode keeps the current match
+  // anchored where possible so the result doesn't jump on every keystroke.
+  useEffect(() => {
+    if (!query) {
+      searchAddon.clearDecorations();
+      setResults({ resultIndex: -1, resultCount: 0 });
+      return;
+    }
+    searchAddon.findNext(query, { ...searchOptions, incremental: true });
+    // searchOptions is a literal const above — stable across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, searchAddon]);
+
+  const findNext = useCallback(() => {
+    if (query) searchAddon.findNext(query, searchOptions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, searchAddon]);
+  const findPrev = useCallback(() => {
+    if (query) searchAddon.findPrevious(query, searchOptions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, searchAddon]);
+
+  const counter =
+    results.resultCount === 0
+      ? query
+        ? "0/0"
+        : ""
+      : `${results.resultIndex + 1}/${results.resultCount}`;
+
+  return (
+    <div
+      className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md border border-white/10 bg-[#15181d]/95 px-2 py-1 shadow-lg backdrop-blur"
+      onMouseDown={(event) => {
+        // Keep clicks inside the bar from focusing the underlying pane
+        // (which would steal focus back into xterm).
+        event.stopPropagation();
+      }}
+    >
+      <SearchIcon className="size-3.5 text-zinc-500" />
+      <input
+        ref={inputRef}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+            return;
+          }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.shiftKey) findPrev();
+            else findNext();
+          }
+        }}
+        placeholder="Find in pane…"
+        className="w-44 bg-transparent text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+        aria-label="Find in pane"
+      />
+      <span className="min-w-[3.5rem] text-right font-mono text-[11px] text-zinc-500">
+        {counter}
+      </span>
+      <Tooltip label="Previous (Shift+Enter)">
+        <button
+          type="button"
+          onClick={findPrev}
+          disabled={!query || results.resultCount === 0}
+          aria-label="Previous match"
+          className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3" aria-hidden="true">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+      </Tooltip>
+      <Tooltip label="Next (Enter)">
+        <button
+          type="button"
+          onClick={findNext}
+          disabled={!query || results.resultCount === 0}
+          aria-label="Next match"
+          className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3" aria-hidden="true">
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+        </button>
+      </Tooltip>
+      <Tooltip label="Close (Esc)">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close search"
+          className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+        >
+          <CloseIcon className="size-3" />
+        </button>
+      </Tooltip>
     </div>
   );
 }

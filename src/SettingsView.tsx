@@ -11,11 +11,14 @@ const AUTO_RESTART_WINDOW_SECONDS_MIN = 1;
 const AUTO_RESTART_WINDOW_SECONDS_MAX = 3_600;
 const MAX_LOG_CHUNKS_MIN = 100;
 const MAX_LOG_CHUNKS_MAX = 100_000;
+const PANE_GRID_COLUMNS_MIN = 1;
+const PANE_GRID_COLUMNS_MAX = 10;
 const UNTOUCHED_FIELDS = {
   editorCommand: false,
   maxAttempts: false,
   windowSeconds: false,
-  maxLogChunks: false
+  maxLogChunks: false,
+  paneGridColumns: false
 };
 
 type TouchedFields = typeof UNTOUCHED_FIELDS;
@@ -40,6 +43,7 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
     String(Math.round(settings.autoRestartWindowMs / 1000))
   );
   const [maxLogChunks, setMaxLogChunks] = useState(String(settings.maxLogChunks));
+  const [paneGridColumns, setPaneGridColumns] = useState(String(settings.paneGridColumns));
   const [touchedFields, setTouchedFields] = useState<TouchedFields>(UNTOUCHED_FIELDS);
 
   // Keep untouched form fields aligned with async settings loads, while still
@@ -56,6 +60,9 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
     }
     if (!touchedFields.maxLogChunks) {
       setMaxLogChunks(String(settings.maxLogChunks));
+    }
+    if (!touchedFields.paneGridColumns) {
+      setPaneGridColumns(String(settings.paneGridColumns));
     }
   }, [settings, touchedFields]);
 
@@ -83,7 +90,13 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
     const parsedAttempts = parseInteger(maxAttempts);
     const parsedWindow = parseInteger(windowSeconds);
     const parsedLog = parseInteger(maxLogChunks);
-    if (parsedAttempts == null || parsedWindow == null || parsedLog == null) {
+    const parsedCols = parseInteger(paneGridColumns);
+    if (
+      parsedAttempts == null ||
+      parsedWindow == null ||
+      parsedLog == null ||
+      parsedCols == null
+    ) {
       setSaveMessage("All numeric fields must be whole numbers.");
       return;
     }
@@ -98,7 +111,8 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
           AUTO_RESTART_WINDOW_SECONDS_MIN,
           AUTO_RESTART_WINDOW_SECONDS_MAX
         ) * 1000,
-      maxLogChunks: clamp(parsedLog, MAX_LOG_CHUNKS_MIN, MAX_LOG_CHUNKS_MAX)
+      maxLogChunks: clamp(parsedLog, MAX_LOG_CHUNKS_MIN, MAX_LOG_CHUNKS_MAX),
+      paneGridColumns: clamp(parsedCols, PANE_GRID_COLUMNS_MIN, PANE_GRID_COLUMNS_MAX)
     };
 
     setSaving(true);
@@ -110,6 +124,7 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
       setMaxAttempts(String(saved.autoRestartMaxAttempts));
       setWindowSeconds(String(Math.round(saved.autoRestartWindowMs / 1000)));
       setMaxLogChunks(String(saved.maxLogChunks));
+      setPaneGridColumns(String(saved.paneGridColumns));
       setTouchedFields(UNTOUCHED_FIELDS);
       setSaveMessage("Saved");
     } catch (error) {
@@ -147,7 +162,9 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
     (touchedFields.maxAttempts && maxAttempts !== String(settings.autoRestartMaxAttempts)) ||
     (touchedFields.windowSeconds &&
       windowSeconds !== String(Math.round(settings.autoRestartWindowMs / 1000))) ||
-    (touchedFields.maxLogChunks && maxLogChunks !== String(settings.maxLogChunks));
+    (touchedFields.maxLogChunks && maxLogChunks !== String(settings.maxLogChunks)) ||
+    (touchedFields.paneGridColumns &&
+      paneGridColumns !== String(settings.paneGridColumns));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101215]">
@@ -246,6 +263,30 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
                 }}
                 className="form-input w-40 font-mono text-xs"
                 aria-label="Max log chunks per service"
+              />
+            </FormRow>
+          </Section>
+
+          <Section
+            title="Layout"
+            description="How open service panes are arranged on screen."
+          >
+            <FormRow
+              label="Pane grid columns"
+              hint={`Max panes per row before wrapping to a new row. ${PANE_GRID_COLUMNS_MIN}–${PANE_GRID_COLUMNS_MAX}.`}
+            >
+              <input
+                type="number"
+                min={PANE_GRID_COLUMNS_MIN}
+                max={PANE_GRID_COLUMNS_MAX}
+                value={paneGridColumns}
+                onChange={(event) => {
+                  setTouchedFields((current) => ({ ...current, paneGridColumns: true }));
+                  setPaneGridColumns(event.target.value);
+                  setSaveMessage(null);
+                }}
+                className="form-input w-32 font-mono text-xs"
+                aria-label="Max pane grid columns"
               />
             </FormRow>
           </Section>

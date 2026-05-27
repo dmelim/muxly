@@ -33,6 +33,8 @@ export type AppSettings = {
   autoRestartWindowMs: number;
   // Max number of log chunks (output writes) kept in memory per service.
   maxLogChunks: number;
+  // Max columns shown in the terminal-pane grid before wrapping to a new row.
+  paneGridColumns: number;
 };
 
 export type ProcessOutputEvent = {

@@ -24,15 +24,36 @@ const ANSI = /\[[0-9;]*[A-Za-z]/g;
 const MIN_QUERY = 2;
 const MAX_HITS_PER_SERVICE = 25;
 
+// How often to re-scan the live log buffers while the modal is open.
+// The `logs` prop is the same Record reference every render (it's
+// `logsRef.current`), so React can't tell us when new chunks arrive — we
+// poll instead. 250ms feels responsive without burning CPU on idle apps.
+const LIVE_REFRESH_MS = 250;
+
 export function GlobalSearch({ services, logs, onJump, onClose }: Props) {
   const [query, setQuery] = useState("");
+  // Tick bumps on a timer while a query is active. It's a useMemo dep below,
+  // which is what gives global search its "live" feel — new chunks streamed
+  // into logsRef during a long-running service become searchable without
+  // the user having to retype.
+  const [tick, setTick] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (query.trim().length < MIN_QUERY) return;
+    const id = window.setInterval(() => setTick((t) => t + 1), LIVE_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [query]);
+
   const results = useMemo<ServiceHits[]>(() => {
+    // `tick` is intentionally read here so the memo invalidates on each
+    // poll — even though we don't use its value, listing it as a dep is
+    // what couples the search to the polling timer.
+    void tick;
     const needle = query.trim().toLowerCase();
     if (needle.length < MIN_QUERY) {
       return [];
@@ -62,7 +83,7 @@ export function GlobalSearch({ services, logs, onJump, onClose }: Props) {
       }
     }
     return out;
-  }, [query, services, logs]);
+  }, [query, services, logs, tick]);
 
   const totalMatches = results.reduce((sum, result) => sum + result.total, 0);
   const trimmed = query.trim();

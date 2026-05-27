@@ -8,6 +8,7 @@ use tauri::{AppHandle, Manager};
 pub const DEFAULT_AUTO_RESTART_MAX_ATTEMPTS: u32 = 3;
 pub const DEFAULT_AUTO_RESTART_WINDOW_MS: u64 = 60_000;
 pub const DEFAULT_MAX_LOG_CHUNKS: u32 = 5_000;
+pub const DEFAULT_PANE_GRID_COLUMNS: u32 = 5;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +27,8 @@ pub struct AppSettings {
     pub auto_restart_window_ms: u64,
     #[serde(default = "default_max_log_chunks")]
     pub max_log_chunks: u32,
+    #[serde(default = "default_pane_grid_columns")]
+    pub pane_grid_columns: u32,
 }
 
 impl Default for AppSettings {
@@ -38,6 +41,7 @@ impl Default for AppSettings {
             auto_restart_max_attempts: DEFAULT_AUTO_RESTART_MAX_ATTEMPTS,
             auto_restart_window_ms: DEFAULT_AUTO_RESTART_WINDOW_MS,
             max_log_chunks: DEFAULT_MAX_LOG_CHUNKS,
+            pane_grid_columns: DEFAULT_PANE_GRID_COLUMNS,
         }
     }
 }
@@ -52,6 +56,10 @@ fn default_auto_restart_window_ms() -> u64 {
 
 fn default_max_log_chunks() -> u32 {
     DEFAULT_MAX_LOG_CHUNKS
+}
+
+fn default_pane_grid_columns() -> u32 {
+    DEFAULT_PANE_GRID_COLUMNS
 }
 
 #[tauri::command]
@@ -79,6 +87,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     settings.auto_restart_max_attempts = settings.auto_restart_max_attempts.min(20);
     settings.auto_restart_window_ms = settings.auto_restart_window_ms.clamp(1_000, 3_600_000);
     settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
+    settings.pane_grid_columns = settings.pane_grid_columns.clamp(1, 10);
     migrate_global_project_privacy(&mut settings);
 
     Ok(settings)
@@ -98,6 +107,7 @@ pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSet
     settings.auto_restart_max_attempts = settings.auto_restart_max_attempts.min(20);
     settings.auto_restart_window_ms = settings.auto_restart_window_ms.clamp(1_000, 3_600_000);
     settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
+    settings.pane_grid_columns = settings.pane_grid_columns.clamp(1, 10);
 
     let path = settings_path(&app)?;
     let parent = path.parent().ok_or_else(|| {

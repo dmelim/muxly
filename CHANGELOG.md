@@ -24,6 +24,20 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- **Wrapping pane grid** — open terminal panes now lay out as a grid that
+  wraps to a new row after a configurable column cap (Settings → Layout →
+  *Pane grid columns*, default 5). Replaces the previous purely horizontal
+  layout.
+
+- **In-pane search** — `Ctrl/Cmd+F` opens a small find bar in the focused
+  terminal pane (also reachable via a new search icon in the pane header).
+  Powered by `@xterm/addon-search`. Enter / Shift+Enter step through matches;
+  Esc closes. Match decorations and the overview-ruler ticks use the brand
+  cyan.
+- **Live-updating global search** — the global log search (`Ctrl+Shift+F`)
+  now re-scans the live log buffers every 250 ms while open, so matches
+  appear as services keep streaming output instead of being frozen at the
+  moment the query was typed.
 - Services can now be spawned attached to a **pseudo-terminal** via a new
   per-service `usePty` flag (toggled in the service form as "Run in
   pseudo-terminal"). Required for dev servers whose hot-reload loop depends
@@ -64,6 +78,11 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- Release builds on Windows no longer open an extra black console window
+  alongside the app. The Tauri scaffold's
+  `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`
+  attribute was missing from `src-tauri/src/main.rs`, so the packaged binary
+  was being linked against the console subsystem.
 - Service icon status dots are no longer clipped by the icon badge container.
 - Long project group names now show their full value in a tooltip when the
   sidebar header truncates them.
@@ -78,6 +97,11 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Changed
 
+- Clicking a service in the sidebar now **replaces the focused pane only**
+  instead of wiping the whole layout. With panes 1,2,3 open and pane 2
+  focused, clicking 4 yields 1,4,3. **Shift+click** adds the service as an
+  additional pane (replacing the previous `Ctrl/Cmd+click` split shortcut).
+  `Ctrl/Cmd+1..9` still jumps to a single pane.
 - Sidebar group headers now tint the start/stop-all icons cyan and rose so the
   bulk actions are easier to scan against the neutral header row.
 - The run-history SQLite table is pruned on startup to keep the most recent

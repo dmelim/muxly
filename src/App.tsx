@@ -85,7 +85,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   // arrive via `load_settings` on mount; these only apply until then.
   autoRestartMaxAttempts: 3,
   autoRestartWindowMs: 60_000,
-  maxLogChunks: 5_000
+  maxLogChunks: 5_000,
+  paneGridColumns: 5
 };
 
 export function App() {
@@ -116,6 +117,10 @@ export function App() {
   const [portConflicts, setPortConflicts] = useState<Record<string, boolean>>({});
   const [history, setHistory] = useState<Record<string, ServiceHistory>>({});
   const [searchOpen, setSearchOpen] = useState(false);
+  // Service id whose in-pane find bar is currently shown — null when closed.
+  // Only one pane shows the bar at a time; switching focus or closing the
+  // pane clears it.
+  const [searchPaneId, setSearchPaneId] = useState<string | null>(null);
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [leftWidth, setLeftWidth] = useState(300);
@@ -211,6 +216,7 @@ export function App() {
   const compactSidebar = leftWidth < 264;
 
   // Open a service as the sole pane (replaces the current layout).
+  // Used for explicit "jump" actions like Ctrl+1..9.
   const openSingle = useCallback((serviceId: string) => {
     setPaneIds([serviceId]);
     setSelectedId(serviceId);
@@ -223,6 +229,28 @@ export function App() {
     );
     setSelectedId(serviceId);
   }, []);
+
+  // Plain sidebar click: replace the *focused* pane with the clicked
+  // service, preserving the layout's other panes. If the clicked service is
+  // already open, just focus it. If nothing is open yet, open it as the
+  // sole pane.
+  const openService = useCallback(
+    (serviceId: string) => {
+      setPaneIds((current) => {
+        if (current.length === 0) return [serviceId];
+        if (current.includes(serviceId)) return current;
+        const focusIndex = selectedId
+          ? current.indexOf(selectedId)
+          : -1;
+        const replaceAt = focusIndex >= 0 ? focusIndex : 0;
+        const next = current.slice();
+        next[replaceAt] = serviceId;
+        return next;
+      });
+      setSelectedId(serviceId);
+    },
+    [selectedId]
+  );
 
   const closePane = useCallback((serviceId: string) => {
     setPaneIds((current) => current.filter((id) => id !== serviceId));
@@ -795,6 +823,14 @@ export function App() {
           setSearchOpen(false);
           return;
         }
+        if (searchPaneId) {
+          // The PaneSearchBar's own Esc handler runs first when its input is
+          // focused — this is the fallback for when focus is elsewhere
+          // (e.g. user clicked back into the terminal but still wants Esc
+          // to dismiss the bar).
+          setSearchPaneId(null);
+          return;
+        }
         if (editing) {
           setEditing(null);
           return;
@@ -820,6 +856,20 @@ export function App() {
       }
 
       if (event.altKey || event.shiftKey) {
+        return;
+      }
+
+      // Ctrl/Cmd + F → in-pane search bar for the focused pane. Handled here
+      // (before the form-field bail-out below) so it works while the xterm
+      // helper textarea has focus — that's the common case after clicking
+      // into a terminal pane.
+      if (event.key.toLowerCase() === "f") {
+        const targetId = selected && paneIds.includes(selected.id) ? selected.id : null;
+        if (targetId) {
+          event.preventDefault();
+          event.stopPropagation();
+          setSearchPaneId(targetId);
+        }
         return;
       }
 
@@ -922,7 +972,8 @@ export function App() {
     openSingle,
     paneIds,
     closePane,
-    settingsOpen
+    settingsOpen,
+    searchPaneId
   ]);
 
   return (
@@ -1174,16 +1225,16 @@ export function App() {
                         role="button"
                         tabIndex={0}
                         onClick={(event) => {
-                          if (event.ctrlKey || event.metaKey) {
+                          if (event.shiftKey) {
                             openInSplit(service.id);
                           } else {
-                            openSingle(service.id);
+                            openService(service.id);
                           }
                         }}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            openSingle(service.id);
+                            openService(service.id);
                           }
                         }}
                         className={`group/card relative w-full cursor-pointer rounded-md px-3 py-3 text-left transition ${
@@ -1341,13 +1392,20 @@ export function App() {
             focusedId={selected?.id ?? null}
             statuses={statuses}
             pids={pids}
+            gridColumns={settings.paneGridColumns}
             terminalsRef={terminalsRef}
             logsRef={logsRef}
+            searchPaneId={searchPaneId}
             onFocus={setSelectedId}
-            onClose={closePane}
+            onClose={(id) => {
+              if (searchPaneId === id) setSearchPaneId(null);
+              closePane(id);
+            }}
             onStart={manualStart}
             onStop={stopService}
             onClear={clearLog}
+            onOpenSearch={(id) => setSearchPaneId(id)}
+            onCloseSearch={() => setSearchPaneId(null)}
           />
           <BottomTerminal
             open={terminalOpen}
