@@ -1,7 +1,7 @@
 use crate::{
     error::AppError,
     events::{ProcessOutputEvent, PtyOutputEvent},
-    net::is_port_available,
+    net::{find_port_holder_pid, is_port_available, kill_external_pid},
     process::{spawn_process, ProcessRegistry},
     pty::{self, PtyRegistry},
     services::{
@@ -21,6 +21,23 @@ pub fn app_version() -> &'static str {
 #[tauri::command]
 pub fn check_port(port: u16) -> bool {
     is_port_available(port)
+}
+
+/// Find the PID of whatever foreign process is listening on `port`, if any.
+/// Returns `None` when the port is free or when we couldn't determine the
+/// holder (no `netstat`/`lsof`/`ss` available, parse failure, etc.).
+#[tauri::command]
+pub fn find_port_holder(port: u16) -> Option<u32> {
+    find_port_holder_pid(port)
+}
+
+/// Forcibly kill a process by raw PID. Used by the "stop blocker and
+/// restart" action when a service's configured port is held by another
+/// process. Errors are returned as `AppError::ProcessStop` so they surface
+/// in the UI with the same plumbing as our own stop failures.
+#[tauri::command]
+pub fn kill_pid(pid: u32) -> Result<(), AppError> {
+    kill_external_pid(pid).map_err(AppError::ProcessStop)
 }
 
 #[tauri::command]

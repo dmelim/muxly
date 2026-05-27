@@ -11,8 +11,8 @@ mod services;
 mod settings;
 
 use commands::{
-    app_version, check_port, load_services, pty_close, pty_open, pty_resize, pty_write,
-    resolve_icon_image, save_services, start_service, stop_service,
+    app_version, check_port, find_port_holder, kill_pid, load_services, pty_close, pty_open,
+    pty_resize, pty_write, resolve_icon_image, save_services, start_service, stop_service,
 };
 use history::{get_service_history, HistoryDb};
 use import::scan_importable;
@@ -62,6 +62,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             check_port,
+            find_port_holder,
+            kill_pid,
             load_services,
             load_settings,
             save_settings,
