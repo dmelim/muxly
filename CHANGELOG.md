@@ -22,6 +22,19 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **PTY services now kill their whole process tree on stop (Windows).**
+  Previously, stopping a PTY-backed service killed only the immediate child,
+  so any grandchildren it spawned could leak as orphans. `portable_pty`
+  spawns the child for us (we can't set `CREATE_SUSPENDED` like the pipe
+  path), so the spawner now re-opens the running child by PID and assigns it
+  to a `KILL_ON_JOB_CLOSE` Job Object after the fact; terminating reaps the
+  whole tree. If the Job Object can't be created or assigned, it degrades to
+  the previous single-child kill. A narrow race remains for grandchildren
+  forked in the moment before assignment (acceptable for dev servers, which
+  don't fork that early). Unix PTY children are unchanged.
+
 ### Added
 
 - **Interactive PTY service panes.** Services run with `usePty` are now

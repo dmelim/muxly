@@ -13,7 +13,7 @@
 //! difference for the user is that PTY output is merged into a single stream
 //! (always tagged `Stdout`) — PTYs do not preserve the stdout/stderr split.
 
-use super::platform::PtyKillHandle;
+use super::platform::{pty_terminator, PtyKillHandle};
 use crate::{
     error::AppError,
     events::{
@@ -22,7 +22,7 @@ use crate::{
     },
     history::HistoryDb,
     net::is_port_available,
-    process::{ProcessRegistry, ProcessTerminator, RunningProcess},
+    process::{ProcessRegistry, RunningProcess},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
 use parking_lot::Mutex;
@@ -210,7 +210,10 @@ pub fn spawn_service_pty(
         .map_err(|err| AppError::ProcessStop(format!("take_writer failed: {err}")))?;
 
     let killer: PtyKillHandle = Arc::new(Mutex::new(child.clone_killer()));
-    let terminator = ProcessTerminator::Pty(killer);
+    // On Windows this also captures the child in a Job Object so stopping the
+    // service reaps any grandchildren it spawns; elsewhere it's just the
+    // killer. See `platform::pty_terminator`.
+    let terminator = pty_terminator(killer, pid);
 
     registry.insert(
         service.id.clone(),

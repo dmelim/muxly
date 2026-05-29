@@ -16,7 +16,7 @@ use windows_sys::Win32::{
             SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         },
-        Threading::CREATE_SUSPENDED,
+        Threading::{OpenProcess, CREATE_SUSPENDED, PROCESS_SET_QUOTA, PROCESS_TERMINATE},
     },
 };
 
@@ -42,11 +42,21 @@ pub enum ProcessTerminator {
     Job(Arc<JobObject>),
     #[cfg(not(windows))]
     ProcessGroup(u32),
-    /// Service spawned through `portable_pty`. The PTY child doesn't belong to
-    /// our Job Object / process group, so we kill it directly through its own
-    /// killer handle. Grandchildren forked by a PTY child are not tracked —
-    /// dev servers don't typically fork, so this is acceptable.
-    Pty(PtyKillHandle),
+    /// Service spawned through `portable_pty`. See `PtyTerminator`.
+    Pty(PtyTerminator),
+}
+
+/// Terminator for a PTY-backed service. `portable_pty` spawns the child for us
+/// (we never see a `std::process::Child` and can't set creation flags), so the
+/// `ChildKiller` is always our baseline way to stop the immediate child. On
+/// Windows we *additionally* try to capture the running child in a Job Object
+/// after the fact — terminating that reaps the whole tree. Without it, only the
+/// immediate child dies and any grandchildren it spawned leak.
+#[derive(Debug, Clone)]
+pub struct PtyTerminator {
+    killer: PtyKillHandle,
+    #[cfg(windows)]
+    job: Option<Arc<JobObject>>,
 }
 
 impl ProcessTerminator {
@@ -56,20 +66,85 @@ impl ProcessTerminator {
             Self::Job(job) => job.terminate(),
             #[cfg(not(windows))]
             Self::ProcessGroup(pid) => terminate_process_tree(*pid),
-            Self::Pty(handle) => {
-                if let Err(err) = handle.lock().kill() {
-                    #[cfg(windows)]
-                    if err.raw_os_error() == Some(0) {
-                        return Ok(());
-                    }
-
-                    return Err(AppError::ProcessStop(format!("pty kill failed: {err}")));
-                }
-
-                Ok(())
-            }
+            Self::Pty(pty) => pty.terminate(),
         }
     }
+}
+
+impl PtyTerminator {
+    #[cfg(windows)]
+    fn terminate(&self) -> Result<(), AppError> {
+        // Prefer the Job Object: `TerminateJobObject` reaps the immediate child
+        // *and* every grandchild that joined the job after assignment. We still
+        // poke the killer afterwards so `portable_pty`'s `wait()` returns
+        // promptly; it's harmless if the job already killed the child.
+        if let Some(job) = &self.job {
+            let result = job.terminate();
+            let _ = self.killer.lock().kill();
+            return result;
+        }
+        self.kill_child_only()
+    }
+
+    #[cfg(not(windows))]
+    fn terminate(&self) -> Result<(), AppError> {
+        self.kill_child_only()
+    }
+
+    fn kill_child_only(&self) -> Result<(), AppError> {
+        if let Err(err) = self.killer.lock().kill() {
+            #[cfg(windows)]
+            if err.raw_os_error() == Some(0) {
+                return Ok(());
+            }
+
+            return Err(AppError::ProcessStop(format!("pty kill failed: {err}")));
+        }
+
+        Ok(())
+    }
+}
+
+/// Build the terminator for a PTY-backed service.
+///
+/// On Windows this creates a Job Object and assigns the already-running child
+/// (by PID) to it, so stopping the service kills any grandchildren the child
+/// spawns. There is a tiny race: grandchildren forked in the window between
+/// `portable_pty`'s spawn and this assignment can still escape — acceptable
+/// because dev servers don't fork workers that early in startup. If the job
+/// can't be created or the child can't be assigned (e.g. an incompatible
+/// pre-existing job), we degrade gracefully to killing just the immediate
+/// child. On other platforms the killer is all we use.
+#[cfg(windows)]
+pub fn pty_terminator(killer: PtyKillHandle, pid: u32) -> ProcessTerminator {
+    ProcessTerminator::Pty(PtyTerminator {
+        killer,
+        job: pty_job_for_pid(pid),
+    })
+}
+
+#[cfg(not(windows))]
+pub fn pty_terminator(killer: PtyKillHandle, _pid: u32) -> ProcessTerminator {
+    ProcessTerminator::Pty(PtyTerminator { killer })
+}
+
+#[cfg(windows)]
+fn pty_job_for_pid(pid: u32) -> Option<Arc<JobObject>> {
+    if pid == 0 {
+        return None;
+    }
+    let job = match JobObject::create() {
+        Ok(job) => job,
+        Err(err) => {
+            eprintln!("[muxly] PTY grandchild tracking off (job create failed): {err}");
+            return None;
+        }
+    };
+    if let Err(err) = job.assign_pid(pid) {
+        eprintln!("[muxly] PTY grandchild tracking off (assign pid {pid} failed): {err}");
+        return None;
+    }
+    Some(Arc::new(job))
 }
 
 #[cfg(windows)]
@@ -124,6 +199,34 @@ impl JobObject {
             return Err(AppError::ProcessStop(format!(
                 "Failed to assign child process {} to Windows Job Object",
                 child.id()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Assign an already-running process (by PID) to this job. Used for PTY
+    /// children: `portable_pty` spawns them for us, so we never hold a
+    /// `std::process::Child` and have to re-open the process by id to get a
+    /// HANDLE. We request only the rights `AssignProcessToJobObject` needs
+    /// (`PROCESS_SET_QUOTA | PROCESS_TERMINATE`) and close the handle straight
+    /// away — job membership persists regardless of whether we keep it open.
+    fn assign_pid(&self, pid: u32) -> Result<(), AppError> {
+        let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid) };
+        if process.is_null() {
+            return Err(AppError::ProcessStop(format!(
+                "OpenProcess failed for pty pid {pid}"
+            )));
+        }
+
+        let ok = unsafe { AssignProcessToJobObject(self.handle, process) };
+        unsafe {
+            CloseHandle(process);
+        }
+
+        if ok == 0 {
+            return Err(AppError::ProcessStop(format!(
+                "Failed to assign pty pid {pid} to Windows Job Object"
             )));
         }
 
