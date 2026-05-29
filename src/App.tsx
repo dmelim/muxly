@@ -486,8 +486,19 @@ export function App() {
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
+    let disposed = false;
 
-    listen<ProcessStartedEvent>(PROCESS_STARTED, (event) => {
+    function trackUnlisten(promise: Promise<() => void>) {
+      void promise.then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        unlisteners.push(unlisten);
+      });
+    }
+
+    trackUnlisten(listen<ProcessStartedEvent>(PROCESS_STARTED, (event) => {
       const { serviceId, pid } = event.payload;
       setStatuses((current) => ({ ...current, [serviceId]: "running" }));
       setPids((current) => ({ ...current, [serviceId]: pid }));
@@ -511,9 +522,9 @@ export function App() {
       });
       appendLog(serviceId, `\r\n\x1b[38;2;34;211;238m[manager] started pid ${pid}\x1b[0m\r\n`);
       refreshHistory(serviceId);
-    }).then((unlisten) => unlisteners.push(unlisten));
+    }));
 
-    listen<ProcessExitedEvent>(PROCESS_EXITED, (event) => {
+    trackUnlisten(listen<ProcessExitedEvent>(PROCESS_EXITED, (event) => {
       const { serviceId, code, requested } = event.payload;
       delete outputChannelsRef.current[serviceId];
       const nextStatus: ServiceStatus = requested
@@ -575,19 +586,19 @@ export function App() {
             })
             .catch(() => {
               /* No netstat/lsof available — silent fallback. */
-            });
+          });
         }, 400);
       }
-    }).then((unlisten) => unlisteners.push(unlisten));
+    }));
 
-    listen<ProcessFailedEvent>(PROCESS_FAILED, (event) => {
+    trackUnlisten(listen<ProcessFailedEvent>(PROCESS_FAILED, (event) => {
       const { serviceId, message } = event.payload;
       delete outputChannelsRef.current[serviceId];
       setStatuses((current) => ({ ...current, [serviceId]: "failed" }));
       appendLog(serviceId, `\r\n\x1b[31m[manager] ${message}\x1b[0m\r\n`);
       scheduleRescan(serviceId);
       refreshHistory(serviceId);
-    }).then((unlisten) => unlisteners.push(unlisten));
+    }));
 
     function scheduleRescan(serviceId: string) {
       const service = servicesRef.current.find((s) => s.id === serviceId);
@@ -634,6 +645,7 @@ export function App() {
     }
 
     return () => {
+      disposed = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, []);

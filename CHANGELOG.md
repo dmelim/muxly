@@ -117,6 +117,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- Stopping PTY-backed services is less noisy on Windows: duplicate lifecycle
+  listeners are cleaned up reliably in development, and the contradictory
+  `pty kill failed: The operation completed successfully. (os error 0)`
+  result is treated as a successful best-effort stop.
 - The global search modal (`Ctrl+Shift+F`) no longer shows an empty results
   panel — and the divider beneath the input — while the query field is
   empty. The results panel only renders once the query reaches the

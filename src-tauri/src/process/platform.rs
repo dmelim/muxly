@@ -56,10 +56,18 @@ impl ProcessTerminator {
             Self::Job(job) => job.terminate(),
             #[cfg(not(windows))]
             Self::ProcessGroup(pid) => terminate_process_tree(*pid),
-            Self::Pty(handle) => handle
-                .lock()
-                .kill()
-                .map_err(|err| AppError::ProcessStop(format!("pty kill failed: {err}"))),
+            Self::Pty(handle) => {
+                if let Err(err) = handle.lock().kill() {
+                    #[cfg(windows)]
+                    if err.raw_os_error() == Some(0) {
+                        return Ok(());
+                    }
+
+                    return Err(AppError::ProcessStop(format!("pty kill failed: {err}")));
+                }
+
+                Ok(())
+            }
         }
     }
 }
