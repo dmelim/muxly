@@ -324,7 +324,12 @@ function PaneView({
       return;
     }
 
-    const terminal = new Terminal(TERMINAL_OPTIONS);
+    // PTY services emit a real CRLF, so `convertEol` (which the pipe path needs
+    // to turn bare `\n` into `\r\n`) would add a second `\r` and stair-step the
+    // output. Disable it for PTY panes; xterm renders their ANSI colours,
+    // spinners, and clear-screen sequences natively.
+    const isPty = service.usePty;
+    const terminal = new Terminal({ ...TERMINAL_OPTIONS, convertEol: !isPty });
     const fitAddon = new FitAddon();
     const search = new SearchAddon();
     terminal.loadAddon(fitAddon);
@@ -346,6 +351,18 @@ function PaneView({
     let disposed = false;
     let setupRaf = 0;
     let fitRaf = 0;
+    // Pipe keystrokes to the service's PTY (read-only pipe services have no
+    // writer, so we only wire this up for PTY panes). xterm hands us a string
+    // already encoded with the right control sequences; the PTY echoes input
+    // back through the normal output stream, so we don't echo locally.
+    let dataDisposable: { dispose: () => void } | null = null;
+    if (isPty) {
+      dataDisposable = terminal.onData((data) => {
+        void invoke("service_pty_write", { serviceId: service.id, data }).catch(() => {
+          /* not running / session gone — nothing useful to surface */
+        });
+      });
+    }
 
     const safeFit = () => {
       if (disposed) {
@@ -358,6 +375,22 @@ function PaneView({
       }
     };
 
+    // Tell the PTY its new dimensions so tools that probe COLUMNS/LINES and
+    // redraw against the window stay aligned with the pane. No-op for pipe
+    // services. Throttled to one call per frame by the rAF caller below.
+    const pushSize = () => {
+      if (disposed || !isPty) {
+        return;
+      }
+      const { cols, rows } = terminal;
+      if (cols < 1 || rows < 1) {
+        return;
+      }
+      void invoke("service_pty_resize", { serviceId: service.id, cols, rows }).catch(() => {
+        /* not running — the next resize after start will sync it */
+      });
+    };
+
     // Defer open/fit/write to the next frame. A pane's mount effect runs
     // before the parent grid has applied final cell widths — fitting and
     // writing here would size the terminal wrong and the replayed log would
@@ -368,6 +401,9 @@ function PaneView({
       }
       terminal.open(host);
       safeFit();
+      // Sync the freshly-measured size to the PTY (the backend spawns at a
+      // default 120x30 until we know the pane's real dimensions).
+      pushSize();
 
       terminal.writeln(`\x1b[1;38;2;34;211;238m${service.name}\x1b[0m`);
       terminal.writeln(`cwd: ${service.cwd}`);
@@ -385,7 +421,10 @@ function PaneView({
       // resize bursts (e.g. while dragging a pane divider).
       resizeObserver = new ResizeObserver(() => {
         cancelAnimationFrame(fitRaf);
-        fitRaf = requestAnimationFrame(safeFit);
+        fitRaf = requestAnimationFrame(() => {
+          safeFit();
+          pushSize();
+        });
       });
       resizeObserver.observe(wrap);
     });
@@ -395,6 +434,7 @@ function PaneView({
       cancelAnimationFrame(setupRaf);
       cancelAnimationFrame(fitRaf);
       resizeObserver?.disconnect();
+      dataDisposable?.dispose();
       terminalsRef.current.delete(service.id);
       setSearchAddon(null);
       terminal.dispose();

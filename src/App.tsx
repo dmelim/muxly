@@ -9,6 +9,7 @@ import type {
   ProcessOutputEvent,
   ProcessStartedEvent,
   AppSettings,
+  LoadedServices,
   ServiceConfig,
   ServiceHistory,
   ServiceIcon,
@@ -436,7 +437,8 @@ export function App() {
 
   const reloadServices = useCallback(async () => {
     try {
-      const loaded = await invoke<ServiceConfig[]>("load_services");
+      const { services: loaded, problems } =
+        await invoke<LoadedServices>("load_services");
       setServices(loaded);
       setStatuses((current) => {
         const next: Record<string, ServiceStatus> = {};
@@ -445,9 +447,17 @@ export function App() {
         }
         return next;
       });
-      setManagerMessage(
-        loaded.length > 0 ? `Loaded ${loaded.length} services` : "No services configured yet"
-      );
+      if (problems.length > 0) {
+        // Some entries were skipped (malformed/invalid/duplicate). Keep the
+        // loaded ones working and surface what was dropped — the full list is
+        // available on hover since the status line is clamped to two lines.
+        const summary = problems.length === 1 ? "1 entry skipped" : `${problems.length} entries skipped`;
+        setManagerMessage(`Loaded ${loaded.length} services — ${summary}: ${problems.join("; ")}`);
+      } else {
+        setManagerMessage(
+          loaded.length > 0 ? `Loaded ${loaded.length} services` : "No services configured yet"
+        );
+      }
       return loaded;
     } catch (error) {
       setManagerMessage(errorMessage(error));
@@ -654,9 +664,16 @@ export function App() {
     // Apply the [HH:MM:SS] annotation *before* the chunk lands in the
     // in-memory buffer so the replay on pane mount renders with the same
     // marks the live terminal saw — the buffer is the source of truth.
-    const annotated = settingsRef.current.showTimestamps
-      ? annotateChunkWithTimestamps(serviceId, chunk, lineStateRef.current)
-      : chunk;
+    //
+    // PTY services are exempt: their output carries cursor-addressing and
+    // clear-screen escapes (spinners, progress bars, interactive prompts), and
+    // injecting timestamps mid-stream would land between escape sequences and
+    // corrupt the rendering. We take their output verbatim.
+    const isPty = servicesRef.current.find((s) => s.id === serviceId)?.usePty ?? false;
+    const annotated =
+      settingsRef.current.showTimestamps && !isPty
+        ? annotateChunkWithTimestamps(serviceId, chunk, lineStateRef.current)
+        : chunk;
 
     const chunks = logsRef.current[serviceId] ?? [];
     chunks.push(annotated);
@@ -1261,7 +1278,9 @@ export function App() {
       >
         <div className="border-b border-white/10 px-5 py-4">
           <h1 className="text-xl font-semibold tracking-normal">Muxly</h1>
-          <p className="mt-2 line-clamp-2 text-xs text-zinc-500">{managerMessage}</p>
+          <p className="mt-2 line-clamp-2 text-xs text-zinc-500" title={managerMessage}>
+            {managerMessage}
+          </p>
           <div className="mt-3 flex gap-2">
             {compactSidebar ? (
               <Tooltip label={`New service (${modKey}+N)`}>

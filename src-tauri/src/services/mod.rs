@@ -43,46 +43,72 @@ pub enum ServiceIcon {
     Image { path: String },
 }
 
+/// Result of loading the service config: the entries that loaded cleanly, plus
+/// human-readable `problems` for any that were skipped. Loading is resilient —
+/// a single malformed or invalid entry is dropped and reported rather than
+/// failing the whole list, so one typo can never empty the sidebar.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedServices {
+    pub services: Vec<ServiceConfig>,
+    pub problems: Vec<String>,
+}
+
+/// Validate a single service's fields (everything except cross-entry duplicate
+/// id detection, which the caller handles with a shared id set). Returns one
+/// problem string per issue found, empty when the service is valid.
+pub fn validate_service_fields(index: usize, service: &ServiceConfig) -> Vec<String> {
+    let mut problems = Vec::new();
+    let label = service_label(index, service);
+
+    if service.id.trim().is_empty() {
+        problems.push(format!("{label}: id must not be empty"));
+    }
+
+    if service.name.trim().is_empty() {
+        problems.push(format!("{label}: name must not be empty"));
+    }
+
+    if service.program.trim().is_empty() {
+        problems.push(format!("{label}: program must not be empty"));
+    }
+
+    if let Some(icon) = &service.icon {
+        match icon {
+            ServiceIcon::Emoji { value }
+            | ServiceIcon::Builtin { value }
+            | ServiceIcon::Image { path: value } => {
+                if value.trim().is_empty() {
+                    problems.push(format!("{label}: icon value must not be empty"));
+                }
+            }
+        }
+    }
+
+    if service.cwd.trim().is_empty() {
+        problems.push(format!("{label}: cwd must not be empty"));
+    }
+
+    if service.port == Some(0) {
+        problems.push(format!("{label}: port must not be 0"));
+    }
+
+    problems
+}
+
 pub fn validate_services(services: &[ServiceConfig]) -> Result<(), Vec<String>> {
     let mut problems = Vec::new();
     let mut ids = HashSet::new();
 
     for (index, service) in services.iter().enumerate() {
-        let label = service_label(index, service);
+        problems.extend(validate_service_fields(index, service));
+
         let id = service.id.trim();
-
-        if id.is_empty() {
-            problems.push(format!("{label}: id must not be empty"));
-        } else if !ids.insert(id.to_string()) {
-            problems.push(format!("{label}: duplicate id '{id}'"));
-        }
-
-        if service.name.trim().is_empty() {
-            problems.push(format!("{label}: name must not be empty"));
-        }
-
-        if service.program.trim().is_empty() {
-            problems.push(format!("{label}: program must not be empty"));
-        }
-
-        if let Some(icon) = &service.icon {
-            match icon {
-                ServiceIcon::Emoji { value }
-                | ServiceIcon::Builtin { value }
-                | ServiceIcon::Image { path: value } => {
-                    if value.trim().is_empty() {
-                        problems.push(format!("{label}: icon value must not be empty"));
-                    }
-                }
-            }
-        }
-
-        if service.cwd.trim().is_empty() {
-            problems.push(format!("{label}: cwd must not be empty"));
-        }
-
-        if service.port == Some(0) {
-            problems.push(format!("{label}: port must not be 0"));
+        if !id.is_empty() && !ids.insert(id.to_string()) {
+            problems.push(format!(
+                "{}: duplicate id '{id}'",
+                service_label(index, service)
+            ));
         }
     }
 

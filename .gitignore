@@ -8,6 +8,9 @@ dist/
 src-tauri/target/
 target/
 
+# Local scratch / throwaway test fixtures
+scratch/
+
 # Local app/runtime data
 services.json
 settings.json

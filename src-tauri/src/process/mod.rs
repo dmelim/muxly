@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 pub use platform::{configure_process_group, resolve_program, resume_child, ProcessTerminator};
 pub use spawn::spawn_process;
-pub use spawn_pty::spawn_service_pty;
+pub use spawn_pty::{
+    resize_service_pty, spawn_service_pty, write_service_pty, ServicePtyRegistry,
+};
 
 #[derive(Debug, Clone)]
 pub struct RunningProcess {

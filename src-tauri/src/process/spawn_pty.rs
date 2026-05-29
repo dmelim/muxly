@@ -26,20 +26,107 @@ use crate::{
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
 use parking_lot::Mutex;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::{
-    io::Read,
+    collections::HashMap,
+    io::{Read, Write},
     path::PathBuf,
     sync::Arc,
     thread,
 };
 use tauri::{ipc::Channel, AppHandle, Emitter, Manager};
 
-/// Initial PTY size. The frontend's TerminalPanes view is plain-text, not a
-/// real terminal emulator, so the dimensions are mostly hints for tools that
-/// probe `COLUMNS` / `LINES`. 80x24 is the universal default.
+/// Initial PTY size, used until the pane reports its measured dimensions via
+/// `service_pty_resize` on mount. A generous default keeps early startup
+/// output (before the first resize lands) from wrapping awkwardly.
 const DEFAULT_PTY_COLS: u16 = 120;
 const DEFAULT_PTY_ROWS: u16 = 30;
+
+/// A live PTY-backed service's master side. The `writer` feeds the child's
+/// stdin so the UI can answer interactive prompts (Vite's `r`/`u`/`q`, etc.),
+/// and `master` drives terminal resize. The child's killer lives separately in
+/// `ProcessRegistry` via `ProcessTerminator::Pty` — this registry only owns the
+/// IO half of the session.
+struct ServicePtySession {
+    writer: Mutex<Box<dyn Write + Send>>,
+    master: Mutex<Box<dyn MasterPty + Send>>,
+}
+
+/// App-wide registry of live PTY-backed service sessions, keyed by service id.
+///
+/// Distinct from `pty::PtyRegistry` (interactive bottom-drawer shells): service
+/// PTYs are keyed by the stable service id rather than a per-shell opaque id,
+/// and their lifecycle owner is `ProcessRegistry`. An entry lives for the whole
+/// run — the waiter thread in `spawn_service_pty` removes it once the child
+/// exits, which drops the master and releases the pseudo-terminal.
+#[derive(Default)]
+pub struct ServicePtyRegistry {
+    sessions: Mutex<HashMap<String, Arc<ServicePtySession>>>,
+}
+
+impl ServicePtyRegistry {
+    fn insert(&self, service_id: String, session: ServicePtySession) {
+        self.sessions.lock().insert(service_id, Arc::new(session));
+    }
+
+    fn get(&self, service_id: &str) -> Option<Arc<ServicePtySession>> {
+        self.sessions.lock().get(service_id).cloned()
+    }
+
+    fn remove(&self, service_id: &str) {
+        self.sessions.lock().remove(service_id);
+    }
+}
+
+/// Forward keystrokes from the UI to a PTY service's stdin. A service that
+/// isn't running has no session — we treat that as a no-op rather than an
+/// error so a stray keystroke against a stopped pane doesn't surface in the UI.
+pub fn write_service_pty(
+    registry: &ServicePtyRegistry,
+    service_id: &str,
+    data: String,
+) -> Result<(), AppError> {
+    let Some(session) = registry.get(service_id) else {
+        return Ok(());
+    };
+    let mut writer = session.writer.lock();
+    writer
+        .write_all(data.as_bytes())
+        .map_err(|source| AppError::Io {
+            action: "write to service pty",
+            source,
+        })?;
+    writer.flush().map_err(|source| AppError::Io {
+        action: "flush service pty",
+        source,
+    })?;
+    Ok(())
+}
+
+/// Resize a PTY service's terminal so tools that probe `COLUMNS`/`LINES` and
+/// redraw against the window (TUIs, progress bars) match the pane. No-op when
+/// the service isn't running.
+pub fn resize_service_pty(
+    registry: &ServicePtyRegistry,
+    service_id: &str,
+    rows: u16,
+    cols: u16,
+) -> Result<(), AppError> {
+    let Some(session) = registry.get(service_id) else {
+        return Ok(());
+    };
+    session
+        .master
+        .lock()
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|err| AppError::ProcessStop(format!("service pty resize failed: {err}")))?;
+    Ok(())
+}
 
 pub fn spawn_service_pty(
     app: AppHandle,
@@ -114,12 +201,13 @@ pub fn spawn_service_pty(
         .master
         .try_clone_reader()
         .map_err(|err| AppError::ProcessStop(format!("clone_reader failed: {err}")))?;
-
-    // The PTY master must stay alive for the duration of the session — drop
-    // it and the slave gets EOF, killing the child. We don't need to interact
-    // with it after spawn (no writes, no resize from the service path), so
-    // stash it on a thread that just sleeps until child exit.
-    let master = pair.master;
+    // Take the writer so the UI can send keystrokes to the child. Both
+    // `try_clone_reader` and `take_writer` borrow `&master`, so we do them
+    // before moving the master into the session registry below.
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|err| AppError::ProcessStop(format!("take_writer failed: {err}")))?;
 
     let killer: PtyKillHandle = Arc::new(Mutex::new(child.clone_killer()));
     let terminator = ProcessTerminator::Pty(killer);
@@ -129,6 +217,19 @@ pub fn spawn_service_pty(
         RunningProcess {
             terminator,
             stop_requested: false,
+        },
+    );
+
+    // Stash the writer + master so `service_pty_write` / `service_pty_resize`
+    // can reach this session by service id. The master must stay alive for the
+    // whole run — dropping it EOFs the slave and kills the child — so the
+    // waiter thread below removes this entry (dropping the master) only after
+    // the child has exited.
+    app.state::<ServicePtyRegistry>().insert(
+        service.id.clone(),
+        ServicePtySession {
+            writer: Mutex::new(writer),
+            master: Mutex::new(pair.master),
         },
     );
 
@@ -155,21 +256,26 @@ pub fn spawn_service_pty(
         });
     }
 
-    // Waiter: blocks on child.wait(), then cleans up and emits the lifecycle
-    // event. Owns the master so it survives until the child exits.
+    // Waiter: blocks on child.wait(), then drops the session (releasing the
+    // master) and emits the lifecycle event.
     let app_for_wait = app.clone();
     let service_id = service.id;
     thread::spawn(move || {
         let exit = child.wait();
-        // Keep `master` alive until here — dropping earlier would close the
-        // slave's controlling terminal and kill the child prematurely.
-        let _ = master;
 
         let requested = app_for_wait
             .try_state::<ProcessRegistry>()
             .and_then(|state| state.remove(&service_id))
             .map(|process| process.stop_requested)
             .unwrap_or(false);
+
+        // Child has exited: drop the PTY writer/master, releasing the
+        // pseudo-terminal. Done here, after `wait()`, so the master stayed
+        // alive for the whole session — dropping it earlier would EOF the
+        // slave and kill the child prematurely.
+        if let Some(sessions) = app_for_wait.try_state::<ServicePtyRegistry>() {
+            sessions.remove(&service_id);
+        }
 
         match exit {
             Ok(status) => {

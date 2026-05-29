@@ -24,6 +24,18 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- **Interactive PTY service panes.** Services run with `usePty` are now
+  fully interactive in their pane, not just read-only: keystrokes are piped
+  to the child's stdin (new `service_pty_write` command) and the pane keeps
+  the PTY sized to match (new `service_pty_resize`), so you can answer
+  Vite's `r`/`u`/`q` prompts and drive other interactive CLIs in place. PTY
+  output now also renders correctly — `convertEol` is disabled for PTY panes
+  (a real PTY already emits CRLF) and per-line timestamps are skipped for
+  them, so ANSI colours, spinners, and clear-screen sequences are no longer
+  corrupted by injected markers. The live writer/master for each PTY service
+  is held in a new `ServicePtyRegistry`, keyed by service id, and released
+  when the child exits. Pipe-mode services stay read-only — they have no
+  writer to send input to.
 - **Per-line timestamps** in service-pane output. Every new line is
   prefixed with a dim `[HH:MM:SS]` marker so you can correlate events
   during a long run or across multiple panes. Streamed chunks that arrive

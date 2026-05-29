@@ -2,11 +2,13 @@ use crate::{
     error::AppError,
     events::{ProcessOutputEvent, PtyOutputEvent},
     net::{find_port_holder_pid, is_port_available, kill_external_pid},
-    process::{spawn_process, ProcessRegistry},
+    process::{
+        resize_service_pty, spawn_process, write_service_pty, ProcessRegistry, ServicePtyRegistry,
+    },
     pty::{self, PtyRegistry},
     services::{
         config::{load_service_config, resolve_cwd, save_service_config, ServicesConfigDir},
-        ServiceConfig,
+        LoadedServices, ServiceConfig,
     },
 };
 use std::{fs, path::Path};
@@ -44,7 +46,7 @@ pub fn kill_pid(pid: u32) -> Result<(), AppError> {
 pub fn load_services(
     app: AppHandle,
     config_dir: State<'_, ServicesConfigDir>,
-) -> Result<Vec<ServiceConfig>, AppError> {
+) -> Result<LoadedServices, AppError> {
     load_service_config(&app, &config_dir)
 }
 
@@ -153,6 +155,27 @@ pub fn pty_resize(
 #[tauri::command]
 pub fn pty_close(registry: State<'_, PtyRegistry>, pty_id: String) -> Result<(), AppError> {
     pty::close_pty(&registry, &pty_id)
+}
+
+/// Send keystrokes from a PTY-backed service pane to that service's stdin.
+#[tauri::command]
+pub fn service_pty_write(
+    registry: State<'_, ServicePtyRegistry>,
+    service_id: String,
+    data: String,
+) -> Result<(), AppError> {
+    write_service_pty(&registry, &service_id, data)
+}
+
+/// Resize a PTY-backed service's terminal to match its pane.
+#[tauri::command]
+pub fn service_pty_resize(
+    registry: State<'_, ServicePtyRegistry>,
+    service_id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), AppError> {
+    resize_service_pty(&registry, &service_id, rows, cols)
 }
 
 fn resolve_icon_path(

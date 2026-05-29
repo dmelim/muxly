@@ -22,6 +22,15 @@ export type ServiceIcon =
   | { type: "builtin"; value: string }
   | { type: "image"; path: string };
 
+// Result of `load_services`: the entries that loaded cleanly, plus a
+// human-readable note for every entry that was skipped (malformed JSON,
+// failed validation, or a duplicate id). The loader is resilient — a single
+// bad entry no longer empties the list.
+export type LoadedServices = {
+  services: ServiceConfig[];
+  problems: string[];
+};
+
 export type AppSettings = {
   editorCommand: string;
   hiddenProjectNames: Record<string, boolean>;

@@ -1,11 +1,12 @@
 use crate::{
     error::AppError,
     events::SERVICES_CHANGED,
-    services::{validate_services, ServiceConfig},
+    services::{validate_service_fields, validate_services, LoadedServices, ServiceConfig},
 };
 use notify::{RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     sync::mpsc,
@@ -79,7 +80,7 @@ impl ServicesConfigDir {
 pub fn load_service_config(
     app: &AppHandle,
     config_dir: &ServicesConfigDir,
-) -> Result<Vec<ServiceConfig>, AppError> {
+) -> Result<LoadedServices, AppError> {
     let path = service_config_path(app)?;
     let text = fs::read_to_string(&path).map_err(|source| AppError::IoPath {
         action: "read",
@@ -87,19 +88,58 @@ pub fn load_service_config(
         source,
     })?;
 
-    let services: Vec<ServiceConfig> =
-        serde_json::from_str(&text).map_err(|source| AppError::ConfigParse {
-            path: path.clone(),
-            source,
-        })?;
-
-    validate_services(&services).map_err(|problems| AppError::ConfigInvalid {
+    let loaded = parse_service_list(&text).map_err(|source| AppError::ConfigParse {
         path: path.clone(),
-        problems,
+        source,
     })?;
 
     config_dir.set_from_path(&path);
-    Ok(services)
+    Ok(loaded)
+}
+
+/// Parse the services file resiliently. Only a missing/invalid top-level JSON
+/// array is a hard error (the whole file is unsalvageable); individual entries
+/// that fail to deserialize or validate are skipped and recorded in `problems`.
+/// Kept free of `AppHandle`/IO so it can be unit-tested directly.
+fn parse_service_list(text: &str) -> Result<LoadedServices, serde_json::Error> {
+    let raw: Vec<serde_json::Value> = serde_json::from_str(text)?;
+
+    let mut services = Vec::new();
+    let mut problems = Vec::new();
+    let mut ids = HashSet::new();
+
+    for (index, value) in raw.into_iter().enumerate() {
+        // Prefer the entry's own id for the label so errors are easy to locate;
+        // fall back to a 1-based position when there is no usable id.
+        let label = match value.get("id").and_then(|id| id.as_str()).map(str::trim) {
+            Some(id) if !id.is_empty() => format!("service '{id}'"),
+            _ => format!("service #{}", index + 1),
+        };
+
+        let service: ServiceConfig = match serde_json::from_value(value) {
+            Ok(service) => service,
+            Err(source) => {
+                problems.push(format!("{label}: {source}"));
+                continue;
+            }
+        };
+
+        let field_problems = validate_service_fields(index, &service);
+        if !field_problems.is_empty() {
+            problems.extend(field_problems);
+            continue;
+        }
+
+        let id = service.id.trim().to_string();
+        if !ids.insert(id.clone()) {
+            problems.push(format!("{label}: duplicate id '{id}' (entry skipped)"));
+            continue;
+        }
+
+        services.push(service);
+    }
+
+    Ok(LoadedServices { services, problems })
 }
 
 /// Persist a new services list to the app config directory. Validates first
@@ -227,8 +267,57 @@ pub fn resolve_cwd(cwd: &str, base_dir: Option<&Path>) -> Result<PathBuf, AppErr
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_cwd;
+    use super::{parse_service_list, resolve_cwd};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn parse_skips_malformed_entry_and_keeps_the_rest() {
+        // The exact corruption the PowerShell register-service helper produced:
+        // `args` written as an empty object instead of an array. Previously this
+        // failed the whole file; now only the offending entry is dropped.
+        let text = r#"[
+            {"id":"good","name":"Good","program":"node","cwd":".","args":["run"]},
+            {"id":"node-test","name":"Node Test","program":"node","cwd":".","args":{}}
+        ]"#;
+
+        let loaded = parse_service_list(text).unwrap();
+
+        assert_eq!(loaded.services.len(), 1);
+        assert_eq!(loaded.services[0].id, "good");
+        assert_eq!(loaded.problems.len(), 1);
+        assert!(loaded.problems[0].contains("node-test"));
+    }
+
+    #[test]
+    fn parse_skips_invalid_entry_and_duplicate_ids() {
+        let text = r#"[
+            {"id":"web","name":"Web","program":"npm","cwd":"."},
+            {"id":"","name":"No Id","program":"npm","cwd":"."},
+            {"id":"web","name":"Dup","program":"npm","cwd":"."}
+        ]"#;
+
+        let loaded = parse_service_list(text).unwrap();
+
+        assert_eq!(loaded.services.len(), 1);
+        assert_eq!(loaded.services[0].id, "web");
+        assert!(loaded
+            .problems
+            .iter()
+            .any(|problem| problem.contains("id must not be empty")));
+        assert!(loaded
+            .problems
+            .iter()
+            .any(|problem| problem.contains("duplicate id 'web'")));
+    }
+
+    #[test]
+    fn parse_errors_only_when_top_level_is_not_an_array() {
+        assert!(parse_service_list("{ not an array }").is_err());
+        // A valid-but-empty array is fine and yields no services.
+        let loaded = parse_service_list("[]").unwrap();
+        assert!(loaded.services.is_empty());
+        assert!(loaded.problems.is_empty());
+    }
 
     #[test]
     fn resolve_cwd_absolute_passes_through() {
