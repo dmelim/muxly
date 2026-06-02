@@ -6,7 +6,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import type { ServiceConfig, ServiceStatus } from "./types";
-import { formatCommand } from "./types";
+import { displayServiceName, formatCommand } from "./types";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 
@@ -43,6 +43,8 @@ type TerminalPanesProps = {
   paneServices: ServiceConfig[];
   /** The focused pane's service id — drives the toolbar/inspector. */
   focusedId: string | null;
+  /** When true, sensitive services show a masked name (stream mode). */
+  streamMode: boolean;
   statuses: Record<string, ServiceStatus>;
   /** Live PIDs, keyed by service id — a present pid means the process runs. */
   pids: Record<string, number>;
@@ -84,6 +86,7 @@ type TerminalPanesProps = {
 export function TerminalPanes({
   paneServices,
   focusedId,
+  streamMode,
   statuses,
   pids,
   gridColumns,
@@ -135,6 +138,7 @@ export function TerminalPanes({
           <PaneShell key={service.id} flashing={flashing} flashNonce={flashNonce}>
             <PaneView
               service={service}
+              streamMode={streamMode}
               status={statuses[service.id] ?? "stopped"}
               running={pids[service.id] != null || adoptedPids[service.id] != null}
               focused={service.id === focusedId}
@@ -253,6 +257,8 @@ function PortBlockerBanner({
 
 type PaneViewProps = {
   service: ServiceConfig;
+  /** When true and the service is sensitive, its name is masked in the header. */
+  streamMode: boolean;
   status: ServiceStatus;
   /** True while the process has a live PID — gates the Stop button. */
   running: boolean;
@@ -283,6 +289,7 @@ type PaneViewProps = {
 
 function PaneView({
   service,
+  streamMode,
   status,
   running,
   focused,
@@ -314,6 +321,12 @@ function PaneView({
   // The SearchAddon is held in state (not just a ref) so the PaneSearchBar
   // re-renders once it becomes available after the deferred terminal open.
   const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
+  // The terminal-open effect runs once (empty deps); this ref lets it read the
+  // current stream-mode state when it writes the one-time name banner, so a
+  // pane opened while stream mode is on starts masked. Toggling stream mode
+  // later updates the header (reactive) but not already-written scrollback.
+  const streamModeRef = useRef(streamMode);
+  streamModeRef.current = streamMode;
 
   // One terminal per pane, created once. The pane is keyed by service id in the
   // parent, so this component instance maps 1:1 to a service for its lifetime.
@@ -405,7 +418,9 @@ function PaneView({
       // default 120x30 until we know the pane's real dimensions).
       pushSize();
 
-      terminal.writeln(`\x1b[1;38;2;34;211;238m${service.name}\x1b[0m`);
+      terminal.writeln(
+        `\x1b[1;38;2;34;211;238m${displayServiceName(service, streamModeRef.current)}\x1b[0m`
+      );
       terminal.writeln(`cwd: ${service.cwd}`);
       terminal.writeln(`cmd: ${formatCommand(service)}`);
       terminal.writeln("");
@@ -464,7 +479,7 @@ function PaneView({
               focused ? "text-zinc-100" : "text-zinc-400"
             }`}
           >
-            {service.name}
+            {displayServiceName(service, streamMode)}
           </span>
           {adopted ? (
             <Tooltip label="External process adopted — Muxly did not spawn this PID, so its stdout/stderr are not captured.">

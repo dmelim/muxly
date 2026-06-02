@@ -152,6 +152,15 @@ export function SettingsIcon({ className }: IconProps) {
   );
 }
 
+/** ⌘ — open the command palette. */
+export function CommandIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+    </svg>
+  );
+}
+
 /** X — close. */
 export function CloseIcon({ className }: IconProps) {
   return (

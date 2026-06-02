@@ -16,7 +16,9 @@ import type {
   ServiceStatus
 } from "./types";
 import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } from "./events";
-import { formatCommand } from "./types";
+import { formatCommand, displayServiceName } from "./types";
+import { CommandPalette } from "./CommandPalette";
+import type { Command } from "./CommandPalette";
 import { ServiceForm } from "./ServiceForm";
 import { ImportPanel } from "./ImportPanel";
 import { Button } from "./Button";
@@ -30,6 +32,7 @@ import { describeExitCode, shortExitCode } from "./exitCodes";
 import { BuiltinServiceIcon } from "./serviceIcons";
 import {
   ChevronRightIcon,
+  CommandIcon,
   EyeIcon,
   EyeOffIcon,
   PanelLeftIcon,
@@ -179,6 +182,12 @@ export function App() {
   // top edge; state lives here so it survives toggle/remount of the drawer.
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(288);
+  // Command palette (Ctrl/Cmd+P). A lightweight registry of named actions.
+  const [commandOpen, setCommandOpen] = useState(false);
+  // Stream mode: when on, services flagged `sensitive` have their names masked
+  // across the UI so the window is safe to screen-share. Ephemeral (session
+  // only) — toggled from the command palette, restored when you toggle it off.
+  const [streamMode, setStreamMode] = useState(false);
   // Drag-to-reorder state. `dragId` is the service currently being dragged;
   // `dropIndicator` is where the cyan "drop here" line / highlight is shown.
   // - "before-service": insert source just above this service (joining its group)
@@ -931,6 +940,20 @@ export function App() {
     setEditing(null);
   };
 
+  // Toggle a single service's `sensitive` flag from the Settings curation
+  // list. The flag lives on the service (not AppSettings), so we persist the
+  // whole list like any other service edit and reload.
+  const setServiceSensitive = useCallback(
+    async (serviceId: string, sensitive: boolean) => {
+      const next = services.map((service) =>
+        service.id === serviceId ? { ...service, sensitive } : service
+      );
+      await invoke("save_services", { services: next });
+      await reloadServices();
+    },
+    [services, reloadServices]
+  );
+
   // Reorder a service via drag-and-drop. Mutates the flat services array (the
   // sidebar groups are derived from order + each service's `group` field) and
   // persists by calling save_services + reloading. Moving across groups also
@@ -1094,6 +1117,78 @@ export function App() {
     });
   }, [persistSettings, projectNameAliases, settings]);
 
+  // Display name for a service, masked when stream mode is on and the service
+  // is flagged sensitive. Used everywhere a service name is shown as UI chrome.
+  const maskName = useCallback(
+    (service: ServiceConfig) => displayServiceName(service, streamMode),
+    [streamMode]
+  );
+
+  // Registry backing the command palette. Small and declarative; the headline
+  // action is stream-mode (mask sensitive names for screen-sharing), with a few
+  // common toggles alongside so the palette is useful on its own.
+  const sensitiveCount = useMemo(
+    () => services.filter((service) => service.sensitive).length,
+    [services]
+  );
+  const commands = useMemo<Command[]>(
+    () => [
+      {
+        id: "stream-mode",
+        title: streamMode
+          ? "Stream mode: show sensitive names"
+          : "Stream mode: hide sensitive names",
+        subtitle:
+          sensitiveCount === 0
+            ? "No services marked sensitive yet — set “Sensitive name” when editing a service"
+            : `Masks ${sensitiveCount} sensitive service name${
+                sensitiveCount === 1 ? "" : "s"
+              } so the window is safe to screen-share`,
+        badge: streamMode ? "On" : "Off",
+        keywords: "stream privacy mask hide sensitive screen share present demo record",
+        run: () => setStreamMode((on) => !on)
+      },
+      {
+        id: "new-service",
+        title: "New service",
+        keywords: "add create",
+        run: () => setEditing({ mode: "new" })
+      },
+      {
+        id: "search-logs",
+        title: "Search all logs",
+        keywords: "find grep",
+        run: () => setSearchOpen(true)
+      },
+      {
+        id: "toggle-terminal",
+        title: terminalOpen ? "Hide bottom terminal" : "Show bottom terminal",
+        badge: terminalOpen ? "On" : "Off",
+        keywords: "shell drawer",
+        run: () => setTerminalOpen((open) => !open)
+      },
+      {
+        id: "toggle-settings",
+        title: settingsOpen ? "Close settings" : "Open settings",
+        keywords: "preferences config",
+        run: () => setSettingsOpen((open) => !open)
+      },
+      {
+        id: "toggle-left-sidebar",
+        title: leftSidebarOpen ? "Hide services sidebar" : "Show services sidebar",
+        keywords: "panel left",
+        run: () => setLeftSidebarOpen((open) => !open)
+      },
+      {
+        id: "toggle-right-sidebar",
+        title: rightSidebarOpen ? "Hide details sidebar" : "Show details sidebar",
+        keywords: "panel right inspector details",
+        run: () => setRightSidebarOpen((open) => !open)
+      }
+    ],
+    [streamMode, sensitiveCount, terminalOpen, settingsOpen, leftSidebarOpen, rightSidebarOpen]
+  );
+
   // Global keyboard shortcuts. Registered in the capture phase so they fire
   // before a focused terminal — xterm consumes Ctrl-combos and stops their
   // propagation, so a bubble-phase listener would never see them. For each
@@ -1103,6 +1198,10 @@ export function App() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        if (commandOpen) {
+          setCommandOpen(false);
+          return;
+        }
         if (searchOpen) {
           setSearchOpen(false);
           return;
@@ -1192,6 +1291,13 @@ export function App() {
         setTerminalOpen((open) => !open);
         return;
       }
+      // Ctrl/Cmd + P → command palette.
+      if (event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        event.stopPropagation();
+        setCommandOpen((open) => !open);
+        return;
+      }
 
       // Ctrl/Cmd + 1..9 → open the Nth visible service as the sole pane.
       if (/^[1-9]$/.test(event.key)) {
@@ -1258,7 +1364,8 @@ export function App() {
     paneIds,
     closePane,
     settingsOpen,
-    searchPaneId
+    searchPaneId,
+    commandOpen
   ]);
 
   return (
@@ -1539,7 +1646,7 @@ export function App() {
                               imageSrc={iconImages[service.id]}
                               status={status}
                             />
-                            <span className="truncate text-sm font-medium">{service.name}</span>
+                            <span className="truncate text-sm font-medium">{maskName(service)}</span>
                           </span>
                           {!isOpen ? (
                             <span className="shrink-0 text-xs text-zinc-500">
@@ -1583,7 +1690,7 @@ export function App() {
                               event.stopPropagation();
                               openInSplit(service.id);
                             }}
-                            aria-label={`Open ${service.name} in split view`}
+                            aria-label={`Open ${maskName(service)} in split view`}
                             className="rounded p-1 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 focus-visible:opacity-100 group-hover/card:opacity-100"
                           >
                             <SplitIcon className="size-3.5" />
@@ -1635,6 +1742,17 @@ export function App() {
                 <SearchIcon className="size-4" />
               </Button>
             </Tooltip>
+            <Tooltip label={`Command palette (${modKey}+P)`}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setCommandOpen(true)}
+                aria-label="Open command palette"
+                className={streamMode ? "text-cyan-400" : ""}
+              >
+                <CommandIcon className="size-4" />
+              </Button>
+            </Tooltip>
             <Tooltip label={settingsOpen ? "Close settings" : "Settings"}>
               <Button
                 variant="ghost"
@@ -1677,6 +1795,7 @@ export function App() {
           <TerminalPanes
             paneServices={paneServices}
             focusedId={selected?.id ?? null}
+            streamMode={streamMode}
             statuses={statuses}
             pids={pids}
             gridColumns={settings.paneGridColumns}
@@ -1724,6 +1843,7 @@ export function App() {
             services={services}
             onClose={() => setSettingsOpen(false)}
             onSave={(next) => persistSettings(next)}
+            onSetServiceSensitive={setServiceSensitive}
           />
         ) : null}
       </section>
@@ -1884,9 +2004,13 @@ export function App() {
       <GlobalSearch
         services={services}
         logs={logsRef.current}
+        streamMode={streamMode}
         onJump={jumpToSearchResult}
         onClose={() => setSearchOpen(false)}
       />
+    ) : null}
+    {commandOpen ? (
+      <CommandPalette commands={commands} onClose={() => setCommandOpen(false)} />
     ) : null}
     </>
   );

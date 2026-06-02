@@ -32,11 +32,14 @@ type Props = {
   // Returns the persisted settings (possibly clamped by the backend) so the
   // form can re-sync to authoritative values after save.
   onSave: (next: AppSettings) => Promise<AppSettings>;
+  // Persist a single service's `sensitive` flag (the flag lives on the service
+  // config, not AppSettings). Used by the Stream-mode curation list below.
+  onSetServiceSensitive: (serviceId: string, sensitive: boolean) => Promise<void>;
 };
 
 // Full-screen Settings surface. Shown by App in place of the terminal panes
 // (between the top header and bottom drawer) when settingsOpen is true.
-export function SettingsView({ settings, services, onClose, onSave }: Props) {
+export function SettingsView({ settings, services, onClose, onSave, onSetServiceSensitive }: Props) {
   const [editorCommand, setEditorCommand] = useState(settings.editorCommand);
   const [maxAttempts, setMaxAttempts] = useState(String(settings.autoRestartMaxAttempts));
   const [windowSeconds, setWindowSeconds] = useState(
@@ -148,6 +151,26 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
     try {
       await onSave({ ...settings, hiddenProjectNames: nextHidden });
       setSaveMessage(target ? "All project names hidden" : "All project names shown");
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Number of services currently flagged sensitive — drives the summary line.
+  const sensitiveCount = useMemo(
+    () => services.filter((service) => service.sensitive).length,
+    [services]
+  );
+
+  // Persist a single service's sensitive flag immediately (like the other
+  // toggle controls here — no Save button needed).
+  const handleSensitiveToggle = async (serviceId: string, nextSensitive: boolean) => {
+    setSaveMessage(null);
+    setSaving(true);
+    try {
+      await onSetServiceSensitive(serviceId, nextSensitive);
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -342,6 +365,47 @@ export function SettingsView({ settings, services, onClose, onSave }: Props) {
                 </span>
               </span>
             </label>
+          </Section>
+
+          <Section
+            title="Sensitive services"
+            description="Mark services whose names should be masked while Stream mode is on (toggle Stream mode from the command palette — Ctrl/Cmd+P). Curate the whole set here, or per-service via the “Sensitive name” checkbox in the service form."
+          >
+            {services.length === 0 ? (
+              <p className="text-xs text-zinc-500">No services yet.</p>
+            ) : (
+              <>
+                <p className="text-[11px] text-zinc-500">
+                  {sensitiveCount} / {services.length} marked sensitive.
+                </p>
+                <ul className="divide-y divide-white/5 overflow-hidden rounded-md border border-white/10">
+                  {services.map((service) => (
+                    <li key={service.id}>
+                      <label className="flex cursor-pointer items-center gap-3 px-3 py-2 transition hover:bg-white/5">
+                        <input
+                          type="checkbox"
+                          checked={service.sensitive ?? false}
+                          disabled={saving}
+                          onChange={(event) =>
+                            void handleSensitiveToggle(service.id, event.target.checked)
+                          }
+                          className="size-4 cursor-pointer accent-cyan-500"
+                          aria-label={`Mark ${service.name} sensitive`}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-zinc-200">
+                            {service.name}
+                          </span>
+                          <span className="block truncate text-[11px] text-zinc-500">
+                            {service.group?.trim() || "Ungrouped"}
+                          </span>
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </Section>
 
         </div>
