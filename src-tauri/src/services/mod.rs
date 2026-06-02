@@ -33,6 +33,19 @@ pub struct ServiceConfig {
     /// first HMR cycle. Defaults to false so existing configs are unaffected.
     #[serde(default)]
     pub use_pty: bool,
+    /// Optional shell prelude run *before* the main command, in the SAME shell,
+    /// so its environment changes carry into the command (`nvm use 20`,
+    /// `source .venv/bin/activate`, …). When empty/absent the service is
+    /// spawned directly as before. When set, the spawn is wrapped in a shell:
+    /// `<pre_run> && <program> <args…>`. See `process::shell`.
+    #[serde(default)]
+    pub pre_run: Option<String>,
+    /// When true, this service's name is masked in the UI while "stream mode"
+    /// is active (a Command-palette toggle), so the window is safe to
+    /// screen-share. Defaults to false. Purely a frontend concern — the backend
+    /// just persists the flag.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -146,6 +159,8 @@ mod tests {
             group: None,
             auto_restart: false,
             use_pty: false,
+            pre_run: None,
+            sensitive: false,
         }
     }
 

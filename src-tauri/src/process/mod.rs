@@ -1,4 +1,5 @@
 mod platform;
+mod shell;
 mod spawn;
 mod spawn_pty;
 

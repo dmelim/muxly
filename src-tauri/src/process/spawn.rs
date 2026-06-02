@@ -53,9 +53,23 @@ pub fn spawn_process(
 
     let base_dir = config_dir.current();
     let cwd = resolve_cwd(&service.cwd, base_dir.as_deref())?;
-    let mut command = Command::new(resolve_program(&service.program));
+
+    // A non-empty `preRun` wraps the spawn in a shell so the prelude and the
+    // command share one environment (see `process::shell`). Otherwise we spawn
+    // the program directly, keeping the Windows `.cmd`/`.bat` resolution.
+    let (program, args): (std::ffi::OsString, Vec<String>) =
+        match super::shell::active_prelude(&service.pre_run) {
+            Some(prelude) => {
+                let (sh, sh_args) =
+                    super::shell::shell_prelude_command(prelude, &service.program, &service.args);
+                (std::ffi::OsString::from(sh), sh_args)
+            }
+            None => (resolve_program(&service.program), service.args.clone()),
+        };
+
+    let mut command = Command::new(&program);
     command
-        .args(&service.args)
+        .args(&args)
         .current_dir(&cwd)
         .envs(&service.env)
         .stdin(Stdio::null())

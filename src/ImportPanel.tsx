@@ -121,7 +121,9 @@ export function ImportPanel({ existingIds, onImport, onCancel }: Props) {
           port: null,
           group,
           autoRestart: false,
-          usePty: false
+          usePty: false,
+          preRun: null,
+          sensitive: false
         }));
       await onImport(services);
     } catch (caught) {

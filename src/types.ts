@@ -15,6 +15,13 @@ export type ServiceConfig = {
   // for dev servers (Vite, WXT) whose HMR loop depends on a real TTY; without
   // one they exit cleanly after the first rebuild. Off by default.
   usePty: boolean;
+  // Optional shell prelude run before the command, in the same shell, so its
+  // env changes carry over (e.g. "nvm use 20", "source .venv/bin/activate").
+  // Empty/absent = spawn directly. See process::shell on the backend.
+  preRun?: string | null;
+  // When true, this service's name is masked while "stream mode" is on (a
+  // Command-palette toggle) so the window is safe to screen-share.
+  sensitive?: boolean;
 };
 
 export type ServiceIcon =
@@ -81,4 +88,15 @@ export type ServiceHistory = {
 
 export function formatCommand(service: ServiceConfig) {
   return [service.program, ...service.args].join(" ");
+}
+
+// Placeholder shown in place of a sensitive service's name while stream mode
+// is on. Fixed-length and identifier-free so it leaks nothing about the real
+// name; the service icon stays visible so panes/cards remain distinguishable.
+export const MASKED_SERVICE_NAME = "•••••••";
+
+// The name to display for a service given the current stream-mode state. Masks
+// only services explicitly flagged `sensitive`; everything else is unchanged.
+export function displayServiceName(service: ServiceConfig, streamMode: boolean): string {
+  return streamMode && service.sensitive ? MASKED_SERVICE_NAME : service.name;
 }

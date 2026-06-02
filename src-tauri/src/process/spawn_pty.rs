@@ -169,11 +169,19 @@ pub fn spawn_service_pty(
             source: std::io::Error::new(std::io::ErrorKind::Other, format!("openpty: {err}")),
         })?;
 
+    // A non-empty `preRun` wraps the spawn in a shell so the prelude and the
+    // command share one environment (see `process::shell`); otherwise we spawn
+    // the program directly.
+    let (program, args) = match super::shell::active_prelude(&service.pre_run) {
+        Some(prelude) => super::shell::shell_prelude_command(prelude, &service.program, &service.args),
+        None => (service.program.clone(), service.args.clone()),
+    };
+
     // CommandBuilder is portable_pty's analogue of std::process::Command. It
     // does its own program lookup, so we pass the raw program name and let it
     // resolve through PATH — including .cmd/.bat on Windows.
-    let mut command = CommandBuilder::new(&service.program);
-    for arg in &service.args {
+    let mut command = CommandBuilder::new(&program);
+    for arg in &args {
         command.arg(arg);
     }
     command.cwd(&cwd);

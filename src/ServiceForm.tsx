@@ -7,6 +7,9 @@ import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { BUILTIN_SERVICE_ICONS, BuiltinServiceIcon } from "./serviceIcons";
 
+// Matches the shortcut label used elsewhere — `⌘` on macOS, `Ctrl` otherwise.
+const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
+
 export type ServiceFormDraft = {
   id: string;
   name: string;
@@ -20,6 +23,8 @@ export type ServiceFormDraft = {
   group: string;
   autoRestart: boolean;
   usePty: boolean;
+  preRun: string; // shell prelude run before the command, same shell
+  sensitive: boolean; // mask the name while stream mode is on
 };
 
 type Props = {
@@ -36,6 +41,17 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
   const [error, setError] = useState<string | null>(null);
 
   const validationError = useMemo(() => validate(draft, existingIds), [draft, existingIds]);
+
+  // Heuristic nudge: when the command looks like a dev server / watcher but PTY
+  // mode is still off, suggest turning it on (see `looksLikeDevServer`). Purely
+  // a suggestion — without a TTY these tools tend to exit cleanly mid-HMR, and
+  // that failure is invisible, so we flag it at creation time rather than
+  // letting the user discover it later. The user can ignore it or just tick the
+  // checkbox directly.
+  const suggestPty = useMemo(
+    () => !draft.usePty && looksLikeDevServer(draft.program, draft.argsText),
+    [draft.usePty, draft.program, draft.argsText]
+  );
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -183,6 +199,18 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
           />
         </Field>
 
+        <Field
+          label="Pre-run"
+          hint="Optional. Runs before the command in the same shell, so env changes carry over — e.g. nvm use 20, source .venv/bin/activate. Leave empty to spawn directly."
+        >
+          <input
+            value={draft.preRun}
+            onChange={(e) => setDraft({ ...draft, preRun: e.target.value })}
+            className="form-input font-mono text-xs"
+            placeholder="nvm use 20"
+          />
+        </Field>
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="Port" hint="Optional, for browser open">
             <input
@@ -238,6 +266,53 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
             </span>
           </span>
         </label>
+
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={draft.sensitive}
+            onChange={(e) => setDraft({ ...draft, sensitive: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block text-xs font-medium uppercase tracking-wider text-zinc-400">
+              Sensitive name
+            </span>
+            <span className="block text-[11px] text-zinc-500">
+              Mask this service's name (sidebar, pane header, search) while Stream mode is on — toggle it from the command palette ({modKey}+P) before screen-sharing.
+            </span>
+          </span>
+        </label>
+
+        {suggestPty ? (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="mt-px size-3.5 shrink-0 text-amber-300"
+              aria-hidden="true"
+            >
+              <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />
+            </svg>
+            <span className="min-w-0 flex-1">
+              This looks like a dev server or watch command. Turn on{" "}
+              <span className="font-medium">Run in pseudo-terminal</span> so it
+              survives hot-reloads — without a TTY these tools can exit cleanly
+              mid-rebuild.
+            </span>
+            <button
+              type="button"
+              onClick={() => setDraft({ ...draft, usePty: true })}
+              className="shrink-0 rounded border border-amber-400/50 bg-amber-500/20 px-2 py-1 font-medium text-amber-50 transition hover:bg-amber-500/30"
+            >
+              Enable
+            </button>
+          </div>
+        ) : null}
 
         {error || validationError ? (
           <p className="rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
@@ -749,6 +824,46 @@ function BuiltinIconGrid({
   );
 }
 
+// Word-boundary patterns that suggest a long-running dev server or watcher
+// which needs a TTY (see the "Run in pseudo-terminal" hint). Kept roughly in
+// sync with the `muxly-register-service` skill so the app and the skill nudge
+// consistently. `\b` boundaries keep these from matching inside other words —
+// e.g. `\bstart\b` does not fire on "restart", `\bdev\b` not on "development".
+const DEV_SERVER_PATTERNS: RegExp[] = [
+  /\bdev\b/,
+  /\bwatch\b/,
+  /\bserve\b/,
+  /\bstart\b/,
+  /\bvite\b/,
+  /\bwxt\b/,
+  /\bnext\b/,
+  /\bnuxt\b/,
+  /\bastro\b/,
+  /\bsvelte-?kit\b/,
+  /\bremix\b/,
+  /\bsolid-?start\b/,
+  /\bqwik\b/,
+  /\banalog\b/,
+  /\bnodemon\b/,
+  /\bvitest\b/,
+  /\bwrangler\b/,
+  /\bexpo\b/,
+  /\bstorybook\b/,
+  /\bwebpack-dev-server\b/,
+  /\breact-native\b/
+];
+
+/**
+ * True when the program + args look like a dev server / watch command that
+ * benefits from PTY mode. Deliberately a loose heuristic powering a dismissible
+ * suggestion — a false positive costs the user a glance, a false negative costs
+ * them a silent mid-HMR exit, so we err toward suggesting.
+ */
+function looksLikeDevServer(program: string, argsText: string): boolean {
+  const haystack = `${program} ${argsText}`.toLowerCase();
+  return DEV_SERVER_PATTERNS.some((pattern) => pattern.test(haystack));
+}
+
 function toDraft(service: ServiceConfig | null): ServiceFormDraft {
   if (!service) {
     return {
@@ -762,6 +877,8 @@ function toDraft(service: ServiceConfig | null): ServiceFormDraft {
       group: "",
       autoRestart: false,
       usePty: false,
+      preRun: "",
+      sensitive: false,
       iconType: "none",
       iconValue: ""
     };
@@ -781,7 +898,9 @@ function toDraft(service: ServiceConfig | null): ServiceFormDraft {
     port: service.port != null ? String(service.port) : "",
     group: service.group ?? "",
     autoRestart: service.autoRestart,
-    usePty: service.usePty
+    usePty: service.usePty,
+    preRun: service.preRun ?? "",
+    sensitive: service.sensitive ?? false
   };
 }
 
@@ -822,7 +941,9 @@ function fromDraft(draft: ServiceFormDraft): ServiceConfig {
     port: Number.isFinite(port) ? port : null,
     group: groupValue || null,
     autoRestart: draft.autoRestart,
-    usePty: draft.usePty
+    usePty: draft.usePty,
+    preRun: draft.preRun.trim() || null,
+    sensitive: draft.sensitive
   };
 }
 
