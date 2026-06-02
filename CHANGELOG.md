@@ -37,6 +37,31 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- **Command palette + Stream mode.** A lightweight command palette
+  (<kbd>Ctrl/Cmd+P</kbd> or the new ⌘ toolbar button) runs named actions from a
+  registry. Its headline command, **Stream mode**, masks the names of services
+  marked **Sensitive** (a new per-service checkbox in the service form) across
+  the sidebar, pane headers, and global search — leaving icons visible — so the
+  window is safe to screen-share. Toggling it again restores the names. The
+  palette also exposes common toggles (search, bottom terminal, sidebars,
+  settings, new service). Services can be flagged sensitive per-service in the
+  service form, or curated all at once in a new **Sensitive services** section
+  of the Settings view.
+- **`preRun` shell prelude for services.** A new optional **Pre-run** field
+  runs a command in the *same shell* immediately before the service command
+  (`<preRun> && <command>`), so environment changes carry over — e.g.
+  `nvm use 24.4.0`, `source .venv/bin/activate`, or `npm ci`. Empty leaves the
+  direct-spawn behaviour unchanged; both the pipe and PTY spawn paths honour
+  it. Tokens containing spaces must be quoted inside the field.
+- **"Looks like a dev server?" PTY hint in the service form.** When a new or
+  edited service's program/args match a dev-server or watch heuristic
+  (`dev`, `watch`, `serve`, `start`, or tools like Vite, WXT, Next, Nuxt,
+  Astro, SvelteKit, Remix, nodemon, vitest, wrangler, expo, storybook, …) and
+  "Run in pseudo-terminal" is still off, an amber nudge with a one-click
+  **Enable** appears under the checkbox. Catches the most common
+  misconfiguration — a dev server that silently exits mid-hot-reload without a
+  TTY — at creation time instead of after the confusing failure. The token set
+  is kept in sync with the `muxly-register-service` skill.
 - **Interactive PTY service panes.** Services run with `usePty` are now
   fully interactive in their pane, not just read-only: keystrokes are piped
   to the child's stdin (new `service_pty_write` command) and the pane keeps
