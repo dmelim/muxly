@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
@@ -19,81 +18,37 @@ import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } fro
 import { formatCommand, displayServiceName } from "./types";
 import { CommandPalette } from "./CommandPalette";
 import type { Command } from "./CommandPalette";
-import { ServiceForm } from "./ServiceForm";
-import { ImportPanel } from "./ImportPanel";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
 import { TerminalPanes } from "./TerminalPanes";
 import { BottomTerminal } from "./BottomTerminal";
 import { SettingsView } from "./SettingsView";
-import { aliasProjectName } from "./privacyNames";
+import { DetailsSidebar } from "./DetailsSidebar";
+import { ServicesSidebar } from "./ServicesSidebar";
 import { describeExitCode, shortExitCode } from "./exitCodes";
-import { BuiltinServiceIcon } from "./serviceIcons";
+import type { EditTarget } from "./appTypes";
 import {
-  ChevronRightIcon,
+  AUTO_RESTART_DELAY_MS,
+  DEFAULT_SETTINGS,
+  annotateChunkWithTimestamps,
+  clamp,
+  ensureProjectAliases,
+  errorMessage,
+  groupKey,
+  groupServices,
+  modKey,
+  sameAliases,
+  sameServiceOrder
+} from "./appUtils";
+import {
   CommandIcon,
-  EyeIcon,
-  EyeOffIcon,
   PanelLeftIcon,
   PanelRightIcon,
-  PlayIcon,
-  PlusIcon,
   SearchIcon,
   SettingsIcon,
-  SplitIcon,
-  StopIcon,
   TerminalIcon
 } from "./icons";
-
-type EditTarget =
-  | { mode: "edit"; service: ServiceConfig }
-  | { mode: "new" }
-  | { mode: "import" };
-
-// Auto-restart guardrails: per-service we re-spawn at most
-// `settings.autoRestartMaxAttempts` times within
-// `settings.autoRestartWindowMs` (both user-tunable via the Settings panel),
-// pausing AUTO_RESTART_DELAY_MS between tries. Log retention
-// (`settings.maxLogChunks`) is similarly user-tunable.
-const AUTO_RESTART_DELAY_MS = 1_000;
-
-// Shorthand shown in shortcut tooltips. macOS uses ⌘, everything else Ctrl.
-const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
-
-const statusLabels: Record<ServiceStatus, string> = {
-  stopped: "Stopped",
-  starting: "Starting",
-  running: "Running",
-  stopping: "Stopping",
-  exited: "Exited",
-  failed: "Failed"
-};
-
-const statusDots: Record<ServiceStatus, string> = {
-  stopped: "bg-zinc-600",
-  starting: "bg-amber-400",
-  running: "bg-cyan-400",
-  stopping: "bg-orange-400",
-  exited: "bg-sky-400",
-  failed: "bg-rose-400"
-};
-
-// Pre-load placeholder — the Rust backend's `load_settings` runs on mount and
-// overrides `editorCommand` with the real per-OS default (`code.cmd` on
-// Windows, `code` elsewhere) or the user's saved value.
-const DEFAULT_SETTINGS: AppSettings = {
-  editorCommand: "code",
-  hiddenProjectNames: {},
-  projectNameAliases: {},
-  // Mirrors the Rust defaults — kept in sync manually. The real values
-  // arrive via `load_settings` on mount; these only apply until then.
-  autoRestartMaxAttempts: 3,
-  autoRestartWindowMs: 60_000,
-  maxLogChunks: 5_000,
-  paneGridColumns: 5,
-  showTimestamps: true
-};
 
 export function App() {
   const [services, setServices] = useState<ServiceConfig[]>([]);
@@ -124,8 +79,8 @@ export function App() {
   // Lets the once-mounted exit listener call the latest startService closure.
   const startServiceRef = useRef<(service: ServiceConfig) => Promise<void>>(async () => {});
   const [editing, setEditing] = useState<EditTarget | null>(null);
-  // Map of serviceId → true when its configured port is held by another process.
-  // Only meaningful when the service is not running — we never flag our own
+  // Map of serviceId â†’ true when its configured port is held by another process.
+  // Only meaningful when the service is not running â€” we never flag our own
   // listener as a "conflict".
   const [portConflicts, setPortConflicts] = useState<Record<string, boolean>>({});
   // After a service exits non-zero and we can still see something listening
@@ -135,7 +90,7 @@ export function App() {
   const [portBlockers, setPortBlockers] = useState<
     Record<string, { pid: number; port: number }>
   >({});
-  // Services the user has chosen to "adopt" — i.e. treat the external
+  // Services the user has chosen to "adopt" â€” i.e. treat the external
   // process holding the port as if it were this service. We don't own its
   // stdout/stderr but we do show it as running and route Stop to kill the
   // adopted PID. Periodically reconciled against the live port holder so an
@@ -145,7 +100,7 @@ export function App() {
   >({});
   const [history, setHistory] = useState<Record<string, ServiceHistory>>({});
   const [searchOpen, setSearchOpen] = useState(false);
-  // Service id whose in-pane find bar is currently shown — null when closed.
+  // Service id whose in-pane find bar is currently shown â€” null when closed.
   // Only one pane shows the bar at a time; switching focus or closing the
   // pane clears it.
   const [searchPaneId, setSearchPaneId] = useState<string | null>(null);
@@ -156,7 +111,7 @@ export function App() {
   const [paneSearchSeed, setPaneSearchSeed] = useState<{
     serviceId: string;
     query: string;
-    // Bump counter so the same query → same pane jump still re-triggers the
+    // Bump counter so the same query â†’ same pane jump still re-triggers the
     // SearchAddon and re-runs the flash animation when re-clicked.
     nonce: number;
   } | null>(null);
@@ -177,8 +132,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  // The bottom shell drawer. Hidden by default — opened from the header button
-  // or with Ctrl/Cmd+↓. Height is user-draggable from a handle on the drawer's
+  // The bottom shell drawer. Hidden by default â€” opened from the header button
+  // or with Ctrl/Cmd+â†“. Height is user-draggable from a handle on the drawer's
   // top edge; state lives here so it survives toggle/remount of the drawer.
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(288);
@@ -186,7 +141,7 @@ export function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   // Stream mode: when on, services flagged `sensitive` have their names masked
   // across the UI so the window is safe to screen-share. Ephemeral (session
-  // only) — toggled from the command palette, restored when you toggle it off.
+  // only) â€” toggled from the command palette, restored when you toggle it off.
   const [streamMode, setStreamMode] = useState(false);
   // Drag-to-reorder state. `dragId` is the service currently being dragged;
   // `dropIndicator` is where the cyan "drop here" line / highlight is shown.
@@ -194,7 +149,7 @@ export function App() {
   // - "end-of-group": append source to the end of this group (and update its group field)
   // The ref mirrors `dragId` so the dragover handlers (which fire between
   // dragstart and React's next render) can read the active source
-  // synchronously and call preventDefault — without it, the OS shows the
+  // synchronously and call preventDefault â€” without it, the OS shows the
   // "forbidden" cursor on the very first dragover events.
   const [dragId, setDragId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
@@ -369,7 +324,7 @@ export function App() {
     }
 
     void persistSettings({ ...settings, projectNameAliases }).catch((error) => {
-      // Background alias-sync — surface to the dev console rather than the UI;
+      // Background alias-sync â€” surface to the dev console rather than the UI;
       // the user didn't initiate this and there's no obvious place to display it.
       console.warn("Failed to persist project name aliases:", errorMessage(error));
     });
@@ -411,7 +366,7 @@ export function App() {
     invoke<ServiceHistory>("get_service_history", { serviceId })
       .then((result) => setHistory((current) => ({ ...current, [serviceId]: result })))
       .catch(() => {
-        /* history unavailable — leave previous value */
+        /* history unavailable â€” leave previous value */
       });
   }, []);
 
@@ -458,10 +413,10 @@ export function App() {
       });
       if (problems.length > 0) {
         // Some entries were skipped (malformed/invalid/duplicate). Keep the
-        // loaded ones working and surface what was dropped — the full list is
+        // loaded ones working and surface what was dropped â€” the full list is
         // available on hover since the status line is clamped to two lines.
         const summary = problems.length === 1 ? "1 entry skipped" : `${problems.length} entries skipped`;
-        setManagerMessage(`Loaded ${loaded.length} services — ${summary}: ${problems.join("; ")}`);
+        setManagerMessage(`Loaded ${loaded.length} services â€” ${summary}: ${problems.join("; ")}`);
       } else {
         setManagerMessage(
           loaded.length > 0 ? `Loaded ${loaded.length} services` : "No services configured yet"
@@ -525,7 +480,7 @@ export function App() {
       setPortConflicts((current) =>
         current[serviceId] ? { ...current, [serviceId]: false } : current
       );
-      // Our process is now the live owner — any "blocker" / "adopted"
+      // Our process is now the live owner â€” any "blocker" / "adopted"
       // bookkeeping from before is obsolete and must not stick around.
       setPortBlockers((current) => {
         if (!current[serviceId]) return current;
@@ -579,7 +534,7 @@ export function App() {
       if (nextStatus === "failed") {
         maybeAutoRestart(serviceId);
       } else {
-        // Clean exit or user stop — reset the crash budget.
+        // Clean exit or user stop â€” reset the crash budget.
         delete autoRestartRef.current[serviceId];
       }
 
@@ -592,7 +547,7 @@ export function App() {
       if (nonZero && service && service.port != null) {
         const port = service.port;
         // Tiny delay so we re-probe after the OS has had a moment to settle
-        // — without it, our own freshly-released listener can briefly
+        // â€” without it, our own freshly-released listener can briefly
         // re-bind and we'd report ourselves as the blocker.
         window.setTimeout(() => {
           invoke<number | null>("find_port_holder", { port })
@@ -604,7 +559,7 @@ export function App() {
               }));
             })
             .catch(() => {
-              /* No netstat/lsof available — silent fallback. */
+              /* No netstat/lsof available â€” silent fallback. */
           });
         }, 400);
       }
@@ -637,7 +592,7 @@ export function App() {
 
       const now = Date.now();
       const record = autoRestartRef.current[serviceId] ?? { count: 0, lastAt: 0 };
-      // A quiet period resets the budget — a service that ran fine for a while
+      // A quiet period resets the budget â€” a service that ran fine for a while
       // and then crashed gets a fresh set of retries.
       if (now - record.lastAt > windowMs) {
         record.count = 0;
@@ -672,7 +627,7 @@ export function App() {
   const appendLog = useCallback((serviceId: string, chunk: string) => {
     // Apply the [HH:MM:SS] annotation *before* the chunk lands in the
     // in-memory buffer so the replay on pane mount renders with the same
-    // marks the live terminal saw — the buffer is the source of truth.
+    // marks the live terminal saw â€” the buffer is the source of truth.
     //
     // PTY services are exempt: their output carries cursor-addressing and
     // clear-screen escapes (spinners, progress bars, interactive prompts), and
@@ -743,7 +698,7 @@ export function App() {
   );
 
   // Kill the foreign process holding our port, then re-spawn the service.
-  // We clear the blocker eagerly so the banner disappears immediately — if
+  // We clear the blocker eagerly so the banner disappears immediately â€” if
   // the kill actually failed, the start attempt below will fail and a fresh
   // blocker entry will repopulate from the exit handler.
   const stopBlockerAndRestart = useCallback(
@@ -806,8 +761,8 @@ export function App() {
     [portBlockers]
   );
 
-  // Drop the adoption mapping without killing the adopted process — used by
-  // the "✕" affordance on the adopted badge. The service goes back to
+  // Drop the adoption mapping without killing the adopted process â€” used by
+  // the "âœ•" affordance on the adopted badge. The service goes back to
   // looking exited, which is accurate.
   const releaseAdopted = useCallback((serviceId: string) => {
     setAdoptedPids((current) => {
@@ -1028,7 +983,7 @@ export function App() {
   // Drag-resize the bottom terminal drawer. Mirrors `startSidebarDrag`: window-
   // level listeners so the drag survives the cursor leaving the thin handle,
   // and a body-level cursor + user-select lock for the duration of the drag.
-  // The drawer grows as the handle is dragged upward — `delta` is inverted.
+  // The drawer grows as the handle is dragged upward â€” `delta` is inverted.
   const startTerminalDrag = useCallback(
     (event: React.MouseEvent) => {
       event.preventDefault();
@@ -1040,7 +995,7 @@ export function App() {
       const onMove = (move: MouseEvent) => {
         const delta = move.clientY - startY;
         // Cap at ~80% of viewport so the drawer can never eat the whole window
-        // — the service panes still need to be visible to be useful.
+        // â€” the service panes still need to be visible to be useful.
         const maxHeight = Math.max(160, Math.round(window.innerHeight * 0.8));
         setTerminalHeight(clamp(startHeight - delta, 120, maxHeight));
       };
@@ -1140,7 +1095,7 @@ export function App() {
           : "Stream mode: hide sensitive names",
         subtitle:
           sensitiveCount === 0
-            ? "No services marked sensitive yet — set “Sensitive name” when editing a service"
+            ? "No services marked sensitive yet â€” set â€œSensitive nameâ€ when editing a service"
             : `Masks ${sensitiveCount} sensitive service name${
                 sensitiveCount === 1 ? "" : "s"
               } so the window is safe to screen-share`,
@@ -1190,7 +1145,7 @@ export function App() {
   );
 
   // Global keyboard shortcuts. Registered in the capture phase so they fire
-  // before a focused terminal — xterm consumes Ctrl-combos and stops their
+  // before a focused terminal â€” xterm consumes Ctrl-combos and stops their
   // propagation, so a bubble-phase listener would never see them. For each
   // shortcut we handle, `stopPropagation` then keeps the key from also
   // reaching the terminal. Modifier combos are ignored while the user is
@@ -1208,7 +1163,7 @@ export function App() {
         }
         if (searchPaneId) {
           // The PaneSearchBar's own Esc handler runs first when its input is
-          // focused — this is the fallback for when focus is elsewhere
+          // focused â€” this is the fallback for when focus is elsewhere
           // (e.g. user clicked back into the terminal but still wants Esc
           // to dismiss the bar).
           setSearchPaneId(null);
@@ -1231,7 +1186,7 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + Shift + F → global log search.
+      // Ctrl/Cmd + Shift + F â†’ global log search.
       if (event.shiftKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
         event.stopPropagation();
@@ -1243,9 +1198,9 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + F → in-pane search bar for the focused pane. Handled here
+      // Ctrl/Cmd + F â†’ in-pane search bar for the focused pane. Handled here
       // (before the form-field bail-out below) so it works while the xterm
-      // helper textarea has focus — that's the common case after clicking
+      // helper textarea has focus â€” that's the common case after clicking
       // into a terminal pane.
       if (event.key.toLowerCase() === "f") {
         const targetId = selected && paneIds.includes(selected.id) ? selected.id : null;
@@ -1257,7 +1212,7 @@ export function App() {
         return;
       }
 
-      // A real text field swallows the remaining shortcuts — but xterm's
+      // A real text field swallows the remaining shortcuts â€” but xterm's
       // hidden helper textarea is not real input, so shortcuts still work
       // while a terminal pane is focused.
       const target = event.target as HTMLElement | null;
@@ -1271,7 +1226,7 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + ← / → → toggle the left / right side panels.
+      // Ctrl/Cmd + â† / â†’ â†’ toggle the left / right side panels.
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         event.stopPropagation();
@@ -1284,14 +1239,14 @@ export function App() {
         setRightSidebarOpen((open) => !open);
         return;
       }
-      // Ctrl/Cmd + ↓ → toggle the bottom shell drawer.
+      // Ctrl/Cmd + â†“ â†’ toggle the bottom shell drawer.
       if (event.key === "ArrowDown") {
         event.preventDefault();
         event.stopPropagation();
         setTerminalOpen((open) => !open);
         return;
       }
-      // Ctrl/Cmd + P → command palette.
+      // Ctrl/Cmd + P â†’ command palette.
       if (event.key.toLowerCase() === "p") {
         event.preventDefault();
         event.stopPropagation();
@@ -1299,7 +1254,7 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + 1..9 → open the Nth visible service as the sole pane.
+      // Ctrl/Cmd + 1..9 â†’ open the Nth visible service as the sole pane.
       if (/^[1-9]$/.test(event.key)) {
         const service = flatServices[Number(event.key) - 1];
         if (service) {
@@ -1313,7 +1268,7 @@ export function App() {
       switch (event.key.toLowerCase()) {
         case "w":
           // Close the focused service pane. Only acts when the focused service
-          // actually has an open pane — otherwise the shortcut is a no-op
+          // actually has an open pane â€” otherwise the shortcut is a no-op
           // rather than silently closing whatever happens to be leftmost.
           if (selected && paneIds.includes(selected.id)) {
             event.preventDefault();
@@ -1378,338 +1333,40 @@ export function App() {
         }`
       }}
     >
-      <aside
-        className={`flex min-h-0 flex-col overflow-hidden bg-[#15181d] ${
-          leftSidebarOpen ? "border-r border-white/10" : ""
-        }`}
-      >
-        <div className="border-b border-white/10 px-5 py-4">
-          <h1 className="text-xl font-semibold tracking-normal">Muxly</h1>
-          <p className="mt-2 line-clamp-2 text-xs text-zinc-500" title={managerMessage}>
-            {managerMessage}
-          </p>
-          <div className="mt-3 flex gap-2">
-            {compactSidebar ? (
-              <Tooltip label={`New service (${modKey}+N)`}>
-                <Button
-                  variant="dashed"
-                  size="sm"
-                  onClick={() => setEditing({ mode: "new" })}
-                  aria-label="New service"
-                >
-                  <PlusIcon className="size-4" />
-                </Button>
-              </Tooltip>
-            ) : (
-              <Tooltip label={`New service (${modKey}+N)`} className="flex-1">
-                <Button
-                  variant="dashed"
-                  size="sm"
-                  onClick={() => setEditing({ mode: "new" })}
-                  className="w-full"
-                >
-                  + New service
-                </Button>
-              </Tooltip>
-            )}
-            <Tooltip
-              label="Import services from package.json or Procfile"
-              className={compactSidebar ? "flex-1" : ""}
-            >
-              <Button
-                variant="dashed"
-                size="sm"
-                onClick={() => setEditing({ mode: "import" })}
-                className={compactSidebar ? "w-full" : ""}
-              >
-                Import
-              </Button>
-            </Tooltip>
-          </div>
-        </div>
-
-        <div
-          onDragEnter={(event) => {
-            // HTML5 DnD requires preventDefault on BOTH dragenter and dragover
-            // to fully suppress the OS forbidden-cursor — handling only
-            // dragover leaves a flash every time the cursor crosses an element
-            // boundary (between cards, into a header, etc.).
-            if (dragIdRef.current) event.preventDefault();
-          }}
-          onDragOver={(event) => {
-            // Safety net: keep the OS "move" cursor (not the forbidden icon)
-            // anywhere inside the sidebar while a drag is in progress, even in
-            // the gaps between cards and group headers. Specific targets below
-            // still set the visual drop indicator.
-            if (dragIdRef.current) event.preventDefault();
-          }}
-          className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
-        >
-          {groupedServices.map(([groupName, groupServicesList]) => {
-            const anyRunning = groupServicesList.some((service) => {
-              const status = statuses[service.id];
-              return status === "running" || status === "starting";
-            });
-            const collapsed = collapsedGroups[groupName] ?? false;
-            const groupHidden = settings.hiddenProjectNames[groupName] ?? false;
-            const displayGroupName = displayProjectName(groupName);
-
-            const headerHighlighted =
-              dropIndicator?.kind === "end-of-group" &&
-              dropIndicator.groupName === groupName;
-
-            return (
-              <div key={groupName} className="space-y-1.5">
-                <div
-                  onDragOver={(event) => {
-                    if (!dragIdRef.current) return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    setDropIndicator((current) =>
-                      current?.kind === "end-of-group" && current.groupName === groupName
-                        ? current
-                        : { kind: "end-of-group", groupName }
-                    );
-                  }}
-                  onDragLeave={(event) => {
-                    // Only clear if leaving the header for something outside it —
-                    // moving across child elements inside still fires dragleave.
-                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-                    setDropIndicator((current) =>
-                      current?.kind === "end-of-group" && current.groupName === groupName
-                        ? null
-                        : current
-                    );
-                  }}
-                  onDrop={(event) => {
-                    const sourceId = dragIdRef.current;
-                    if (!sourceId) return;
-                    event.preventDefault();
-                    endDrag();
-                    void reorderService(sourceId, { kind: "end-of-group", groupName });
-                  }}
-                  className={`flex items-center justify-between gap-2 rounded px-2 pt-1 transition ${
-                    headerHighlighted ? "bg-cyan-400/15" : ""
-                  }`}
-                >
-                  <Tooltip label={displayGroupName} className="min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => toggleGroupCollapsed(groupName)}
-                      aria-expanded={!collapsed}
-                      aria-label={`${collapsed ? "Expand" : "Collapse"} ${displayGroupName}`}
-                      className="group/header flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-                    >
-                      <ChevronRightIcon
-                        className={`size-3 shrink-0 transition-transform ${
-                          collapsed ? "" : "rotate-90"
-                        }`}
-                      />
-                      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.18em]">
-                        {displayGroupName}
-                      </span>
-                    </button>
-                  </Tooltip>
-                  <div className="flex shrink-0 gap-0.5">
-                    <Tooltip label={groupHidden ? "Show project name" : "Hide project name"}>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => toggleProjectNamePrivacy(groupName)}
-                        aria-label={
-                          groupHidden
-                            ? `Show project name for ${displayGroupName}`
-                            : `Hide project name for ${displayGroupName}`
-                        }
-                        aria-pressed={groupHidden}
-                      >
-                        {groupHidden ? (
-                          <EyeOffIcon className="size-3.5" />
-                        ) : (
-                          <EyeIcon className="size-3.5" />
-                        )}
-                      </Button>
-                    </Tooltip>
-                    <Tooltip label={`Start all in ${displayGroupName}`}>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => startGroup(groupName)}
-                        aria-label={`Start all services in ${displayGroupName}`}
-                        className="text-cyan-400/80 hover:text-cyan-300"
-                      >
-                        <PlayIcon className="size-3.5" />
-                      </Button>
-                    </Tooltip>
-                    <Tooltip label={`Stop all in ${displayGroupName}`}>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => stopGroup(groupName)}
-                        disabled={!anyRunning}
-                        aria-label={`Stop all running services in ${displayGroupName}`}
-                        className="text-rose-400/80 hover:text-rose-300 disabled:text-zinc-500"
-                      >
-                        <StopIcon className="size-3.5" />
-                      </Button>
-                    </Tooltip>
-                  </div>
-                </div>
-                <div className={collapsed ? "hidden" : "space-y-1.5"}>
-                  {groupServicesList.map((service) => {
-                    const status = statuses[service.id] ?? "stopped";
-                    const isOpen = paneIds.includes(service.id);
-                    const showConflict =
-                      service.port != null &&
-                      portConflicts[service.id] &&
-                      status !== "running" &&
-                      status !== "starting" &&
-                      status !== "stopping";
-
-                    const showDropLine =
-                      dropIndicator?.kind === "before-service" &&
-                      dropIndicator.serviceId === service.id &&
-                      dragId !== service.id;
-                    const isDragging = dragId === service.id;
-
-                    return (
-                      <div key={service.id} className="relative">
-                        <span
-                          aria-hidden="true"
-                          className={`pointer-events-none absolute -top-1 left-0 right-0 h-0.5 rounded-full bg-cyan-400 transition-opacity ${
-                            showDropLine ? "opacity-100" : "opacity-0"
-                          }`}
-                        />
-                      <div
-                        draggable
-                        onDragStart={(event) => {
-                          beginDrag(service.id);
-                          event.dataTransfer.effectAllowed = "move";
-                          // Some platforms require a data payload for drag to initiate.
-                          try {
-                            event.dataTransfer.setData("text/plain", service.id);
-                          } catch {
-                            /* Safari may throw on some MIME types — ignore. */
-                          }
-                        }}
-                        onDragEnd={endDrag}
-                        onDragOver={(event) => {
-                          const sourceId = dragIdRef.current;
-                          if (!sourceId || sourceId === service.id) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                          setDropIndicator((current) =>
-                            current?.kind === "before-service" && current.serviceId === service.id
-                              ? current
-                              : { kind: "before-service", serviceId: service.id }
-                          );
-                        }}
-                        onDrop={(event) => {
-                          const sourceId = dragIdRef.current;
-                          if (!sourceId || sourceId === service.id) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          endDrag();
-                          void reorderService(sourceId, {
-                            kind: "before-service",
-                            serviceId: service.id
-                          });
-                        }}
-                        role="button"
-                        tabIndex={0}
-                        onClick={(event) => {
-                          if (event.shiftKey) {
-                            openInSplit(service.id);
-                          } else {
-                            openService(service.id);
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            openService(service.id);
-                          }
-                        }}
-                        className={`group/card relative w-full cursor-pointer rounded-md px-3 py-3 text-left transition ${
-                          isDragging ? "opacity-40 " : ""
-                        }${
-                          selected?.id === service.id || isOpen
-                            ? "bg-white/10 text-white"
-                            : "text-zinc-300 hover:bg-white/5 hover:text-white"
-                        }`}
-                      >
-                        <span className="flex items-center justify-between gap-3">
-                          <span className="flex min-w-0 items-center gap-3">
-                            <ServiceIconBadge
-                              service={service}
-                              imageSrc={iconImages[service.id]}
-                              status={status}
-                            />
-                            <span className="truncate text-sm font-medium">{maskName(service)}</span>
-                          </span>
-                          {!isOpen ? (
-                            <span className="shrink-0 text-xs text-zinc-500">
-                              {statusLabels[status]}
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="mt-1 block truncate pl-10 font-mono text-xs text-zinc-500">
-                          {formatCommand(service)}
-                        </span>
-                        {showConflict ? (
-                          <span className="mt-1 block pl-10 text-[11px] text-amber-300">
-                            ⚠ port {service.port} in use
-                          </span>
-                        ) : null}
-                        {isOpen ? (
-                          <Tooltip
-                            label="Open in a pane"
-                            className="absolute top-2 right-2 text-cyan-400"
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="size-4"
-                              aria-hidden="true"
-                            >
-                              <path d="m7 11 2-2-2-2" />
-                              <path d="M11 13h4" />
-                              <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                            </svg>
-                          </Tooltip>
-                        ) : null}
-                        <Tooltip label="Open in split view" className="absolute bottom-2 right-2">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openInSplit(service.id);
-                            }}
-                            aria-label={`Open ${maskName(service)} in split view`}
-                            className="rounded p-1 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 focus-visible:opacity-100 group-hover/card:opacity-100"
-                          >
-                            <SplitIcon className="size-3.5" />
-                          </button>
-                        </Tooltip>
-                      </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </aside>
+      <ServicesSidebar
+        open={leftSidebarOpen}
+        managerMessage={managerMessage}
+        compact={compactSidebar}
+        modKey={modKey}
+        groupedServices={groupedServices}
+        statuses={statuses}
+        collapsedGroups={collapsedGroups}
+        settings={settings}
+        dropIndicator={dropIndicator}
+        dragId={dragId}
+        dragIdRef={dragIdRef}
+        paneIds={paneIds}
+        portConflicts={portConflicts}
+        selected={selected}
+        iconImages={iconImages}
+        displayProjectName={displayProjectName}
+        maskName={maskName}
+        setDropIndicator={setDropIndicator}
+        setEditing={setEditing}
+        toggleGroupCollapsed={toggleGroupCollapsed}
+        toggleProjectNamePrivacy={toggleProjectNamePrivacy}
+        startGroup={startGroup}
+        stopGroup={stopGroup}
+        beginDrag={beginDrag}
+        endDrag={endDrag}
+        reorderService={reorderService}
+        openService={openService}
+        openInSplit={openInSplit}
+      />
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-16 items-center justify-between border-b border-white/10 px-5">
-          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+←)`}>
+          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+â†)`}>
             <Button
               variant="ghost"
               size="icon"
@@ -1720,7 +1377,7 @@ export function App() {
             </Button>
           </Tooltip>
           <div className="flex items-center gap-2">
-            <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+↓)`}>
+            <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+â†“)`}>
               <Button
                 variant="ghost"
                 size="icon"
@@ -1767,7 +1424,7 @@ export function App() {
             </Tooltip>
             <span className="mx-1 h-5 w-px bg-white/10" />
             <Tooltip
-              label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+→)`}
+              label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+â†’)`}
               side="bottom"
             >
               <Button
@@ -1784,7 +1441,7 @@ export function App() {
 
         {/*
           Keep the terminal panes / bottom drawer mounted while Settings is
-          open and just hide them — unmounting would dispose every xterm
+          open and just hide them â€” unmounting would dispose every xterm
           instance and wipe scrollback, which is a noticeable UX regression.
         */}
         <div
@@ -1853,126 +1510,24 @@ export function App() {
           rightSidebarOpen ? "border-l border-white/10" : ""
         }`}
       >
-        {editing?.mode === "import" ? (
-          <ImportPanel
-            existingIds={services.map((service) => service.id)}
-            onImport={importServices}
-            onCancel={() => setEditing(null)}
-          />
-        ) : editing ? (
-          <ServiceForm
-            initial={editing.mode === "edit" ? editing.service : null}
-            existingIds={services
-              .filter((service) => editing.mode !== "edit" || service.id !== editing.service.id)
-              .map((service) => service.id)}
-            onSave={saveServiceConfig}
-            onCancel={() => setEditing(null)}
-            onDelete={
-              editing.mode === "edit"
-                ? () => deleteServiceConfig(editing.service)
-                : undefined
-            }
-          />
-        ) : (
-          <>
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-          <h2 className="text-sm font-semibold">Details</h2>
-          {selected ? (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => setEditing({ mode: "edit", service: selected })}
-            >
-              Edit
-            </Button>
-          ) : null}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-        {selected ? (
-          <div className="space-y-5 p-5 text-sm">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  openInEditor(selected.cwd, selected.id, settings.editorCommand, appendLog)
-                }
-              >
-                Open in editor
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => openInFileManager(selected.cwd, selected.id, appendLog)}
-              >
-                Open folder
-              </Button>
-              {selected.port ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => openServiceUrl(selected.port!, selected.id, appendLog)}
-                >
-                  Open localhost:{selected.port}
-                </Button>
-              ) : null}
-            </div>
-            <dl className="space-y-5">
-              <Detail label="Icon">
-                <ServiceIconBadge
-                  service={selected}
-                  imageSrc={iconImages[selected.id]}
-                  status={statuses[selected.id] ?? "stopped"}
-                  large
-                />
-              </Detail>
-              <Detail label="Status">
-                {adoptedPids[selected.id]
-                  ? `Adopted (external pid ${adoptedPids[selected.id].pid})`
-                  : statusLabels[statuses[selected.id] ?? "stopped"]}
-              </Detail>
-              <Detail label="PID">
-                {pids[selected.id] ?? adoptedPids[selected.id]?.pid ?? "None"}
-              </Detail>
-              <Detail label="Last Exit">{lastExit[selected.id] ?? "None"}</Detail>
-              <Detail label="Command">
-                <span className="block rounded-md bg-black/20 p-3 font-mono text-xs text-zinc-300">
-                  {formatCommand(selected)}
-                </span>
-              </Detail>
-              <Detail label="Working Dir">
-                <span className="font-mono text-xs text-zinc-300">{selected.cwd}</span>
-              </Detail>
-              <Detail label="Group">
-                {selected.group ? displayProjectName(groupKey(selected)) : "None"}
-              </Detail>
-              <Detail label="Port">{selected.port ?? "None"}</Detail>
-              <Detail label="Env">
-                {Object.keys(selected.env).length === 0
-                  ? "None"
-                  : `${Object.keys(selected.env).length} variables`}
-              </Detail>
-            </dl>
-
-            <div className="border-t border-white/10 pt-5">
-              <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Run history</p>
-              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-                <Detail label="Total runs">{history[selected.id]?.totalRuns ?? 0}</Detail>
-                <Detail label="Failed">{history[selected.id]?.failedRuns ?? 0}</Detail>
-                <Detail label="Last run">{timeAgo(history[selected.id]?.lastStartedAt ?? null)}</Detail>
-                <Detail label="Last failure">
-                  {timeAgo(history[selected.id]?.lastFailureAt ?? null)}
-                </Detail>
-              </dl>
-            </div>
-          </div>
-        ) : (
-          <p className="p-5 text-sm text-zinc-500">No service selected. Use "+ New service" in the sidebar to create one.</p>
-        )}
-        </div>
-          </>
-        )}
+        <DetailsSidebar
+          editing={editing}
+          services={services}
+          selected={selected}
+          settings={settings}
+          statuses={statuses}
+          pids={pids}
+          adoptedPids={adoptedPids}
+          lastExit={lastExit}
+          history={history}
+          iconImages={iconImages}
+          displayProjectName={displayProjectName}
+          appendLog={appendLog}
+          onImport={importServices}
+          onSaveService={saveServiceConfig}
+          onDeleteService={deleteServiceConfig}
+          onEdit={setEditing}
+        />
       </aside>
 
       {leftSidebarOpen ? (
@@ -2016,257 +1571,6 @@ export function App() {
   );
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
 
-// Walk `chunk` and inject a dim [HH:MM:SS] marker at the start of every
-// new line. Uses an external `lineState` map so streamed output (which
-// often arrives split across chunk boundaries) only gets one marker per
-// line, even when the line spans many chunks.
-//
-// Rules:
-//   - A `\n` marks "the next non-newline byte begins a new line".
-//   - A bare `\r` is treated as a carriage return *without* line break
-//     (matches xterm semantics — many CLIs use `\r` to redraw progress
-//     bars in place). We never inject a marker after a bare `\r`.
-//   - Empty lines (`\n\n`) stay empty — markers only precede content.
-//   - ANSI escape sequences are passed through unchanged; the marker has
-//     its own self-contained `\x1b[…m…\x1b[0m` wrapper so it never bleeds
-//     into the colour state of the surrounding text.
-function annotateChunkWithTimestamps(
-  serviceId: string,
-  chunk: string,
-  lineState: Record<string, boolean>
-): string {
-  // Default to "at line start" for a service we've never seen — the first
-  // byte ever appended is, by definition, the start of the first line.
-  if (lineState[serviceId] === undefined) {
-    lineState[serviceId] = true;
-  }
 
-  let out = "";
-  for (let i = 0; i < chunk.length; i++) {
-    const ch = chunk[i];
-    if (lineState[serviceId] && ch !== "\n" && ch !== "\r") {
-      out += formatTimestamp();
-      lineState[serviceId] = false;
-    }
-    out += ch;
-    if (ch === "\n") {
-      lineState[serviceId] = true;
-    }
-  }
-  return out;
-}
 
-function formatTimestamp(): string {
-  const d = new Date();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  // 256-colour 245 is a neutral mid-grey that's readable against the
-  // pane's near-black background without competing with the foreground
-  // text. Trailing space keeps the marker visually separate from the
-  // first character of the line.
-  return `\x1b[38;5;245m[${hh}:${mm}:${ss}]\x1b[0m `;
-}
-
-function groupKey(service: ServiceConfig) {
-  return service.group?.trim() || "Ungrouped";
-}
-
-// Group services by `group`, preserving the order in which groups first appear
-// and the order of services within each group. Returns [groupName, services][].
-function groupServices(services: ServiceConfig[]): Array<[string, ServiceConfig[]]> {
-  const order: string[] = [];
-  const byGroup = new Map<string, ServiceConfig[]>();
-
-  for (const service of services) {
-    const key = groupKey(service);
-    if (!byGroup.has(key)) {
-      byGroup.set(key, []);
-      order.push(key);
-    }
-    byGroup.get(key)!.push(service);
-  }
-
-  return order.map((name) => [name, byGroup.get(name)!]);
-}
-
-function ensureProjectAliases(groupNames: string[], settings: AppSettings) {
-  let aliases = settings.projectNameAliases;
-
-  for (const groupName of groupNames) {
-    if (aliases[groupName]) continue;
-    if (aliases === settings.projectNameAliases) {
-      aliases = { ...settings.projectNameAliases };
-    }
-    aliases[groupName] = aliasProjectName(groupName, {
-      ...settings,
-      projectNameAliases: aliases
-    });
-  }
-
-  return aliases;
-}
-
-// True iff two service lists describe the same order *and* same group membership.
-// Used to skip a save_services round-trip when a drag drops a service back
-// where it already was.
-function sameServiceOrder(left: ServiceConfig[], right: ServiceConfig[]) {
-  if (left.length !== right.length) return false;
-  return left.every(
-    (service, i) =>
-      service.id === right[i].id && (service.group ?? null) === (right[i].group ?? null)
-  );
-}
-
-function sameAliases(left: Record<string, string>, right: Record<string, string>) {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-
-  return leftEntries.every(([key, value]) => right[key] === value);
-}
-
-function ServiceIconBadge({
-  service,
-  imageSrc,
-  status,
-  large = false
-}: {
-  service: ServiceConfig;
-  imageSrc?: string | null;
-  status: ServiceStatus;
-  large?: boolean;
-}) {
-  const size = large ? "size-10" : "size-7";
-  const dotSize = large ? "size-2.5" : "size-2";
-  return (
-    <span
-      className={`relative inline-flex ${size} shrink-0 items-center justify-center rounded-md border border-white/10 bg-black/25 text-zinc-300`}
-      aria-hidden="true"
-    >
-      <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]">
-        <ServiceIconContent icon={service.icon} imageSrc={imageSrc} large={large} />
-      </span>
-      <span
-        className={`absolute -bottom-px -right-px ${dotSize} rounded-full ring-2 ring-[#15181d] ${
-          statusDots[status]
-        }`}
-      />
-    </span>
-  );
-}
-
-function ServiceIconContent({
-  icon,
-  imageSrc,
-  large
-}: {
-  icon?: ServiceIcon | null;
-  imageSrc?: string | null;
-  large: boolean;
-}) {
-  if (icon?.type === "emoji") {
-    return <span className={large ? "text-lg" : "text-sm"}>{icon.value}</span>;
-  }
-  if (icon?.type === "image" && imageSrc) {
-    return <img src={imageSrc} alt="" className="h-full w-full object-cover" />;
-  }
-  if (icon?.type === "builtin") {
-    return <BuiltinServiceIcon name={icon.value} className={large ? "size-5" : "size-4"} />;
-  }
-  return <BuiltinServiceIcon name="terminal" className={large ? "size-5" : "size-4"} />;
-}
-
-async function openInEditor(
-  cwd: string,
-  serviceId: string,
-  editorCommand: string,
-  appendLog: (id: string, chunk: string) => void
-) {
-  try {
-    await invoke("open_in_editor", { cwd, editorCommand });
-  } catch (error) {
-    appendLog(serviceId, `\r\n\x1b[31m[manager] open in editor failed: ${errorMessage(error)}\x1b[0m\r\n`);
-  }
-}
-
-async function openInFileManager(
-  cwd: string,
-  serviceId: string,
-  appendLog: (id: string, chunk: string) => void
-) {
-  try {
-    await invoke("open_in_file_manager", { cwd });
-  } catch (error) {
-    appendLog(serviceId, `\r\n\x1b[31m[manager] open folder failed: ${errorMessage(error)}\x1b[0m\r\n`);
-  }
-}
-
-async function openServiceUrl(
-  port: number,
-  serviceId: string,
-  appendLog: (id: string, chunk: string) => void
-) {
-  try {
-    await invoke("open_url", { url: `http://localhost:${port}` });
-  } catch (error) {
-    appendLog(serviceId, `\r\n\x1b[31m[manager] open url failed: ${errorMessage(error)}\x1b[0m\r\n`);
-  }
-}
-
-// Format a unix-millis timestamp as a short relative string.
-function timeAgo(timestamp: number | null): string {
-  if (timestamp == null) {
-    return "Never";
-  }
-  const seconds = Math.round((Date.now() - timestamp) / 1000);
-  if (seconds < 45) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
-}
-
-function errorMessage(error: unknown) {
-  if (isBackendError(error)) {
-    switch (error.code) {
-      case "already_running":
-      case "not_running":
-      case "config_invalid":
-      case "config_parse_error":
-        return error.message;
-      default:
-        return error.message;
-    }
-  }
-
-  return String(error);
-}
-
-function isBackendError(error: unknown): error is { code: string; message: string } {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    "message" in error &&
-    typeof (error as { code: unknown }).code === "string" &&
-    typeof (error as { message: unknown }).message === "string"
-  );
-}
-
-function Detail({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs uppercase tracking-[0.14em] text-zinc-500">{label}</dt>
-      <dd className="mt-1 text-zinc-300">{children}</dd>
-    </div>
-  );
-}
