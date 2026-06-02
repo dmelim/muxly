@@ -22,6 +22,12 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Frontend component structure.** Split large app/form files into focused
+  components and helpers for service forms, service icon inputs, sidebars, app
+  utilities, and detail rows. Behaviour is intended to stay unchanged.
+
 ### Fixed
 
 - **PTY services now kill their whole process tree on stop (Windows).**
