@@ -1511,6 +1511,7 @@ export function App() {
             onClose={() => setSettingsOpen(false)}
             onSave={(next) => persistSettings(next)}
             onSetServicesSensitive={setServicesSensitive}
+            streamMode={streamMode}
           />
         ) : null}
       </section>

@@ -35,8 +35,12 @@ section, and tag the commit `vX.Y.Z`.
   reveals them. This is independent of the sidebar eye toggle, which still hides
   a project name manually regardless of Stream mode. Checking a project also
   marks all of its services as a convenience, after which you can uncheck
-  individual services without unchecking the project. Adds a
-  `sensitiveProjectNames` field to settings (backward-compatible default).
+  individual services without unchecking the project. While Stream mode is on,
+  the curation list masks the names it controls (so it doesn't leak them on a
+  shared screen) and exposes an eye button to reveal them temporarily for
+  editing — the reveal starts hidden on entering Stream mode and resets on
+  exit. Adds a `sensitiveProjectNames` field to settings (backward-compatible
+  default).
 - **Masked service names now keep their last 3 characters** (e.g.
   `••••tor`) instead of a fixed bullet run, so panes and cards stay
   distinguishable while Stream mode is on. Names of 3 characters or fewer are

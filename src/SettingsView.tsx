@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AppSettings, ServiceConfig } from "./types";
+import { displayServiceName, maskSensitiveName } from "./types";
 import { groupServices } from "./appUtils";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
-import { CloseIcon } from "./icons";
+import { CloseIcon, EyeIcon, EyeOffIcon } from "./icons";
 
 // Bounds — must match the clamps in `src-tauri/src/settings.rs` so the form
 // can show the same limits the backend will enforce on save.
@@ -38,11 +39,22 @@ type Props = {
   // curation list below toggles a single service, or every service in a
   // project at once via the project checkbox.
   onSetServicesSensitive: (serviceIds: string[], sensitive: boolean) => Promise<void>;
+  // Whether stream mode is currently on. When it is, the sensitive curation
+  // list masks the very names it controls (so the list itself doesn't leak
+  // them on a shared screen), with an in-section reveal toggle to edit it.
+  streamMode: boolean;
 };
 
 // Full-screen Settings surface. Shown by App in place of the terminal panes
 // (between the top header and bottom drawer) when settingsOpen is true.
-export function SettingsView({ settings, services, onClose, onSave, onSetServicesSensitive }: Props) {
+export function SettingsView({
+  settings,
+  services,
+  onClose,
+  onSave,
+  onSetServicesSensitive,
+  streamMode
+}: Props) {
   const [editorCommand, setEditorCommand] = useState(settings.editorCommand);
   const [maxAttempts, setMaxAttempts] = useState(String(settings.autoRestartMaxAttempts));
   const [windowSeconds, setWindowSeconds] = useState(
@@ -170,6 +182,18 @@ export function SettingsView({ settings, services, onClose, onSave, onSetService
   // Services grouped by project, in the same order the sidebar renders them,
   // so the curation tree mirrors the sidebar's layout.
   const groupedServices = useMemo(() => groupServices(services), [services]);
+
+  // While stream mode is on, the list masks the names it curates. The eye
+  // toggle below temporarily reveals them so the list stays editable. It
+  // starts hidden each time stream mode is entered and resets when it's left,
+  // after which it's purely driven by the button.
+  const [revealNames, setRevealNames] = useState(false);
+  useEffect(() => {
+    setRevealNames(false);
+  }, [streamMode]);
+  // Names in this list are masked only while stream mode is on and the user
+  // hasn't pressed reveal.
+  const maskNames = streamMode && !revealNames;
 
   // Persist a single service's sensitive flag immediately (no Save button
   // needed, like the other toggles here).
@@ -404,15 +428,38 @@ export function SettingsView({ settings, services, onClose, onSave, onSetService
 
           <Section
             title="Sensitive services"
-            description="Mark projects and services as sensitive. While Stream mode is on (toggle it from the command palette — Ctrl/Cmd+P), every sensitive project name is hidden (shown as its alias) and every sensitive service name is masked to its last 3 characters; turning Stream mode off reveals them again. This is independent of the sidebar eye toggle, which hides a project name manually regardless of Stream mode. Checking a project also marks all its services as a convenience; you can then uncheck individual services without affecting the project."
+            description="Mark projects and services as sensitive. While Stream mode is on (command palette — Ctrl/Cmd+P), every sensitive project and service name is hidden; This list masks those names too while Stream mode is on — use the eye button to reveal them temporarily so you can keep editing."
           >
             {services.length === 0 ? (
               <p className="text-xs text-zinc-500">No services yet.</p>
             ) : (
               <>
-                <p className="text-[11px] text-zinc-500">
-                  {sensitiveCount} / {services.length} marked sensitive.
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-zinc-500">
+                    {sensitiveCount} / {services.length} marked sensitive.
+                  </p>
+                  {streamMode ? (
+                    <Tooltip label={revealNames ? "Hide names" : "Reveal names to edit"}>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => setRevealNames((value) => !value)}
+                        aria-label={
+                          revealNames
+                            ? "Hide sensitive names again"
+                            : "Reveal sensitive names to edit the list"
+                        }
+                        aria-pressed={revealNames}
+                      >
+                        {revealNames ? (
+                          <EyeIcon className="size-3.5" />
+                        ) : (
+                          <EyeOffIcon className="size-3.5" />
+                        )}
+                      </Button>
+                    </Tooltip>
+                  ) : null}
+                </div>
                 <div className="space-y-2">
                   {groupedServices.map(([groupName, groupList]) => {
                     const ids = groupList.map((service) => service.id);
@@ -421,6 +468,14 @@ export function SettingsView({ settings, services, onClose, onSave, onSetService
                     ).length;
                     const projectSensitive =
                       settings.sensitiveProjectNames[groupName] ?? false;
+                    // Mirror the live display: a sensitive project shows its
+                    // alias while masked; a sensitive service shows its masked
+                    // form. The reveal toggle flips `maskNames` off to edit.
+                    const projectLabel =
+                      maskNames && projectSensitive
+                        ? settings.projectNameAliases[groupName] ??
+                          maskSensitiveName(groupName)
+                        : groupName;
                     return (
                       <div
                         key={groupName}
@@ -435,11 +490,11 @@ export function SettingsView({ settings, services, onClose, onSave, onSetService
                               void handleProjectToggle(groupName, ids, event.target.checked)
                             }
                             className="size-4 cursor-pointer accent-cyan-500"
-                            aria-label={`Mark the ${groupName} project and its services sensitive`}
+                            aria-label={`Mark the ${projectLabel} project and its services sensitive`}
                           />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-xs font-semibold uppercase tracking-[0.14em] text-zinc-300">
-                              {groupName}
+                              {projectLabel}
                             </span>
                           </span>
                           <span className="shrink-0 text-[11px] text-zinc-500">
@@ -461,10 +516,10 @@ export function SettingsView({ settings, services, onClose, onSave, onSetService
                                     )
                                   }
                                   className="size-4 cursor-pointer accent-cyan-500"
-                                  aria-label={`Mark ${service.name} sensitive`}
+                                  aria-label={`Mark ${displayServiceName(service, maskNames)} sensitive`}
                                 />
                                 <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">
-                                  {service.name}
+                                  {displayServiceName(service, maskNames)}
                                 </span>
                               </label>
                             </li>
