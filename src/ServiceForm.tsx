@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ServiceConfig } from "./types";
 import { Button } from "./Button";
 import { Field } from "./FormField";
@@ -7,8 +7,8 @@ import { looksLikeDevServer } from "./devServerHeuristics";
 import { fromDraft, toDraft, validate } from "./serviceFormModel";
 import type { ServiceFormDraft } from "./serviceFormModel";
 
-// Matches the shortcut label used elsewhere â€” `âŒ˜` on macOS, `Ctrl` otherwise.
-const modKey = navigator.userAgent.includes("Mac") ? "âŒ˜" : "Ctrl";
+// Matches the shortcut label used elsewhere — `⌘` on macOS, `Ctrl` otherwise.
+const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
 
 
 type Props = {
@@ -28,7 +28,7 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
 
   // Heuristic nudge: when the command looks like a dev server / watcher but PTY
   // mode is still off, suggest turning it on (see `looksLikeDevServer`). Purely
-  // a suggestion â€” without a TTY these tools tend to exit cleanly mid-HMR, and
+  // a suggestion — without a TTY these tools tend to exit cleanly mid-HMR, and
   // that failure is invisible, so we flag it at creation time rather than
   // letting the user discover it later. The user can ignore it or just tick the
   // checkbox directly.
@@ -145,7 +145,7 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
 
         <Field
           label="Pre-run"
-          hint="Optional. Runs before the command in the same shell, so env changes carry over â€” e.g. nvm use 20, source .venv/bin/activate. Leave empty to spawn directly."
+          hint="Optional. Runs before the command in the same shell, so env changes carry over — e.g. nvm use 20, source .venv/bin/activate. Leave empty to spawn directly."
         >
           <input
             value={draft.preRun}
@@ -223,7 +223,7 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
               Sensitive name
             </span>
             <span className="block text-[11px] text-zinc-500">
-              Mask this service's name (sidebar, pane header, search) while Stream mode is on â€” toggle it from the command palette ({modKey}+P) before screen-sharing.
+              Mask this service's name (sidebar, pane header, search) while Stream mode is on — toggle it from the command palette ({modKey}+P) before screen-sharing.
             </span>
           </span>
         </label>
@@ -245,7 +245,7 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
             <span className="min-w-0 flex-1">
               This looks like a dev server or watch command. Turn on{" "}
               <span className="font-medium">Run in pseudo-terminal</span> so it
-              survives hot-reloads â€” without a TTY these tools can exit cleanly
+              survives hot-reloads — without a TTY these tools can exit cleanly
               mid-rebuild.
             </span>
             <button
@@ -285,8 +285,8 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
           >
             {saving
               ? initial
-                ? "Savingâ€¦"
-                : "Addingâ€¦"
+                ? "Saving…"
+                : "Adding…"
               : initial
               ? "Save changes"
               : "Add service"}

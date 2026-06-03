@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
@@ -79,8 +79,8 @@ export function App() {
   // Lets the once-mounted exit listener call the latest startService closure.
   const startServiceRef = useRef<(service: ServiceConfig) => Promise<void>>(async () => {});
   const [editing, setEditing] = useState<EditTarget | null>(null);
-  // Map of serviceId â†’ true when its configured port is held by another process.
-  // Only meaningful when the service is not running â€” we never flag our own
+  // Map of serviceId → true when its configured port is held by another process.
+  // Only meaningful when the service is not running — we never flag our own
   // listener as a "conflict".
   const [portConflicts, setPortConflicts] = useState<Record<string, boolean>>({});
   // After a service exits non-zero and we can still see something listening
@@ -90,7 +90,7 @@ export function App() {
   const [portBlockers, setPortBlockers] = useState<
     Record<string, { pid: number; port: number }>
   >({});
-  // Services the user has chosen to "adopt" â€” i.e. treat the external
+  // Services the user has chosen to "adopt" — i.e. treat the external
   // process holding the port as if it were this service. We don't own its
   // stdout/stderr but we do show it as running and route Stop to kill the
   // adopted PID. Periodically reconciled against the live port holder so an
@@ -100,7 +100,7 @@ export function App() {
   >({});
   const [history, setHistory] = useState<Record<string, ServiceHistory>>({});
   const [searchOpen, setSearchOpen] = useState(false);
-  // Service id whose in-pane find bar is currently shown â€” null when closed.
+  // Service id whose in-pane find bar is currently shown — null when closed.
   // Only one pane shows the bar at a time; switching focus or closing the
   // pane clears it.
   const [searchPaneId, setSearchPaneId] = useState<string | null>(null);
@@ -111,7 +111,7 @@ export function App() {
   const [paneSearchSeed, setPaneSearchSeed] = useState<{
     serviceId: string;
     query: string;
-    // Bump counter so the same query â†’ same pane jump still re-triggers the
+    // Bump counter so the same query → same pane jump still re-triggers the
     // SearchAddon and re-runs the flash animation when re-clicked.
     nonce: number;
   } | null>(null);
@@ -132,8 +132,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  // The bottom shell drawer. Hidden by default â€” opened from the header button
-  // or with Ctrl/Cmd+â†“. Height is user-draggable from a handle on the drawer's
+  // The bottom shell drawer. Hidden by default — opened from the header button
+  // or with Ctrl/Cmd+↓. Height is user-draggable from a handle on the drawer's
   // top edge; state lives here so it survives toggle/remount of the drawer.
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(288);
@@ -141,7 +141,7 @@ export function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   // Stream mode: when on, services flagged `sensitive` have their names masked
   // across the UI so the window is safe to screen-share. Ephemeral (session
-  // only) â€” toggled from the command palette, restored when you toggle it off.
+  // only) — toggled from the command palette, restored when you toggle it off.
   const [streamMode, setStreamMode] = useState(false);
   // Drag-to-reorder state. `dragId` is the service currently being dragged;
   // `dropIndicator` is where the cyan "drop here" line / highlight is shown.
@@ -149,7 +149,7 @@ export function App() {
   // - "end-of-group": append source to the end of this group (and update its group field)
   // The ref mirrors `dragId` so the dragover handlers (which fire between
   // dragstart and React's next render) can read the active source
-  // synchronously and call preventDefault â€” without it, the OS shows the
+  // synchronously and call preventDefault — without it, the OS shows the
   // "forbidden" cursor on the very first dragover events.
   const [dragId, setDragId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
@@ -199,12 +199,18 @@ export function App() {
     () => ensureProjectAliases(groupNames, settings),
     [groupNames, settings]
   );
+  // A project name is replaced by its alias for either of two independent
+  // reasons: the manual sidebar toggle (`hiddenProjectNames`) is on, which
+  // hides it regardless of stream mode; or stream mode is on and the project is
+  // flagged sensitive (`sensitiveProjectNames`). The two never affect each
+  // other — stream mode is sovereign over sensitive items, the toggle is manual.
   const displayProjectName = useCallback(
     (groupName: string) =>
-      settings.hiddenProjectNames[groupName]
+      settings.hiddenProjectNames[groupName] ||
+      (streamMode && settings.sensitiveProjectNames[groupName])
         ? projectNameAliases[groupName] ?? groupName
         : groupName,
-    [projectNameAliases, settings.hiddenProjectNames]
+    [projectNameAliases, settings.hiddenProjectNames, settings.sensitiveProjectNames, streamMode]
   );
 
   // Services in the same order the sidebar renders them (grouped), so the
@@ -324,7 +330,7 @@ export function App() {
     }
 
     void persistSettings({ ...settings, projectNameAliases }).catch((error) => {
-      // Background alias-sync â€” surface to the dev console rather than the UI;
+      // Background alias-sync — surface to the dev console rather than the UI;
       // the user didn't initiate this and there's no obvious place to display it.
       console.warn("Failed to persist project name aliases:", errorMessage(error));
     });
@@ -366,7 +372,7 @@ export function App() {
     invoke<ServiceHistory>("get_service_history", { serviceId })
       .then((result) => setHistory((current) => ({ ...current, [serviceId]: result })))
       .catch(() => {
-        /* history unavailable â€” leave previous value */
+        /* history unavailable — leave previous value */
       });
   }, []);
 
@@ -413,10 +419,10 @@ export function App() {
       });
       if (problems.length > 0) {
         // Some entries were skipped (malformed/invalid/duplicate). Keep the
-        // loaded ones working and surface what was dropped â€” the full list is
+        // loaded ones working and surface what was dropped — the full list is
         // available on hover since the status line is clamped to two lines.
         const summary = problems.length === 1 ? "1 entry skipped" : `${problems.length} entries skipped`;
-        setManagerMessage(`Loaded ${loaded.length} services â€” ${summary}: ${problems.join("; ")}`);
+        setManagerMessage(`Loaded ${loaded.length} services — ${summary}: ${problems.join("; ")}`);
       } else {
         setManagerMessage(
           loaded.length > 0 ? `Loaded ${loaded.length} services` : "No services configured yet"
@@ -480,7 +486,7 @@ export function App() {
       setPortConflicts((current) =>
         current[serviceId] ? { ...current, [serviceId]: false } : current
       );
-      // Our process is now the live owner â€” any "blocker" / "adopted"
+      // Our process is now the live owner — any "blocker" / "adopted"
       // bookkeeping from before is obsolete and must not stick around.
       setPortBlockers((current) => {
         if (!current[serviceId]) return current;
@@ -534,7 +540,7 @@ export function App() {
       if (nextStatus === "failed") {
         maybeAutoRestart(serviceId);
       } else {
-        // Clean exit or user stop â€” reset the crash budget.
+        // Clean exit or user stop — reset the crash budget.
         delete autoRestartRef.current[serviceId];
       }
 
@@ -547,7 +553,7 @@ export function App() {
       if (nonZero && service && service.port != null) {
         const port = service.port;
         // Tiny delay so we re-probe after the OS has had a moment to settle
-        // â€” without it, our own freshly-released listener can briefly
+        // — without it, our own freshly-released listener can briefly
         // re-bind and we'd report ourselves as the blocker.
         window.setTimeout(() => {
           invoke<number | null>("find_port_holder", { port })
@@ -559,7 +565,7 @@ export function App() {
               }));
             })
             .catch(() => {
-              /* No netstat/lsof available â€” silent fallback. */
+              /* No netstat/lsof available — silent fallback. */
           });
         }, 400);
       }
@@ -592,7 +598,7 @@ export function App() {
 
       const now = Date.now();
       const record = autoRestartRef.current[serviceId] ?? { count: 0, lastAt: 0 };
-      // A quiet period resets the budget â€” a service that ran fine for a while
+      // A quiet period resets the budget — a service that ran fine for a while
       // and then crashed gets a fresh set of retries.
       if (now - record.lastAt > windowMs) {
         record.count = 0;
@@ -627,7 +633,7 @@ export function App() {
   const appendLog = useCallback((serviceId: string, chunk: string) => {
     // Apply the [HH:MM:SS] annotation *before* the chunk lands in the
     // in-memory buffer so the replay on pane mount renders with the same
-    // marks the live terminal saw â€” the buffer is the source of truth.
+    // marks the live terminal saw — the buffer is the source of truth.
     //
     // PTY services are exempt: their output carries cursor-addressing and
     // clear-screen escapes (spinners, progress bars, interactive prompts), and
@@ -698,7 +704,7 @@ export function App() {
   );
 
   // Kill the foreign process holding our port, then re-spawn the service.
-  // We clear the blocker eagerly so the banner disappears immediately â€” if
+  // We clear the blocker eagerly so the banner disappears immediately — if
   // the kill actually failed, the start attempt below will fail and a fresh
   // blocker entry will repopulate from the exit handler.
   const stopBlockerAndRestart = useCallback(
@@ -761,8 +767,8 @@ export function App() {
     [portBlockers]
   );
 
-  // Drop the adoption mapping without killing the adopted process â€” used by
-  // the "âœ•" affordance on the adopted badge. The service goes back to
+  // Drop the adoption mapping without killing the adopted process — used by
+  // the "✕" affordance on the adopted badge. The service goes back to
   // looking exited, which is accurate.
   const releaseAdopted = useCallback((serviceId: string) => {
     setAdoptedPids((current) => {
@@ -898,10 +904,14 @@ export function App() {
   // Toggle a single service's `sensitive` flag from the Settings curation
   // list. The flag lives on the service (not AppSettings), so we persist the
   // whole list like any other service edit and reload.
-  const setServiceSensitive = useCallback(
-    async (serviceId: string, sensitive: boolean) => {
+  // Flag one or more services sensitive in a single save. The Settings list
+  // uses the multi-id form when a project checkbox toggles all of its services
+  // at once, so we don't fan out into one save+reload per service.
+  const setServicesSensitive = useCallback(
+    async (serviceIds: string[], sensitive: boolean) => {
+      const ids = new Set(serviceIds);
       const next = services.map((service) =>
-        service.id === serviceId ? { ...service, sensitive } : service
+        ids.has(service.id) ? { ...service, sensitive } : service
       );
       await invoke("save_services", { services: next });
       await reloadServices();
@@ -983,7 +993,7 @@ export function App() {
   // Drag-resize the bottom terminal drawer. Mirrors `startSidebarDrag`: window-
   // level listeners so the drag survives the cursor leaving the thin handle,
   // and a body-level cursor + user-select lock for the duration of the drag.
-  // The drawer grows as the handle is dragged upward â€” `delta` is inverted.
+  // The drawer grows as the handle is dragged upward — `delta` is inverted.
   const startTerminalDrag = useCallback(
     (event: React.MouseEvent) => {
       event.preventDefault();
@@ -995,7 +1005,7 @@ export function App() {
       const onMove = (move: MouseEvent) => {
         const delta = move.clientY - startY;
         // Cap at ~80% of viewport so the drawer can never eat the whole window
-        // â€” the service panes still need to be visible to be useful.
+        // — the service panes still need to be visible to be useful.
         const maxHeight = Math.max(160, Math.round(window.innerHeight * 0.8));
         setTerminalHeight(clamp(startHeight - delta, 120, maxHeight));
       };
@@ -1095,7 +1105,7 @@ export function App() {
           : "Stream mode: hide sensitive names",
         subtitle:
           sensitiveCount === 0
-            ? "No services marked sensitive yet â€” set â€œSensitive nameâ€ when editing a service"
+            ? "No services marked sensitive yet — set “Sensitive name” when editing a service"
             : `Masks ${sensitiveCount} sensitive service name${
                 sensitiveCount === 1 ? "" : "s"
               } so the window is safe to screen-share`,
@@ -1145,7 +1155,7 @@ export function App() {
   );
 
   // Global keyboard shortcuts. Registered in the capture phase so they fire
-  // before a focused terminal â€” xterm consumes Ctrl-combos and stops their
+  // before a focused terminal — xterm consumes Ctrl-combos and stops their
   // propagation, so a bubble-phase listener would never see them. For each
   // shortcut we handle, `stopPropagation` then keeps the key from also
   // reaching the terminal. Modifier combos are ignored while the user is
@@ -1163,7 +1173,7 @@ export function App() {
         }
         if (searchPaneId) {
           // The PaneSearchBar's own Esc handler runs first when its input is
-          // focused â€” this is the fallback for when focus is elsewhere
+          // focused — this is the fallback for when focus is elsewhere
           // (e.g. user clicked back into the terminal but still wants Esc
           // to dismiss the bar).
           setSearchPaneId(null);
@@ -1186,7 +1196,7 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + Shift + F â†’ global log search.
+      // Ctrl/Cmd + Shift + F → global log search.
       if (event.shiftKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
         event.stopPropagation();
@@ -1198,9 +1208,9 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + F â†’ in-pane search bar for the focused pane. Handled here
+      // Ctrl/Cmd + F → in-pane search bar for the focused pane. Handled here
       // (before the form-field bail-out below) so it works while the xterm
-      // helper textarea has focus â€” that's the common case after clicking
+      // helper textarea has focus — that's the common case after clicking
       // into a terminal pane.
       if (event.key.toLowerCase() === "f") {
         const targetId = selected && paneIds.includes(selected.id) ? selected.id : null;
@@ -1212,7 +1222,7 @@ export function App() {
         return;
       }
 
-      // A real text field swallows the remaining shortcuts â€” but xterm's
+      // A real text field swallows the remaining shortcuts — but xterm's
       // hidden helper textarea is not real input, so shortcuts still work
       // while a terminal pane is focused.
       const target = event.target as HTMLElement | null;
@@ -1226,7 +1236,7 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + â† / â†’ â†’ toggle the left / right side panels.
+      // Ctrl/Cmd + ← / → → toggle the left / right side panels.
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         event.stopPropagation();
@@ -1239,14 +1249,14 @@ export function App() {
         setRightSidebarOpen((open) => !open);
         return;
       }
-      // Ctrl/Cmd + â†“ â†’ toggle the bottom shell drawer.
+      // Ctrl/Cmd + ↓ → toggle the bottom shell drawer.
       if (event.key === "ArrowDown") {
         event.preventDefault();
         event.stopPropagation();
         setTerminalOpen((open) => !open);
         return;
       }
-      // Ctrl/Cmd + P â†’ command palette.
+      // Ctrl/Cmd + P → command palette.
       if (event.key.toLowerCase() === "p") {
         event.preventDefault();
         event.stopPropagation();
@@ -1254,7 +1264,7 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd + 1..9 â†’ open the Nth visible service as the sole pane.
+      // Ctrl/Cmd + 1..9 → open the Nth visible service as the sole pane.
       if (/^[1-9]$/.test(event.key)) {
         const service = flatServices[Number(event.key) - 1];
         if (service) {
@@ -1268,7 +1278,7 @@ export function App() {
       switch (event.key.toLowerCase()) {
         case "w":
           // Close the focused service pane. Only acts when the focused service
-          // actually has an open pane â€” otherwise the shortcut is a no-op
+          // actually has an open pane — otherwise the shortcut is a no-op
           // rather than silently closing whatever happens to be leftmost.
           if (selected && paneIds.includes(selected.id)) {
             event.preventDefault();
@@ -1366,7 +1376,7 @@ export function App() {
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-16 items-center justify-between border-b border-white/10 px-5">
-          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+â†)`}>
+          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+←)`}>
             <Button
               variant="ghost"
               size="icon"
@@ -1377,7 +1387,7 @@ export function App() {
             </Button>
           </Tooltip>
           <div className="flex items-center gap-2">
-            <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+â†“)`}>
+            <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+↓)`}>
               <Button
                 variant="ghost"
                 size="icon"
@@ -1424,7 +1434,7 @@ export function App() {
             </Tooltip>
             <span className="mx-1 h-5 w-px bg-white/10" />
             <Tooltip
-              label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+â†’)`}
+              label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+→)`}
               side="bottom"
             >
               <Button
@@ -1441,7 +1451,7 @@ export function App() {
 
         {/*
           Keep the terminal panes / bottom drawer mounted while Settings is
-          open and just hide them â€” unmounting would dispose every xterm
+          open and just hide them — unmounting would dispose every xterm
           instance and wipe scrollback, which is a noticeable UX regression.
         */}
         <div
@@ -1500,7 +1510,7 @@ export function App() {
             services={services}
             onClose={() => setSettingsOpen(false)}
             onSave={(next) => persistSettings(next)}
-            onSetServiceSensitive={setServiceSensitive}
+            onSetServicesSensitive={setServicesSensitive}
           />
         ) : null}
       </section>

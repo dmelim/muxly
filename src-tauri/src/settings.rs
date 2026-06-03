@@ -20,6 +20,11 @@ pub struct AppSettings {
     pub hide_project_names: bool,
     #[serde(default)]
     pub hidden_project_names: BTreeMap<String, bool>,
+    /// Projects flagged sensitive in the Settings list. Distinct from
+    /// `hidden_project_names` (the manual sidebar toggle): these are hidden
+    /// only while stream mode is on, never on their own.
+    #[serde(default)]
+    pub sensitive_project_names: BTreeMap<String, bool>,
     #[serde(default)]
     pub project_name_aliases: BTreeMap<String, String>,
     #[serde(default = "default_auto_restart_max_attempts")]
@@ -40,6 +45,7 @@ impl Default for AppSettings {
             editor_command: default_editor_command().to_string(),
             hide_project_names: false,
             hidden_project_names: BTreeMap::new(),
+            sensitive_project_names: BTreeMap::new(),
             project_name_aliases: BTreeMap::new(),
             auto_restart_max_attempts: DEFAULT_AUTO_RESTART_MAX_ATTEMPTS,
             auto_restart_window_ms: DEFAULT_AUTO_RESTART_WINDOW_MS,

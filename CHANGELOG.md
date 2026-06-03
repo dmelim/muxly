@@ -27,9 +27,28 @@ section, and tag the commit `vX.Y.Z`.
 - **Frontend component structure.** Split large app/form files into focused
   components and helpers for service forms, service icon inputs, sidebars, app
   utilities, and detail rows. Behaviour is intended to stay unchanged.
+- **Sensitive services are now curated as a project tree.** The Settings list
+  groups services under their project with a checkbox per project and per
+  service. Marking a project or service sensitive hides/masks it **only while
+  Stream mode is on** — sensitive project names show their alias and sensitive
+  service names are masked to their last 3 characters; turning Stream mode off
+  reveals them. This is independent of the sidebar eye toggle, which still hides
+  a project name manually regardless of Stream mode. Checking a project also
+  marks all of its services as a convenience, after which you can uncheck
+  individual services without unchecking the project. Adds a
+  `sensitiveProjectNames` field to settings (backward-compatible default).
+- **Masked service names now keep their last 3 characters** (e.g.
+  `••••tor`) instead of a fixed bullet run, so panes and cards stay
+  distinguishable while Stream mode is on. Names of 3 characters or fewer are
+  still fully masked.
 
 ### Fixed
 
+- **Garbled punctuation in the UI.** `App.tsx` and `ServiceForm.tsx` had been
+  double-encoded (UTF-8 read as Windows-1252 and re-saved), so em dashes and
+  curly quotes rendered as mojibake — most visibly in the command palette's
+  Stream mode description and the "Sensitive name" form hint. Restored the
+  intended characters and stripped the stray byte-order marks.
 - **PTY services now kill their whole process tree on stop (Windows).**
   Previously, stopping a PTY-backed service killed only the immediate child,
   so any grandchildren it spawned could leak as orphans. `portable_pty`

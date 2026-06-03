@@ -40,7 +40,12 @@ export type LoadedServices = {
 
 export type AppSettings = {
   editorCommand: string;
+  // Manual per-project "hide name" toggle (the sidebar eye button). Hides the
+  // project name regardless of stream mode.
   hiddenProjectNames: Record<string, boolean>;
+  // Projects flagged sensitive in the Settings list. Independent of the manual
+  // toggle above — these are hidden only while stream mode is on.
+  sensitiveProjectNames: Record<string, boolean>;
   projectNameAliases: Record<string, string>;
   // Auto-restart guardrails — when a service crashes (status: failed), we
   // re-spawn up to `autoRestartMaxAttempts` times within `autoRestartWindowMs`.
@@ -90,13 +95,25 @@ export function formatCommand(service: ServiceConfig) {
   return [service.program, ...service.args].join(" ");
 }
 
-// Placeholder shown in place of a sensitive service's name while stream mode
-// is on. Fixed-length and identifier-free so it leaks nothing about the real
-// name; the service icon stays visible so panes/cards remain distinguishable.
-export const MASKED_SERVICE_NAME = "•••••••";
+// How many trailing characters of a sensitive name stay visible while masked,
+// and the cap on how many bullets stand in for the hidden portion (so a very
+// long name doesn't produce an unwieldy run of dots).
+const VISIBLE_SUFFIX = 3;
+const MAX_MASK_BULLETS = 8;
+
+// Mask a sensitive service name, keeping only its last few characters so panes
+// and cards stay distinguishable while the bulk of the name is hidden. Names
+// short enough that the suffix would reveal everything are fully bulleted.
+export function maskSensitiveName(name: string): string {
+  if (name.length <= VISIBLE_SUFFIX) {
+    return "•".repeat(Math.max(name.length, 1));
+  }
+  const hidden = Math.min(name.length - VISIBLE_SUFFIX, MAX_MASK_BULLETS);
+  return "•".repeat(hidden) + name.slice(-VISIBLE_SUFFIX);
+}
 
 // The name to display for a service given the current stream-mode state. Masks
 // only services explicitly flagged `sensitive`; everything else is unchanged.
 export function displayServiceName(service: ServiceConfig, streamMode: boolean): string {
-  return streamMode && service.sensitive ? MASKED_SERVICE_NAME : service.name;
+  return streamMode && service.sensitive ? maskSensitiveName(service.name) : service.name;
 }
