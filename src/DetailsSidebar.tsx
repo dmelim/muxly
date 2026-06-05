@@ -16,6 +16,10 @@ type Props = {
   settings: AppSettings;
   statuses: Record<string, ServiceStatus>;
   pids: Record<string, number>;
+  // The port a running service actually bound to. For an auto-port service this
+  // may differ from `service.port` (the preference); used to label/link the
+  // real port while it's running.
+  actualPorts: Record<string, number>;
   adoptedPids: Record<string, { pid: number; port: number }>;
   lastExit: Record<string, string>;
   history: Record<string, ServiceHistory>;
@@ -35,6 +39,7 @@ export function DetailsSidebar({
   settings,
   statuses,
   pids,
+  actualPorts,
   adoptedPids,
   lastExit,
   history,
@@ -103,13 +108,19 @@ export function DetailsSidebar({
               >
                 Open folder
               </Button>
-              {selected.port ? (
+              {actualPorts[selected.id] ?? selected.port ? (
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => openServiceUrl(selected.port!, selected.id, appendLog)}
+                  onClick={() =>
+                    openServiceUrl(
+                      (actualPorts[selected.id] ?? selected.port)!,
+                      selected.id,
+                      appendLog
+                    )
+                  }
                 >
-                  Open localhost:{selected.port}
+                  Open localhost:{actualPorts[selected.id] ?? selected.port}
                 </Button>
               ) : null}
             </div>
@@ -142,7 +153,13 @@ export function DetailsSidebar({
               <Detail label="Group">
                 {selected.group ? displayProjectName(groupKey(selected)) : "None"}
               </Detail>
-              <Detail label="Port">{selected.port ?? "None"}</Detail>
+              <Detail label="Port">
+                {actualPorts[selected.id] != null && actualPorts[selected.id] !== selected.port
+                  ? `${actualPorts[selected.id]} (auto, prefers ${selected.port ?? "any"})`
+                  : selected.autoPort
+                  ? `${selected.port ?? "any"} (auto-roll)`
+                  : selected.port ?? "None"}
+              </Detail>
               <Detail label="Env">
                 {Object.keys(selected.env).length === 0
                   ? "None"

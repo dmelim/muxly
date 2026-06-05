@@ -6,7 +6,6 @@ use crate::{
         ProcessStartedEvent, PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED,
     },
     history::HistoryDb,
-    net::is_port_available,
     process::{
         configure_process_group, resolve_program, resume_child, ProcessRegistry, RunningProcess,
     },
@@ -39,17 +38,12 @@ pub fn spawn_process(
         });
     }
 
-    // Pre-flight port check. We probe BEFORE spawning so we never half-start a
-    // service whose port belongs to someone else; the user gets a clean error
-    // and the conflicting process is left alone.
-    if let Some(port) = service.port {
-        if !is_port_available(port) {
-            return Err(AppError::PortInUse {
-                service_name: service.name,
-                port,
-            });
-        }
-    }
+    // Resolve the effective port + command inputs. For a plain `port` this is
+    // the historical free-or-fail preflight; for an `auto_port` service it
+    // rolls a busy port to the next free one and injects the chosen value into
+    // args/env (see `process::port`). Done BEFORE spawning so we never
+    // half-start a service whose port belongs to someone else.
+    let resolved = super::port::resolve_spawn(&service)?;
 
     let base_dir = config_dir.current();
     let cwd = resolve_cwd(&service.cwd, base_dir.as_deref())?;
@@ -61,17 +55,17 @@ pub fn spawn_process(
         match super::shell::active_prelude(&service.pre_run) {
             Some(prelude) => {
                 let (sh, sh_args) =
-                    super::shell::shell_prelude_command(prelude, &service.program, &service.args);
+                    super::shell::shell_prelude_command(prelude, &service.program, &resolved.args);
                 (std::ffi::OsString::from(sh), sh_args)
             }
-            None => (resolve_program(&service.program), service.args.clone()),
+            None => (resolve_program(&service.program), resolved.args.clone()),
         };
 
     let mut command = Command::new(&program);
     command
         .args(&args)
         .current_dir(&cwd)
-        .envs(&service.env)
+        .envs(&resolved.env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -110,11 +104,17 @@ pub fn spawn_process(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
+    // One token for this run, shared by the registry entry and the waiter so a
+    // fast restart reusing `service.id` can't have its entry reaped by the
+    // previous run's waiter. See `ProcessRegistry::next_token`.
+    let run_token = registry.next_token();
+
     registry.insert(
         service.id.clone(),
         RunningProcess {
             terminator,
             stop_requested: false,
+            run_token,
         },
     );
 
@@ -129,6 +129,8 @@ pub fn spawn_process(
         ProcessStartedEvent {
             service_id: service.id.clone(),
             pid,
+            run_token,
+            port: resolved.port,
         },
     );
 
@@ -137,6 +139,7 @@ pub fn spawn_process(
             app.clone(),
             on_output.clone(),
             service.id.clone(),
+            run_token,
             OutputStream::Stdout,
             stdout,
         );
@@ -147,6 +150,7 @@ pub fn spawn_process(
             app.clone(),
             on_output,
             service.id.clone(),
+            run_token,
             OutputStream::Stderr,
             stderr,
         );
@@ -156,9 +160,11 @@ pub fn spawn_process(
     let service_id = service.id;
     thread::spawn(move || {
         let exit = child.wait();
+        // Reclaim only if this run still owns the entry — a faster restart may
+        // already have replaced it under the same `service_id`.
         let requested = app_for_wait
             .try_state::<ProcessRegistry>()
-            .and_then(|state| state.remove(&service_id))
+            .and_then(|state| state.remove_if_token(&service_id, run_token))
             .map(|process| process.stop_requested)
             .unwrap_or(false);
 
@@ -171,6 +177,7 @@ pub fn spawn_process(
                     PROCESS_EXITED,
                     ProcessExitedEvent {
                         service_id,
+                        run_token,
                         code: status.code(),
                         requested,
                     },
@@ -184,6 +191,7 @@ pub fn spawn_process(
                     PROCESS_FAILED,
                     ProcessFailedEvent {
                         service_id,
+                        run_token,
                         message: error.to_string(),
                     },
                 );
@@ -198,6 +206,7 @@ fn spawn_output_reader<R>(
     app: AppHandle,
     on_output: Channel<ProcessOutputEvent>,
     service_id: String,
+    run_token: u64,
     stream: OutputStream,
     reader: R,
 ) where
@@ -214,6 +223,7 @@ fn spawn_output_reader<R>(
                     if let Some(chunk) = decoder.finish() {
                         let _ = on_output.send(ProcessOutputEvent {
                             service_id: service_id.clone(),
+                            run_token,
                             stream,
                             chunk,
                         });
@@ -224,6 +234,7 @@ fn spawn_output_reader<R>(
                     if let Some(chunk) = decoder.decode(&buffer[..count]) {
                         let _ = on_output.send(ProcessOutputEvent {
                             service_id: service_id.clone(),
+                            run_token,
                             stream,
                             chunk,
                         });
@@ -234,6 +245,7 @@ fn spawn_output_reader<R>(
                         PROCESS_FAILED,
                         ProcessFailedEvent {
                             service_id: service_id.clone(),
+                            run_token,
                             message: error.to_string(),
                         },
                     );

@@ -16,6 +16,13 @@ pub const SERVICES_CHANGED: &str = "services_changed";
 pub struct ProcessStartedEvent {
     pub service_id: String,
     pub pid: u32,
+    /// Monotonic identifier for this concrete run of the service. The frontend
+    /// uses it to ignore stale events from previous runs after quick restarts.
+    pub run_token: u64,
+    /// The port the service actually bound to, if any. For an auto-port service
+    /// this is the rolled/chosen port, which may differ from its configured
+    /// preference; the UI uses it to label and link the real port.
+    pub port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -29,6 +36,7 @@ pub enum OutputStream {
 #[serde(rename_all = "camelCase")]
 pub struct ProcessOutputEvent {
     pub service_id: String,
+    pub run_token: u64,
     pub stream: OutputStream,
     pub chunk: String,
 }
@@ -37,6 +45,7 @@ pub struct ProcessOutputEvent {
 #[serde(rename_all = "camelCase")]
 pub struct ProcessExitedEvent {
     pub service_id: String,
+    pub run_token: u64,
     pub code: Option<i32>,
     pub requested: bool,
 }
@@ -45,6 +54,7 @@ pub struct ProcessExitedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct ProcessFailedEvent {
     pub service_id: String,
+    pub run_token: u64,
     pub message: String,
 }
 

@@ -21,8 +21,7 @@ use crate::{
         ProcessStartedEvent, PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED,
     },
     history::HistoryDb,
-    net::is_port_available,
-    process::{ProcessRegistry, RunningProcess},
+    process::{ProcessRegistry, RunToken, RunningProcess},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
 use parking_lot::Mutex;
@@ -50,6 +49,10 @@ const DEFAULT_PTY_ROWS: u16 = 30;
 struct ServicePtySession {
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
+    /// The run this session belongs to. A fast restart reuses the `service_id`
+    /// key, so the waiter that tears down the *previous* run must not drop the
+    /// session the *new* run just inserted — it compares this token first.
+    run_token: RunToken,
 }
 
 /// App-wide registry of live PTY-backed service sessions, keyed by service id.
@@ -73,8 +76,17 @@ impl ServicePtyRegistry {
         self.sessions.lock().get(service_id).cloned()
     }
 
-    fn remove(&self, service_id: &str) {
-        self.sessions.lock().remove(service_id);
+    /// Drop the session for `service_id` only if it still belongs to `token`.
+    /// A no-op when a newer run already replaced it, so a stale waiter can't
+    /// EOF the live run's PTY by dropping its master out from under it.
+    fn remove_if_token(&self, service_id: &str, token: RunToken) {
+        let mut sessions = self.sessions.lock();
+        if sessions
+            .get(service_id)
+            .is_some_and(|session| session.run_token == token)
+        {
+            sessions.remove(service_id);
+        }
     }
 }
 
@@ -141,16 +153,10 @@ pub fn spawn_service_pty(
         });
     }
 
-    // Pre-flight port check, same as the pipe path — we never want to half-
-    // start a service whose port belongs to someone else.
-    if let Some(port) = service.port {
-        if !is_port_available(port) {
-            return Err(AppError::PortInUse {
-                service_name: service.name,
-                port,
-            });
-        }
-    }
+    // Resolve the effective port + command inputs (free-or-fail preflight for a
+    // plain port; roll-and-inject for an auto-port service). Same as the pipe
+    // path — see `process::port`.
+    let resolved = super::port::resolve_spawn(&service)?;
 
     let base_dir = config_dir.current();
     let cwd: PathBuf = resolve_cwd(&service.cwd, base_dir.as_deref())?;
@@ -173,8 +179,8 @@ pub fn spawn_service_pty(
     // command share one environment (see `process::shell`); otherwise we spawn
     // the program directly.
     let (program, args) = match super::shell::active_prelude(&service.pre_run) {
-        Some(prelude) => super::shell::shell_prelude_command(prelude, &service.program, &service.args),
-        None => (service.program.clone(), service.args.clone()),
+        Some(prelude) => super::shell::shell_prelude_command(prelude, &service.program, &resolved.args),
+        None => (service.program.clone(), resolved.args.clone()),
     };
 
     // CommandBuilder is portable_pty's analogue of std::process::Command. It
@@ -185,12 +191,12 @@ pub fn spawn_service_pty(
         command.arg(arg);
     }
     command.cwd(&cwd);
-    for (key, value) in &service.env {
+    for (key, value) in &resolved.env {
         command.env(key, value);
     }
     // Hint xterm-compatible escape handling for tools that probe TERM. Most
     // dev servers fall back to monochrome without this.
-    if !service.env.contains_key("TERM") {
+    if !resolved.env.contains_key("TERM") {
         command.env("TERM", "xterm-256color");
     }
 
@@ -223,11 +229,17 @@ pub fn spawn_service_pty(
     // killer. See `platform::pty_terminator`.
     let terminator = pty_terminator(killer, pid);
 
+    // One token for this run, shared by the registry entry, the PTY session,
+    // and the waiter below. A fast restart reuses `service.id`, so cleanup
+    // compares this token to avoid the stale waiter dropping the new run.
+    let run_token = registry.next_token();
+
     registry.insert(
         service.id.clone(),
         RunningProcess {
             terminator,
             stop_requested: false,
+            run_token,
         },
     );
 
@@ -241,6 +253,7 @@ pub fn spawn_service_pty(
         ServicePtySession {
             writer: Mutex::new(writer),
             master: Mutex::new(pair.master),
+            run_token,
         },
     );
 
@@ -254,6 +267,8 @@ pub fn spawn_service_pty(
         ProcessStartedEvent {
             service_id: service.id.clone(),
             pid,
+            run_token,
+            port: resolved.port,
         },
     );
 
@@ -263,7 +278,7 @@ pub fn spawn_service_pty(
         let service_id = service.id.clone();
         let on_output = on_output.clone();
         thread::spawn(move || {
-            pump_output(reader, &service_id, &on_output);
+            pump_output(reader, &service_id, run_token, &on_output);
         });
     }
 
@@ -274,18 +289,22 @@ pub fn spawn_service_pty(
     thread::spawn(move || {
         let exit = child.wait();
 
+        // Only reclaim entries that still belong to *this* run. A fast restart
+        // reusing `service_id` may have already inserted a newer run under the
+        // same key; `remove_if_token` leaves that live run untouched.
         let requested = app_for_wait
             .try_state::<ProcessRegistry>()
-            .and_then(|state| state.remove(&service_id))
+            .and_then(|state| state.remove_if_token(&service_id, run_token))
             .map(|process| process.stop_requested)
             .unwrap_or(false);
 
         // Child has exited: drop the PTY writer/master, releasing the
         // pseudo-terminal. Done here, after `wait()`, so the master stayed
         // alive for the whole session — dropping it earlier would EOF the
-        // slave and kill the child prematurely.
+        // slave and kill the child prematurely. Token-guarded so we never EOF
+        // a newer run's master.
         if let Some(sessions) = app_for_wait.try_state::<ServicePtyRegistry>() {
-            sessions.remove(&service_id);
+            sessions.remove_if_token(&service_id, run_token);
         }
 
         match exit {
@@ -302,6 +321,7 @@ pub fn spawn_service_pty(
                     PROCESS_EXITED,
                     ProcessExitedEvent {
                         service_id,
+                        run_token,
                         code,
                         requested,
                     },
@@ -315,6 +335,7 @@ pub fn spawn_service_pty(
                     PROCESS_FAILED,
                     ProcessFailedEvent {
                         service_id,
+                        run_token,
                         message: error.to_string(),
                     },
                 );
@@ -328,6 +349,7 @@ pub fn spawn_service_pty(
 fn pump_output(
     mut reader: Box<dyn Read + Send>,
     service_id: &str,
+    run_token: RunToken,
     on_output: &Channel<ProcessOutputEvent>,
 ) {
     let mut buf = [0u8; 4096];
@@ -342,6 +364,7 @@ fn pump_output(
                 if on_output
                     .send(ProcessOutputEvent {
                         service_id: service_id.to_string(),
+                        run_token,
                         stream: OutputStream::Stdout,
                         chunk,
                     })

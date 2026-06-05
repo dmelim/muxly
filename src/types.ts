@@ -9,6 +9,14 @@ export type ServiceConfig = {
   cwd: string;
   env: Record<string, string>;
   port?: number | null;
+  // When true, `port` is a *preferred* port: if it's busy at launch Muxly rolls
+  // to the next free port and injects the chosen value into the process (env var
+  // named by `portEnvVar`, default PORT, plus any `{port}` placeholders in args
+  // and env values). When false, a busy port is a hard error. Default false.
+  autoPort: boolean;
+  // Env var name that receives the chosen port when `autoPort` is on. Empty =
+  // PORT. Ignored when autoPort is off.
+  portEnvVar?: string | null;
   group?: string | null;
   autoRestart: boolean;
   // Spawn the service attached to a pseudo-terminal instead of pipes. Needed
@@ -67,6 +75,7 @@ export type AppSettings = {
 
 export type ProcessOutputEvent = {
   serviceId: string;
+  runToken: number;
   stream: "stdout" | "stderr";
   chunk: string;
 };
@@ -74,16 +83,22 @@ export type ProcessOutputEvent = {
 export type ProcessStartedEvent = {
   serviceId: string;
   pid: number;
+  runToken: number;
+  // The port the service actually bound to, if any. For an auto-port service
+  // this is the rolled/chosen port, which may differ from the configured one.
+  port?: number | null;
 };
 
 export type ProcessExitedEvent = {
   serviceId: string;
+  runToken: number;
   code: number | null;
   requested: boolean;
 };
 
 export type ProcessFailedEvent = {
   serviceId: string;
+  runToken: number;
   message: string;
 };
 

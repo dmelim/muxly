@@ -119,6 +119,8 @@ export function ImportPanel({ existingIds, onImport, onCancel }: Props) {
           cwd: row.cwd,
           env: {},
           port: null,
+          autoPort: false,
+          portEnvVar: null,
           group,
           autoRestart: false,
           usePty: false,

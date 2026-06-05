@@ -156,7 +156,14 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
         </Field>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Port" hint="Optional, for browser open">
+          <Field
+            label="Port"
+            hint={
+              draft.autoPort
+                ? "Preferred port — rolls to the next free one if busy"
+                : "Optional, for browser open"
+            }
+          >
             <input
               value={draft.port}
               onChange={(e) => setDraft({ ...draft, port: e.target.value })}
@@ -176,6 +183,40 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
             />
           </Field>
         </div>
+
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={draft.autoPort}
+            onChange={(e) => setDraft({ ...draft, autoPort: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block text-xs font-medium uppercase tracking-wider text-zinc-400">
+              Auto-roll port if busy
+            </span>
+            <span className="block text-[11px] text-zinc-500">
+              Treat Port as a preference: if it's taken, start on the next free
+              port instead of failing. Muxly injects the chosen port as an env
+              var and substitutes any <code>{"{port}"}</code> in args and env
+              values, so the process always uses the right one.
+            </span>
+          </span>
+        </label>
+
+        {draft.autoPort ? (
+          <Field
+            label="Port env var"
+            hint="Environment variable set to the chosen port. Blank = PORT."
+          >
+            <input
+              value={draft.portEnvVar}
+              onChange={(e) => setDraft({ ...draft, portEnvVar: e.target.value })}
+              className="form-input font-mono text-xs"
+              placeholder="PORT"
+            />
+          </Field>
+        ) : null}
 
         <label className="flex items-start gap-2">
           <input

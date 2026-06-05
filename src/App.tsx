@@ -57,6 +57,10 @@ export function App() {
   const [paneIds, setPaneIds] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<Record<string, ServiceStatus>>({});
   const [pids, setPids] = useState<Record<string, number>>({});
+  // The port a running service actually bound to (from PROCESS_STARTED). For an
+  // auto-port service this may differ from its configured preference; cleared
+  // on exit. Drives the "Open localhost:N" affordance and the manager note.
+  const [actualPorts, setActualPorts] = useState<Record<string, number>>({});
   const [lastExit, setLastExit] = useState<Record<string, string>>({});
   const [managerMessage, setManagerMessage] = useState("Loading service config...");
   // One xterm terminal per open pane, keyed by service id.
@@ -78,6 +82,9 @@ export function App() {
   const autoRestartRef = useRef<Record<string, { count: number; lastAt: number }>>({});
   // Lets the once-mounted exit listener call the latest startService closure.
   const startServiceRef = useRef<(service: ServiceConfig) => Promise<void>>(async () => {});
+  // Backend run token for each service's current live run. A fast restart can
+  // leave stale output/exit/failure events from the old run in flight.
+  const activeRunTokensRef = useRef<Record<string, number>>({});
   const [editing, setEditing] = useState<EditTarget | null>(null);
   // Map of serviceId → true when its configured port is held by another process.
   // Only meaningful when the service is not running — we never flag our own
@@ -390,7 +397,9 @@ export function App() {
   const scanPorts = useCallback(async (servicesToScan: ServiceConfig[]) => {
     const probes = await Promise.all(
       servicesToScan
-        .filter((service) => service.port != null)
+        // Auto-port services roll off a busy port by design, so a taken
+        // preferred port isn't a conflict worth flagging.
+        .filter((service) => service.port != null && !service.autoPort)
         .map(async (service) => {
           try {
             const available = await invoke<boolean>("check_port", { port: service.port });
@@ -481,9 +490,22 @@ export function App() {
     }
 
     trackUnlisten(listen<ProcessStartedEvent>(PROCESS_STARTED, (event) => {
-      const { serviceId, pid } = event.payload;
+      const { serviceId, pid, runToken, port } = event.payload;
+      activeRunTokensRef.current[serviceId] = runToken;
       setStatuses((current) => ({ ...current, [serviceId]: "running" }));
       setPids((current) => ({ ...current, [serviceId]: pid }));
+      // Record the port the process actually bound to, and note when auto-port
+      // had to roll off the preferred one so the collision is visible.
+      if (port != null) {
+        setActualPorts((current) => ({ ...current, [serviceId]: port }));
+        const service = servicesRef.current.find((s) => s.id === serviceId);
+        if (service?.autoPort && service.port != null && service.port !== port) {
+          appendLog(
+            serviceId,
+            `\r\n\x1b[33m[manager] port ${service.port} busy — using ${port} instead\x1b[0m\r\n`
+          );
+        }
+      }
       // The port (if any) now belongs to this service; clear any stale conflict.
       setPortConflicts((current) =>
         current[serviceId] ? { ...current, [serviceId]: false } : current
@@ -507,7 +529,11 @@ export function App() {
     }));
 
     trackUnlisten(listen<ProcessExitedEvent>(PROCESS_EXITED, (event) => {
-      const { serviceId, code, requested } = event.payload;
+      const { serviceId, runToken, code, requested } = event.payload;
+      if (activeRunTokensRef.current[serviceId] !== runToken) {
+        return;
+      }
+      delete activeRunTokensRef.current[serviceId];
       delete outputChannelsRef.current[serviceId];
       const nextStatus: ServiceStatus = requested
         ? "stopped"
@@ -516,6 +542,12 @@ export function App() {
         : "failed";
       setStatuses((current) => ({ ...current, [serviceId]: nextStatus }));
       setPids((current) => {
+        const next = { ...current };
+        delete next[serviceId];
+        return next;
+      });
+      setActualPorts((current) => {
+        if (current[serviceId] == null) return current;
         const next = { ...current };
         delete next[serviceId];
         return next;
@@ -552,7 +584,9 @@ export function App() {
       // so the user can stop-and-restart or adopt without leaving the app.
       const service = servicesRef.current.find((s) => s.id === serviceId);
       const nonZero = !requested && code !== 0 && code !== null;
-      if (nonZero && service && service.port != null) {
+      // Auto-port services can't fail *because* the preferred port was taken —
+      // Muxly would have rolled to a free one — so skip the blocker probe.
+      if (nonZero && service && service.port != null && !service.autoPort) {
         const port = service.port;
         // Tiny delay so we re-probe after the OS has had a moment to settle
         // — without it, our own freshly-released listener can briefly
@@ -574,7 +608,11 @@ export function App() {
     }));
 
     trackUnlisten(listen<ProcessFailedEvent>(PROCESS_FAILED, (event) => {
-      const { serviceId, message } = event.payload;
+      const { serviceId, runToken, message } = event.payload;
+      if (activeRunTokensRef.current[serviceId] !== runToken) {
+        return;
+      }
+      delete activeRunTokensRef.current[serviceId];
       delete outputChannelsRef.current[serviceId];
       setStatuses((current) => ({ ...current, [serviceId]: "failed" }));
       appendLog(serviceId, `\r\n\x1b[31m[manager] ${message}\x1b[0m\r\n`);
@@ -675,7 +713,11 @@ export function App() {
 
       const onOutput = new Channel<ProcessOutputEvent>();
       onOutput.onmessage = (msg) => {
-        const { serviceId, stream, chunk } = msg;
+        const { serviceId, runToken, stream, chunk } = msg;
+        const activeRunToken = activeRunTokensRef.current[serviceId];
+        if (activeRunToken != null && activeRunToken !== runToken) {
+          return;
+        }
         appendLog(serviceId, stream === "stderr" ? `\x1b[31m${chunk}\x1b[0m` : chunk);
       };
       outputChannelsRef.current[service.id] = onOutput;
@@ -1538,6 +1580,7 @@ export function App() {
           settings={settings}
           statuses={statuses}
           pids={pids}
+          actualPorts={actualPorts}
           adoptedPids={adoptedPids}
           lastExit={lastExit}
           history={history}
@@ -1591,7 +1634,6 @@ export function App() {
     </>
   );
 }
-
 
 
 

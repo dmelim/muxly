@@ -63,6 +63,13 @@ pub enum AppError {
     #[error("Port {port} is already in use (cannot start {service_name})")]
     PortInUse { service_name: String, port: u16 },
 
+    #[error("No free port found for {service_name} in {tried} ports starting at {base}")]
+    NoFreePort {
+        service_name: String,
+        base: u16,
+        tried: u16,
+    },
+
     #[error("History database error: {0}")]
     Database(String),
 }
@@ -80,6 +87,7 @@ impl AppError {
             Self::ProcessStart { .. } => "process_start_failed",
             Self::ProcessStop(_) => "process_stop_failed",
             Self::PortInUse { .. } => "port_in_use",
+            Self::NoFreePort { .. } => "no_free_port",
             Self::Database(_) => "database_error",
         }
     }

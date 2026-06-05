@@ -18,6 +18,17 @@ pub struct ServiceConfig {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub port: Option<u16>,
+    /// When true, treat `port` as a *preferred* port: if it's already taken at
+    /// launch, Muxly rolls upward to the next free port and injects the chosen
+    /// value into the process (env var named by `port_env_var`, default `PORT`,
+    /// plus any `{port}` placeholders in `args`/`env` values). When false, a
+    /// busy `port` is a hard error as before. Defaults to false.
+    #[serde(default)]
+    pub auto_port: bool,
+    /// Name of the environment variable that receives the chosen port when
+    /// `auto_port` is on. Absent/empty = `PORT`. Ignored when `auto_port` is off.
+    #[serde(default)]
+    pub port_env_var: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
     /// When true, the frontend re-spawns the service if it exits with a
@@ -156,6 +167,8 @@ mod tests {
             cwd: ".".to_string(),
             env: HashMap::new(),
             port: Some(3000),
+            auto_port: false,
+            port_env_var: None,
             group: None,
             auto_restart: false,
             use_pty: false,

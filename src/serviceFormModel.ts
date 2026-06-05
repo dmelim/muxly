@@ -10,6 +10,8 @@ export type ServiceFormDraft = {
   cwd: string;
   envText: string; // KEY=value per line
   port: string; // string for input control
+  autoPort: boolean; // roll to next free port if `port` is busy, and inject it
+  portEnvVar: string; // env var to receive the chosen port (blank = PORT)
   group: string;
   autoRestart: boolean;
   usePty: boolean;
@@ -27,6 +29,8 @@ export function toDraft(service: ServiceConfig | null): ServiceFormDraft {
       cwd: ".",
       envText: "",
       port: "",
+      autoPort: false,
+      portEnvVar: "",
       group: "",
       autoRestart: false,
       usePty: false,
@@ -49,6 +53,8 @@ export function toDraft(service: ServiceConfig | null): ServiceFormDraft {
       .map(([k, v]) => `${k}=${v}`)
       .join("\n"),
     port: service.port != null ? String(service.port) : "",
+    autoPort: service.autoPort ?? false,
+    portEnvVar: service.portEnvVar ?? "",
     group: service.group ?? "",
     autoRestart: service.autoRestart,
     usePty: service.usePty,
@@ -91,6 +97,8 @@ export function fromDraft(draft: ServiceFormDraft): ServiceConfig {
     cwd: draft.cwd.trim() || ".",
     env,
     port: Number.isFinite(port) ? port : null,
+    autoPort: draft.autoPort,
+    portEnvVar: draft.autoPort ? draft.portEnvVar.trim() || null : null,
     group: groupValue || null,
     autoRestart: draft.autoRestart,
     usePty: draft.usePty,

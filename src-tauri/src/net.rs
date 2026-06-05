@@ -21,6 +21,16 @@ pub fn is_port_available(port: u16) -> bool {
     TcpListener::bind(("0.0.0.0", port)).is_ok()
 }
 
+/// Find a free port at or after `base`, probing up to `max_attempts` ports.
+/// Returns the first bindable port, or `None` if every candidate in the range
+/// is taken (or the range runs past `u16::MAX`). Used by services with
+/// auto-port enabled so a busy preferred port rolls to the next free one.
+pub fn find_free_port_from(base: u16, max_attempts: u16) -> Option<u16> {
+    (base..=u16::MAX)
+        .take(max_attempts as usize)
+        .find(|&port| is_port_available(port))
+}
+
 /// Return the PID currently listening on `port`, if any. None when the port
 /// is free, when no tool we can call is available, or when parsing fails —
 /// callers treat None as "we don't know who has it" rather than "free".
