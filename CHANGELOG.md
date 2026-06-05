@@ -24,6 +24,9 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Changed
 
+- **Pane lifecycle controls use a single slot.** Start, Restart, and Stop now
+  replace each other in the terminal pane header instead of showing separate
+  Start and Stop buttons with one disabled.
 - **Frontend component structure.** Split large app/form files into focused
   components and helpers for service forms, service icon inputs, sidebars, app
   utilities, and detail rows. Behaviour is intended to stay unchanged.
@@ -48,6 +51,17 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- **Stale restart events no longer clobber the new run.** Service lifecycle and
+  output events now include the run token, and the frontend ignores exit,
+  failure, and output events from older runs once a newer run has started.
+- **Restarting a service no longer hangs with a blank pane.** A stop→start of
+  the same service could leave the new run started but producing no output (and
+  unstoppable) until you stopped and started again. The previous run's waiter
+  thread tears down by `service_id`, and on a fast restart it could remove the
+  *new* run's registry entry and PTY session — dropping the master and killing
+  the output pump out from under the live process. Each run now carries a
+  monotonic run token and cleanup is a compare-and-remove, so a stale waiter
+  can never clobber a newer run. Affects both the PTY and pipe spawn paths.
 - **Garbled punctuation in the UI.** `App.tsx` and `ServiceForm.tsx` had been
   double-encoded (UTF-8 read as Windows-1252 and re-saved), so em dashes and
   curly quotes rendered as mojibake — most visibly in the command palette's
@@ -66,8 +80,23 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- **Auto-roll a busy port (opt-in port management).** A new per-service
+  **Auto-roll port if busy** toggle turns the service's `port` into a
+  *preference*: if it's already taken at launch, Muxly starts on the next free
+  port (probing up to 64 ports upward) instead of failing. The chosen port is
+  injected into the process so the two can never disagree — it's set as an
+  environment variable (name configurable per service via **Port env var**,
+  default `PORT`) and substituted for any `{port}` placeholder in the service's
+  args and env values. The pane logs `port 3000 busy — using 3001 instead` when
+  it rolls, the Inspector's "Open localhost:N" and Port row reflect the real
+  bound port, and port-conflict flags/blocker probes are suppressed for
+  auto-port services (a busy preferred port is expected, not an error). Adds
+  `autoPort` and `portEnvVar` to the service schema (backward-compatible
+  defaults: off / `PORT`) and a `port` field to the `process_started` event.
+  Non-auto services are unchanged: a busy `port` is still a hard error and
+  nothing is injected.
 - **Collapsed projects stay collapsed across restarts.** Minimizing
-  (collapsing) a project in the sidebar is now remembered between sessions ?
+  (collapsing) a project in the sidebar is now remembered between sessions —
   reopening the app no longer expands every project back open. The state lives
   in a new `collapsedProjectNames` settings field (backward-compatible default:
   all expanded), persisted the same way as the per-project name-privacy toggle.
