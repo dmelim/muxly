@@ -499,7 +499,15 @@ function PaneView({
           ) : null}
         </span>
         <span className="flex shrink-0 items-center gap-0.5">
-          {status === "failed" || status === "exited" ? (
+          {running ? (
+            <PaneIconButton
+              label="Stop"
+              accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+              onClick={onStop}
+            >
+              <StopIcon className="size-3.5" />
+            </PaneIconButton>
+          ) : status === "failed" || status === "exited" ? (
             <PaneIconButton
               label="Restart"
               accent="text-amber-400 hover:bg-amber-500/15 hover:text-amber-300"
@@ -517,14 +525,6 @@ function PaneView({
               <PlayIcon className="size-3.5" />
             </PaneIconButton>
           )}
-          <PaneIconButton
-            label="Stop"
-            accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
-            disabled={!running}
-            onClick={onStop}
-          >
-            <StopIcon className="size-3.5" />
-          </PaneIconButton>
           <PaneIconButton
             label={`Find in pane (${MOD_KEY}+F)`}
             accent={
