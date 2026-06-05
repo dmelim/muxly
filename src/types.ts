@@ -43,6 +43,9 @@ export type AppSettings = {
   // Manual per-project "hide name" toggle (the sidebar eye button). Hides the
   // project name regardless of stream mode.
   hiddenProjectNames: Record<string, boolean>;
+  // Per-project collapsed (minimized) state in the sidebar. Persisted so a
+  // project you minimize stays minimized across restarts. Absent = expanded.
+  collapsedProjectNames: Record<string, boolean>;
   // Projects flagged sensitive in the Settings list. Independent of the manual
   // toggle above — these are hidden only while stream mode is on.
   sensitiveProjectNames: Record<string, boolean>;

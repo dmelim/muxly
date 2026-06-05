@@ -66,6 +66,11 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- **Collapsed projects stay collapsed across restarts.** Minimizing
+  (collapsing) a project in the sidebar is now remembered between sessions ?
+  reopening the app no longer expands every project back open. The state lives
+  in a new `collapsedProjectNames` settings field (backward-compatible default:
+  all expanded), persisted the same way as the per-project name-privacy toggle.
 - **Command palette + Stream mode.** A lightweight command palette
   (<kbd>Ctrl/Cmd+P</kbd> or the new ⌘ toolbar button) runs named actions from a
   registry. Its headline command, **Stream mode**, masks the names of services

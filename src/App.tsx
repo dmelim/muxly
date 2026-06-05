@@ -131,7 +131,9 @@ export function App() {
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  // Project collapse state is persisted in settings (see `collapsedProjectNames`)
+  // so a minimized project stays minimized across restarts.
+  const collapsedGroups = settings.collapsedProjectNames;
   // The bottom shell drawer. Hidden by default — opened from the header button
   // or with Ctrl/Cmd+↓. Height is user-draggable from a handle on the drawer's
   // top edge; state lives here so it survives toggle/remount of the drawer.
@@ -984,11 +986,19 @@ export function App() {
   };
 
   const toggleGroupCollapsed = useCallback((groupName: string) => {
-    setCollapsedGroups((current) => ({
-      ...current,
-      [groupName]: !current[groupName]
-    }));
-  }, []);
+    const collapsed = !settingsRef.current.collapsedProjectNames[groupName];
+    const nextSettings = {
+      ...settingsRef.current,
+      collapsedProjectNames: {
+        ...settingsRef.current.collapsedProjectNames,
+        [groupName]: collapsed
+      }
+    };
+
+    void persistSettings(nextSettings).catch((error) => {
+      console.warn("Failed to persist project collapse state:", errorMessage(error));
+    });
+  }, [persistSettings]);
 
   // Drag-resize the bottom terminal drawer. Mirrors `startSidebarDrag`: window-
   // level listeners so the drag survives the cursor leaving the thin handle,

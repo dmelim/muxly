@@ -18,6 +18,7 @@ export const statusLabels: Record<ServiceStatus, string> = {
 export const DEFAULT_SETTINGS: AppSettings = {
   editorCommand: "code",
   hiddenProjectNames: {},
+  collapsedProjectNames: {},
   sensitiveProjectNames: {},
   projectNameAliases: {},
   autoRestartMaxAttempts: 3,

@@ -20,6 +20,10 @@ pub struct AppSettings {
     pub hide_project_names: bool,
     #[serde(default)]
     pub hidden_project_names: BTreeMap<String, bool>,
+    /// Per-project collapsed (minimized) state in the sidebar. Persisted so a
+    /// minimized project stays minimized across restarts. Absent = expanded.
+    #[serde(default)]
+    pub collapsed_project_names: BTreeMap<String, bool>,
     /// Projects flagged sensitive in the Settings list. Distinct from
     /// `hidden_project_names` (the manual sidebar toggle): these are hidden
     /// only while stream mode is on, never on their own.
@@ -45,6 +49,7 @@ impl Default for AppSettings {
             editor_command: default_editor_command().to_string(),
             hide_project_names: false,
             hidden_project_names: BTreeMap::new(),
+            collapsed_project_names: BTreeMap::new(),
             sensitive_project_names: BTreeMap::new(),
             project_name_aliases: BTreeMap::new(),
             auto_restart_max_attempts: DEFAULT_AUTO_RESTART_MAX_ATTEMPTS,
