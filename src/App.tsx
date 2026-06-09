@@ -30,6 +30,8 @@ import { describeExitCode, shortExitCode } from "./exitCodes";
 import type { EditTarget } from "./appTypes";
 import {
   AUTO_RESTART_DELAY_MS,
+  PTY_WATCHDOG_MS,
+  PTY_RECYCLE_MAX,
   DEFAULT_SETTINGS,
   annotateChunkWithTimestamps,
   clamp,
@@ -85,6 +87,16 @@ export function App() {
   // Backend run token for each service's current live run. A fast restart can
   // leave stale output/exit/failure events from the old run in flight.
   const activeRunTokensRef = useRef<Record<string, number>>({});
+  // Services the user asked to *restart* while they were still running. Starting
+  // alone is a no-op against a live process, so a restart stops the service and
+  // records the id here; the exit handler re-spawns it once its exit lands.
+  const pendingRestartRef = useRef<Set<string>>(new Set());
+  // PTY deadlock watchdog bookkeeping. `sawPtyOutputRef` maps a service to the
+  // run token that has produced real process output (proof the PTY came up).
+  // `ptyRecycleRef` counts how many times we've recycled a stuck start so the
+  // retries are capped. See PTY_WATCHDOG_MS / PTY_RECYCLE_MAX.
+  const sawPtyOutputRef = useRef<Record<string, number>>({});
+  const ptyRecycleRef = useRef<Record<string, number>>({});
   const [editing, setEditing] = useState<EditTarget | null>(null);
   // Map of serviceId → true when its configured port is held by another process.
   // Only meaningful when the service is not running — we never flag our own
@@ -526,6 +538,17 @@ export function App() {
       });
       appendLog(serviceId, `\r\n\x1b[38;2;34;211;238m[manager] started pid ${pid}\x1b[0m\r\n`);
       refreshHistory(serviceId);
+
+      // Arm the PTY deadlock watchdog: a ConPTY `.cmd`-shim hang produces no
+      // output and never spawns its real child, so if this run emits nothing
+      // within the window we recycle it. Pipe-mode spawns don't hit this.
+      const startedService = servicesRef.current.find((s) => s.id === serviceId);
+      if (startedService?.usePty) {
+        const watchedToken = runToken;
+        window.setTimeout(() => {
+          maybeRecyclePtyStart(serviceId, watchedToken);
+        }, PTY_WATCHDOG_MS);
+      }
     }));
 
     trackUnlisten(listen<ProcessExitedEvent>(PROCESS_EXITED, (event) => {
@@ -571,10 +594,30 @@ export function App() {
 
       refreshHistory(serviceId);
 
-      if (nextStatus === "failed") {
+      if (pendingRestartRef.current.has(serviceId)) {
+        // The user asked to restart a running service: we stopped it, and now
+        // that its exit has landed we re-spawn it regardless of exit code. A
+        // deliberate cycle, so it doesn't count against the crash budget.
+        pendingRestartRef.current.delete(serviceId);
+        delete autoRestartRef.current[serviceId];
+        const service = servicesRef.current.find((s) => s.id === serviceId);
+        if (service) {
+          window.setTimeout(() => {
+            void startServiceRef.current(service);
+          }, AUTO_RESTART_DELAY_MS);
+        }
+      } else if (!requested) {
+        // Any exit the user didn't ask for is a candidate for auto-restart —
+        // including a *clean* `code 0`. Dev servers behind a nested orchestrator
+        // (Tauri's `tauri:dev`, `bun run dev → wxt → node`, etc.) re-pipe their
+        // inner Vite's stdio, so a PTY on the parent never reaches it; Vite then
+        // drains its event loop after an HMR cycle and exits 0. Treating only
+        // non-zero exits as restartable would leave those silently dead. The
+        // per-service `autoRestart` opt-in and the attempt budget (checked in
+        // `maybeAutoRestart`) keep a genuinely-finishing task from looping.
         maybeAutoRestart(serviceId);
       } else {
-        // Clean exit or user stop — reset the crash budget.
+        // User-requested stop — reset the crash budget.
         delete autoRestartRef.current[serviceId];
       }
 
@@ -624,6 +667,43 @@ export function App() {
       const service = servicesRef.current.find((s) => s.id === serviceId);
       if (!service || service.port == null) return;
       window.setTimeout(() => void scanPorts([service]), 300);
+    }
+
+    // A PTY start that has produced no output within the watchdog window is
+    // almost certainly a ConPTY shim deadlock (0% CPU, no real child). Kill it
+    // and let the exit handler respawn it against a fresh pseudo-terminal — the
+    // race usually resolves on the retry. Capped so a genuinely silent-then-
+    // working tool can't loop forever.
+    function maybeRecyclePtyStart(serviceId: string, token: number) {
+      // Only the still-live run that never emitted output is a candidate.
+      if (activeRunTokensRef.current[serviceId] !== token) return;
+      if (sawPtyOutputRef.current[serviceId] === token) return;
+      const service = servicesRef.current.find((s) => s.id === serviceId);
+      if (!service) return;
+
+      const attempts = (ptyRecycleRef.current[serviceId] ?? 0) + 1;
+      if (attempts > PTY_RECYCLE_MAX) {
+        appendLog(
+          serviceId,
+          `\r\n\x1b[31m[manager] start still produced no output after ${PTY_RECYCLE_MAX} recycles — leaving it; press restart to try again\x1b[0m\r\n`
+        );
+        delete ptyRecycleRef.current[serviceId];
+        return;
+      }
+      ptyRecycleRef.current[serviceId] = attempts;
+      appendLog(
+        serviceId,
+        `\r\n\x1b[33m[manager] no output in ${Math.round(
+          PTY_WATCHDOG_MS / 1000
+        )}s — PTY start likely stuck, recycling (attempt ${attempts}/${PTY_RECYCLE_MAX})\x1b[0m\r\n`
+      );
+      // Reuse the restart handoff: stop the stuck child; the exit handler sees
+      // the pending-restart flag and re-spawns it (fresh ConPTY) after a beat.
+      pendingRestartRef.current.add(serviceId);
+      void invoke("stop_service", { serviceId }).catch((error) => {
+        pendingRestartRef.current.delete(serviceId);
+        appendLog(serviceId, `\r\n\x1b[31m[manager] ${errorMessage(error)}\x1b[0m\r\n`);
+      });
     }
 
     function maybeAutoRestart(serviceId: string) {
@@ -718,6 +798,10 @@ export function App() {
         if (activeRunToken != null && activeRunToken !== runToken) {
           return;
         }
+        // Real process output proves the PTY came up — disarm the deadlock
+        // watchdog for this run and reset its recycle budget.
+        sawPtyOutputRef.current[serviceId] = runToken;
+        delete ptyRecycleRef.current[serviceId];
         appendLog(serviceId, stream === "stderr" ? `\x1b[31m${chunk}\x1b[0m` : chunk);
       };
       outputChannelsRef.current[service.id] = onOutput;
@@ -902,6 +986,30 @@ export function App() {
       }
     },
     [appendLog, pids, adoptedPids]
+  );
+
+  // The documented "restart" action (Ctrl/Cmd+R). Starting alone is a no-op
+  // against a live process, so for a running service we stop it and let the
+  // exit handler re-spawn it once the exit lands (see `pendingRestartRef`).
+  // An adopted instance has no exit of ours to wait on, so we kill it and
+  // start our own after the port frees. A stopped/failed/exited service just
+  // starts. This is what lets restart cycle a service without the user having
+  // to stop and start by hand.
+  const restartService = useCallback(
+    async (service: ServiceConfig) => {
+      if (pids[service.id] != null) {
+        pendingRestartRef.current.add(service.id);
+        await stopService(service);
+        return;
+      }
+      if (adoptedPids[service.id] != null) {
+        await stopService(service);
+        window.setTimeout(() => void manualStart(service), 600);
+        return;
+      }
+      await manualStart(service);
+    },
+    [pids, adoptedPids, stopService, manualStart]
   );
 
   const startGroup = (groupName: string) => {
@@ -1342,7 +1450,7 @@ export function App() {
           if (selected) {
             event.preventDefault();
             event.stopPropagation();
-            void manualStart(selected);
+            void restartService(selected);
           }
           break;
         case "s":
@@ -1375,6 +1483,7 @@ export function App() {
     flatServices,
     selected,
     manualStart,
+    restartService,
     stopService,
     clearSelectedLog,
     openSingle,
