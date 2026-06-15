@@ -165,6 +165,9 @@ export function DetailsSidebar({
                   ? "None"
                   : `${Object.keys(selected.env).length} variables`}
               </Detail>
+              <Detail label="Options">
+                <EnabledOptions service={selected} />
+              </Detail>
             </dl>
 
             <div className="border-t border-white/10 pt-5">
@@ -186,5 +189,31 @@ export function DetailsSidebar({
         )}
       </div>
     </>
+  );
+}
+
+// Lists only the service's enabled option flags, each as green text. Disabled
+// flags are omitted entirely; when none are on we fall back to a dim "None" so
+// the row never reads as missing data.
+function EnabledOptions({ service }: { service: ServiceConfig }) {
+  const enabled = [
+    service.autoPort && "Auto-roll port if busy",
+    service.autoRestart && "Auto-restart on crash",
+    service.usePty && "Run in pseudo-terminal",
+    service.sensitive && "Sensitive name"
+  ].filter((label): label is string => Boolean(label));
+
+  if (enabled.length === 0) {
+    return <span className="text-zinc-500">None</span>;
+  }
+
+  return (
+    <ul className="mt-0.5 space-y-1">
+      {enabled.map((label) => (
+        <li key={label} className="text-xs text-emerald-400">
+          {label}
+        </li>
+      ))}
+    </ul>
   );
 }

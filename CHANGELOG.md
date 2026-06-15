@@ -22,6 +22,14 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- **Details panel shows the service's enabled options.** An "Options" row lists
+  any of Auto-roll port if busy, Auto-restart on crash, Run in pseudo-terminal,
+  and Sensitive name that are turned on (as green text; disabled ones are
+  omitted, "None" when nothing is on), so you can see the active flags without
+  opening the edit form.
+
 ### Changed
 
 - **Pane lifecycle controls use a single slot.** Start, Restart, and Stop now
