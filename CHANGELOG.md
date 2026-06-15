@@ -62,6 +62,18 @@ section, and tag the commit `vX.Y.Z`.
 - **Terminal search no longer blanks the app on addon errors.** In-pane search
   enables xterm's proposed decoration API and catches SearchAddon failures, with
   a root error boundary as a final fallback instead of an empty window.
+- **Backspacing in Windows PTY panes no longer flashes the cursor at the prompt.**
+  Standalone carriage-return chunks from ConPTY are now held briefly and merged
+  with the following redraw chunk, avoiding the intermediate column-0 cursor
+  paint while preserving the original PTY stream.
+- **PTY pane input lands on the correct row.** The backend opens each PTY at a
+  default 120×30 because it can't know the pane size until the child exists. The
+  pane fitted xterm to its real (narrower) geometry on mount, but that resize was
+  a no-op since the process wasn't running yet, and nothing re-fired afterwards —
+  leaving the PTY's width disagreeing with xterm's. readline-driven REPLs (node,
+  python) then computed cursor-relative redraws against the wrong width, so
+  echoed input rendered on the wrong line. The measured size is now pushed to the
+  PTY on `PROCESS_STARTED` so the two always agree.
 - **Stale restart events no longer clobber the new run.** Service lifecycle and
   output events now include the run token, and the frontend ignores exit,
   failure, and output events from older runs once a newer run has started.

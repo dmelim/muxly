@@ -52,6 +52,13 @@ import {
   TerminalIcon
 } from "./icons";
 
+const PTY_CARRIAGE_RETURN_SETTLE_MS = 75;
+
+type PendingPtyCarriageReturn = {
+  text: string;
+  timer: ReturnType<typeof window.setTimeout>;
+};
+
 export function App() {
   const [services, setServices] = useState<ServiceConfig[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,6 +75,20 @@ export function App() {
   // One xterm terminal per open pane, keyed by service id.
   const terminalsRef = useRef<Map<string, Terminal>>(new Map());
   const logsRef = useRef<Record<string, string[]>>({});
+  // Live terminal writes are coalesced to one flush per animation frame. A
+  // single PTY read can arrive split across frames — a readline backspace
+  // redraw (carriage-return to column 0, then reprint) is the common case —
+  // and writing each piece the instant it lands lets xterm paint the
+  // intermediate cursor position for a frame, seen as a cursor flicker.
+  // Buffering per service and flushing once per frame merges same-frame pieces
+  // into a single paint. `logsRef` above stays the source of truth for the
+  // pane-mount replay; this only affects the live append.
+  const pendingWritesRef = useRef<Map<string, string>>(new Map());
+  const flushRafRef = useRef(0);
+  // Windows ConPTY can split readline redraws into a bare carriage return and a
+  // later repaint. Hold that standalone CR briefly so xterm does not paint the
+  // cursor at column 0 between the two chunks.
+  const pendingPtyCarriageReturnsRef = useRef<Map<string, PendingPtyCarriageReturn>>(new Map());
   // Per-service line-start tracker for the timestamp annotator. `true` means
   // the next non-newline byte we append begins a fresh line and should get a
   // [HH:MM:SS] marker; flips to false after one is emitted and back to true
@@ -544,6 +565,26 @@ export function App() {
       // within the window we recycle it. Pipe-mode spawns don't hit this.
       const startedService = servicesRef.current.find((s) => s.id === serviceId);
       if (startedService?.usePty) {
+        // The backend opens every PTY at a default 120×30 (it can't know the
+        // pane size until the child exists). The pane already fitted xterm to
+        // its real, narrower geometry on mount, but that resize was a no-op
+        // because the process wasn't running yet — and nothing fires the pane's
+        // ResizeObserver afterwards since its box never changes. Re-push the
+        // measured size now so the PTY's width matches xterm's. Without this the
+        // two disagree and readline-driven REPLs (node, python) compute their
+        // cursor-relative redraws against the wrong width, landing echoed input
+        // on the wrong row.
+        const terminal = terminalsRef.current.get(serviceId);
+        if (terminal && terminal.cols > 0 && terminal.rows > 0) {
+          void invoke("service_pty_resize", {
+            serviceId,
+            cols: terminal.cols,
+            rows: terminal.rows
+          }).catch(() => {
+            /* race with a stop — the next real resize will resync */
+          });
+        }
+
         const watchedToken = runToken;
         window.setTimeout(() => {
           maybeRecyclePtyStart(serviceId, watchedToken);
@@ -747,8 +788,73 @@ export function App() {
     return () => {
       disposed = true;
       unlisteners.forEach((unlisten) => unlisten());
+      for (const pending of pendingPtyCarriageReturnsRef.current.values()) {
+        window.clearTimeout(pending.timer);
+      }
+      pendingPtyCarriageReturnsRef.current.clear();
     };
   }, []);
+
+  // Drain the per-service buffers, writing each terminal's accumulated output
+  // in a single `write()`. Runs once per frame (scheduled from appendLog).
+  const flushTerminalWrites = useCallback(() => {
+    flushRafRef.current = 0;
+    const pending = pendingWritesRef.current;
+    if (pending.size === 0) return;
+    for (const [serviceId, data] of pending) {
+      // The pane may have closed between buffering and this flush — its
+      // terminal is gone from the registry, so the write simply no-ops and
+      // the output survives in logsRef for the next time the pane opens.
+      terminalsRef.current.get(serviceId)?.write(data);
+    }
+    pending.clear();
+  }, []);
+
+  const enqueueTerminalWrite = useCallback(
+    (serviceId: string, data: string) => {
+      if (!terminalsRef.current.has(serviceId)) return;
+
+      const pending = pendingWritesRef.current;
+      pending.set(serviceId, (pending.get(serviceId) ?? "") + data);
+      if (flushRafRef.current === 0) {
+        flushRafRef.current = requestAnimationFrame(flushTerminalWrites);
+      }
+    },
+    [flushTerminalWrites]
+  );
+
+  const takePendingPtyCarriageReturn = useCallback((serviceId: string) => {
+    const pending = pendingPtyCarriageReturnsRef.current.get(serviceId);
+    if (!pending) return "";
+
+    window.clearTimeout(pending.timer);
+    pendingPtyCarriageReturnsRef.current.delete(serviceId);
+    return pending.text;
+  }, []);
+
+  const enqueueLiveTerminalWrite = useCallback(
+    (serviceId: string, data: string, isPty: boolean) => {
+      if (!terminalsRef.current.has(serviceId)) {
+        takePendingPtyCarriageReturn(serviceId);
+        return;
+      }
+
+      if (isPty && data === "\r") {
+        const current = takePendingPtyCarriageReturn(serviceId);
+        const text = current + data;
+        const timer = window.setTimeout(() => {
+          pendingPtyCarriageReturnsRef.current.delete(serviceId);
+          enqueueTerminalWrite(serviceId, text);
+        }, PTY_CARRIAGE_RETURN_SETTLE_MS);
+
+        pendingPtyCarriageReturnsRef.current.set(serviceId, { text, timer });
+        return;
+      }
+
+      enqueueTerminalWrite(serviceId, takePendingPtyCarriageReturn(serviceId) + data);
+    },
+    [enqueueTerminalWrite, takePendingPtyCarriageReturn]
+  );
 
   const appendLog = useCallback((serviceId: string, chunk: string) => {
     // Apply the [HH:MM:SS] annotation *before* the chunk lands in the
@@ -774,9 +880,13 @@ export function App() {
     }
 
     logsRef.current[serviceId] = chunks;
-    // Write live to the pane showing this service, if one is open.
-    terminalsRef.current.get(serviceId)?.write(annotated);
-  }, []);
+    // Buffer the live write and flush it next frame (see pendingWritesRef).
+    // Only buffer when a pane is actually showing this service; otherwise the
+    // pane-mount replay from logsRef already covers it, and buffering here
+    // could double-render against that replay. Registration in TerminalPanes
+    // happens after the replay, so a present terminal means replay is done.
+    enqueueLiveTerminalWrite(serviceId, annotated, isPty);
+  }, [enqueueLiveTerminalWrite]);
 
   const startService = useCallback(
     async (service: ServiceConfig) => {
@@ -1218,6 +1328,14 @@ export function App() {
     // Force the next appended chunk to be treated as the start of a fresh
     // line so it picks up a timestamp even mid-stream.
     lineStateRef.current[serviceId] = true;
+    // Discard any output buffered for the next frame so it can't repopulate
+    // the terminal we're about to clear.
+    pendingWritesRef.current.delete(serviceId);
+    const pendingCarriageReturn = pendingPtyCarriageReturnsRef.current.get(serviceId);
+    if (pendingCarriageReturn) {
+      window.clearTimeout(pendingCarriageReturn.timer);
+      pendingPtyCarriageReturnsRef.current.delete(serviceId);
+    }
     terminalsRef.current.get(serviceId)?.clear();
   }, []);
 
@@ -1743,6 +1861,3 @@ export function App() {
     </>
   );
 }
-
-
-
