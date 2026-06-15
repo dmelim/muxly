@@ -468,5 +468,3 @@ in the center, service details and actions on the right.
 [Unreleased]: https://github.com/dmelim/muxly/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/dmelim/muxly/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dmelim/muxly/releases/tag/v0.1.0
-
-
