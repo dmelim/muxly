@@ -59,6 +59,9 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- **Terminal search no longer blanks the app on addon errors.** In-pane search
+  enables xterm's proposed decoration API and catches SearchAddon failures, with
+  a root error boundary as a final fallback instead of an empty window.
 - **Stale restart events no longer clobber the new run.** Service lifecycle and
   output events now include the run token, and the frontend ignores exit,
   failure, and output events from older runs once a newer run has started.

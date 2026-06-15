@@ -24,6 +24,10 @@ const statusDots: Record<ServiceStatus, string> = {
 const MOD_KEY = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
 
 const TERMINAL_OPTIONS = {
+  // The in-pane SearchAddon draws match highlights with registerDecoration /
+  // registerMarker, which xterm classifies as proposed API and refuses to run
+  // unless this is set — without it, every keystroke in search throws.
+  allowProposedApi: true,
   convertEol: true,
   cursorBlink: true,
   fontFamily: "JetBrains Mono, Cascadia Mono, Consolas, monospace",
@@ -638,33 +642,66 @@ function PaneSearchBar({
     return () => handle.dispose();
   }, [searchAddon]);
 
+  // Same guard rationale as the find calls below: clearing decorations also
+  // touches the renderer/decoration path, so contain + log any throw rather
+  // than letting it bubble out of an effect and blank the app.
+  const safeClearDecorations = useCallback(() => {
+    try {
+      searchAddon.clearDecorations();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("[search] clearDecorations threw", error);
+    }
+  }, [searchAddon]);
+
   // When the bar unmounts (pane lost focus + closed, Esc, X), clear the
   // decorations so stale highlights don't linger on the terminal.
   useEffect(() => {
     return () => {
-      searchAddon.clearDecorations();
+      safeClearDecorations();
     };
-  }, [searchAddon]);
+  }, [safeClearDecorations]);
 
   // Live-search as the user types — incremental mode keeps the current match
   // anchored where possible so the result doesn't jump on every keystroke.
   useEffect(() => {
     if (!query) {
-      searchAddon.clearDecorations();
+      safeClearDecorations();
       setResults({ resultIndex: -1, resultCount: 0 });
       return;
     }
-    searchAddon.findNext(query, { ...searchOptions, incremental: true });
+    // Guarded: a throw from the addon here runs inside an effect, which in
+    // React 19 would unmount the whole tree (blank window) since there's no
+    // boundary below the root. Contain + log it instead, so a bad search
+    // degrades to "no results" rather than taking down the UI.
+    try {
+      searchAddon.findNext(query, { ...searchOptions, incremental: true });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("[search] findNext (incremental) threw for query", JSON.stringify(query), error);
+    }
     // searchOptions is a literal const above — stable across renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, searchAddon]);
 
   const findNext = useCallback(() => {
-    if (query) searchAddon.findNext(query, searchOptions);
+    if (!query) return;
+    try {
+      searchAddon.findNext(query, searchOptions);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("[search] findNext threw for query", JSON.stringify(query), error);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, searchAddon]);
   const findPrev = useCallback(() => {
-    if (query) searchAddon.findPrevious(query, searchOptions);
+    if (!query) return;
+    try {
+      searchAddon.findPrevious(query, searchOptions);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("[search] findPrevious threw for query", JSON.stringify(query), error);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, searchAddon]);
 
