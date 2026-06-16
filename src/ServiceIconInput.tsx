@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ReactNode } from "react";
 import { EmojiPicker } from "frimousse";
+import { Dropdown } from "./Dropdown";
 import { Field } from "./FormField";
 import type { ServiceFormDraft } from "./serviceFormModel";
 import { BUILTIN_SERVICE_ICONS, BuiltinServiceIcon } from "./serviceIcons";
@@ -23,7 +23,8 @@ export function ServiceIconInput({
   return (
     <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
       <Field label="Icon">
-        <SelectField
+        <Dropdown
+          ariaLabel="Icon type"
           value={iconType}
           options={[
             { value: "none", label: "None" },
@@ -57,12 +58,6 @@ export function ServiceIconInput({
   );
 }
 
-type SelectOption = {
-  value: string;
-  label: string;
-  icon?: ReactNode;
-};
-
 const EMOJI_CATEGORY_SHORTCUTS = [
   { key: "smileys-emotion", label: "Smileys & Emotion", icon: "\u{1F600}" },
   { key: "people-body", label: "People & Body", icon: "\u{1F44B}" },
@@ -78,88 +73,6 @@ const EMOJI_CATEGORY_SHORTCUTS = [
 const EMOJI_POPOVER_WIDTH = 288;
 const POPOVER_EDGE_GAP = 8;
 const POPOVER_TRIGGER_GAP = 6;
-
-function SelectField({
-  value,
-  options,
-  onChange
-}: {
-  value: string;
-  options: SelectOption[];
-  onChange: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = options.find((option) => option.value === value) ?? options[0];
-
-  return (
-    <div
-      className="relative"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          setOpen(false);
-        }
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setOpen(false);
-        }}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 rounded-md border border-white/10 bg-black/25 px-2.5 py-2 text-left text-[0.8125rem] text-zinc-200 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          {selected?.icon ? <span className="shrink-0 text-zinc-400">{selected.icon}</span> : null}
-          <span className="truncate">{selected?.label ?? ""}</span>
-        </span>
-        <span className={`text-zinc-500 transition-transform ${open ? "rotate-180" : ""}`}>
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            className="size-3.5"
-            aria-hidden="true"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </span>
-      </button>
-      {open ? (
-        <div
-          role="listbox"
-          className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-white/10 bg-zinc-900 py-1 shadow-lg"
-        >
-          {options.map((option) => {
-            const active = option.value === value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={active}
-                onClick={() => {
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition ${
-                  active
-                    ? "bg-white/[0.03] text-zinc-100"
-                    : "text-zinc-300 hover:bg-white/5 hover:text-zinc-100"
-                }`}
-              >
-                {option.icon ? <span className="shrink-0 text-zinc-400">{option.icon}</span> : null}
-                <span className="truncate">{option.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function EmojiSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false);
