@@ -18,6 +18,7 @@ import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } fro
 import { formatCommand, displayServiceName } from "./types";
 import { CommandPalette } from "./CommandPalette";
 import type { Command } from "./CommandPalette";
+import { ProfilePrompt } from "./ProfilePrompt";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
@@ -39,9 +40,11 @@ import {
   errorMessage,
   groupKey,
   groupServices,
+  isServiceInProfile,
   modKey,
   sameAliases,
-  sameServiceOrder
+  sameServiceOrder,
+  visibleForProfile
 } from "./appUtils";
 import {
   CommandIcon,
@@ -181,6 +184,7 @@ export function App() {
   const [terminalHeight, setTerminalHeight] = useState(288);
   // Command palette (Ctrl/Cmd+P). A lightweight registry of named actions.
   const [commandOpen, setCommandOpen] = useState(false);
+  const [profilePromptOpen, setProfilePromptOpen] = useState(false);
   // Stream mode: when on, services flagged `sensitive` have their names masked
   // across the UI so the window is safe to screen-share. Ephemeral (session
   // only) — toggled from the command palette, restored when you toggle it off.
@@ -221,18 +225,26 @@ export function App() {
     [paneIds, services]
   );
 
-  // The focused service drives the toolbar and inspector. Falls back to the
-  // first open pane (e.g. after the focused pane is closed), then any service.
-  const selected = useMemo(
-    () =>
-      services.find((service) => service.id === selectedId) ??
-      paneServices[0] ??
-      services[0] ??
-      null,
-    [selectedId, services, paneServices]
+  const activeProfile = settings.activeProfile ?? null;
+
+  // Services visible under the active profile (the active one plus all
+  // unassigned). "All profiles" returns the full list untouched.
+  const visibleServices = useMemo(
+    () => visibleForProfile(services, activeProfile),
+    [services, activeProfile]
   );
 
-  const groupedServices = useMemo(() => groupServices(services), [services]);
+  // The focused service drives the toolbar and inspector. Falls back to the
+  // first open pane (e.g. after the focused pane is closed), then any visible
+  // service. A selected service hidden by the active profile is ignored so the
+  // inspector never shows something outside the current view.
+  const selected = useMemo(() => {
+    const byId = services.find((service) => service.id === selectedId);
+    const focused = byId && isServiceInProfile(byId, activeProfile) ? byId : null;
+    return focused ?? paneServices[0] ?? visibleServices[0] ?? null;
+  }, [selectedId, services, paneServices, visibleServices, activeProfile]);
+
+  const groupedServices = useMemo(() => groupServices(visibleServices), [visibleServices]);
   const groupNames = useMemo(
     () => groupedServices.map(([groupName]) => groupName),
     [groupedServices]
@@ -377,6 +389,73 @@ export function App() {
       console.warn("Failed to persist project name aliases:", errorMessage(error));
     });
   }, [persistSettings, projectNameAliases, settings]);
+
+  // Switch the active profile (null = "All profiles"), persisted in settings.
+  const setActiveProfile = useCallback(
+    (profileId: string | null) => {
+      void persistSettings({ ...settingsRef.current, activeProfile: profileId }).catch(
+        (error) => {
+          console.warn("Failed to switch profile:", errorMessage(error));
+        }
+      );
+    },
+    [persistSettings]
+  );
+
+  // Create a profile by name and switch to it. Powers the command-palette quick
+  // add; Settings has the fuller create/rename/delete UI. Name uniqueness is
+  // case-insensitive, matching the Settings check.
+  const createProfile = useCallback(
+    async (rawName: string) => {
+      const name = rawName.trim();
+      if (!name) return;
+      const current = settingsRef.current;
+      if (
+        current.profiles.some(
+          (profile) => profile.name.trim().toLowerCase() === name.toLowerCase()
+        )
+      ) {
+        throw new Error(`A profile named "${name}" already exists.`);
+      }
+      const id = crypto.randomUUID();
+      await persistSettings({
+        ...current,
+        profiles: [...current.profiles, { id, name }],
+        activeProfile: id
+      });
+    },
+    [persistSettings]
+  );
+
+  // Switching profiles is a pure view filter, but a hidden service shouldn't
+  // stay open or focused. When the active profile changes, drop panes that the
+  // new profile hides and clear the selection if it's no longer visible. The
+  // services themselves keep running — only the view is pruned.
+  useEffect(() => {
+    if (!activeProfile) return;
+    setPaneIds((current) =>
+      current.filter((id) => {
+        const service = servicesRef.current.find((candidate) => candidate.id === id);
+        return !service || isServiceInProfile(service, activeProfile);
+      })
+    );
+    setSelectedId((current) => {
+      if (!current) return current;
+      const service = servicesRef.current.find((candidate) => candidate.id === current);
+      return service && !isServiceInProfile(service, activeProfile) ? null : current;
+    });
+  }, [activeProfile]);
+
+  // Count of running/starting services hidden by the active profile, surfaced
+  // in the sidebar so a live-but-hidden service doesn't become a mystery.
+  const runningElsewhere = useMemo(() => {
+    if (!activeProfile) return 0;
+    return services.filter(
+      (service) =>
+        !isServiceInProfile(service, activeProfile) &&
+        (statuses[service.id] === "running" || statuses[service.id] === "starting")
+    ).length;
+  }, [services, activeProfile, statuses]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1181,6 +1260,30 @@ export function App() {
     [services, reloadServices]
   );
 
+  // Delete a profile from Settings: reassign its services to unassigned (never
+  // delete them), then drop it from the registry and clear the active filter if
+  // it pointed here. Done in two persists — services first, settings second —
+  // so a half-failure leaves an empty-but-valid profile rather than orphans.
+  const deleteProfile = useCallback(
+    async (profileId: string) => {
+      const affected = servicesRef.current.some((service) => service.profile === profileId);
+      if (affected) {
+        const next = servicesRef.current.map((service) =>
+          service.profile === profileId ? { ...service, profile: null } : service
+        );
+        await invoke("save_services", { services: next });
+        await reloadServices();
+      }
+      const current = settingsRef.current;
+      await persistSettings({
+        ...current,
+        profiles: current.profiles.filter((profile) => profile.id !== profileId),
+        activeProfile: current.activeProfile === profileId ? null : current.activeProfile
+      });
+    },
+    [persistSettings, reloadServices]
+  );
+
   // Reorder a service via drag-and-drop. Mutates the flat services array (the
   // sidebar groups are derived from order + each service's `group` field) and
   // persists by calling save_services + reloading. Moving across groups also
@@ -1398,6 +1501,13 @@ export function App() {
         run: () => setEditing({ mode: "new" })
       },
       {
+        id: "new-profile",
+        title: "New profile",
+        subtitle: "Create a profile and switch to it",
+        keywords: "add create profile group separate workspace context",
+        run: () => setProfilePromptOpen(true)
+      },
+      {
         id: "search-logs",
         title: "Search all logs",
         keywords: "find grep",
@@ -1441,6 +1551,10 @@ export function App() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        if (profilePromptOpen) {
+          setProfilePromptOpen(false);
+          return;
+        }
         if (commandOpen) {
           setCommandOpen(false);
           return;
@@ -1609,7 +1723,8 @@ export function App() {
     closePane,
     settingsOpen,
     searchPaneId,
-    commandOpen
+    commandOpen,
+    profilePromptOpen
   ]);
 
   return (
@@ -1631,6 +1746,10 @@ export function App() {
         statuses={statuses}
         collapsedGroups={collapsedGroups}
         settings={settings}
+        profiles={settings.profiles}
+        activeProfile={activeProfile}
+        setActiveProfile={setActiveProfile}
+        runningElsewhere={runningElsewhere}
         dropIndicator={dropIndicator}
         dragId={dragId}
         dragIdRef={dragIdRef}
@@ -1790,6 +1909,7 @@ export function App() {
             onClose={() => setSettingsOpen(false)}
             onSave={(next) => persistSettings(next)}
             onSetServicesSensitive={setServicesSensitive}
+            onDeleteProfile={deleteProfile}
             streamMode={streamMode}
           />
         ) : null}
@@ -1805,6 +1925,7 @@ export function App() {
           services={services}
           selected={selected}
           settings={settings}
+          activeProfile={activeProfile}
           statuses={statuses}
           pids={pids}
           actualPorts={actualPorts}
@@ -1857,6 +1978,13 @@ export function App() {
     ) : null}
     {commandOpen ? (
       <CommandPalette commands={commands} onClose={() => setCommandOpen(false)} />
+    ) : null}
+    {profilePromptOpen ? (
+      <ProfilePrompt
+        existingNames={settings.profiles.map((profile) => profile.name)}
+        onCreate={createProfile}
+        onClose={() => setProfilePromptOpen(false)}
+      />
     ) : null}
     </>
   );

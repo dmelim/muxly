@@ -18,6 +18,10 @@ export type ServiceConfig = {
   // PORT. Ignored when autoPort is off.
   portEnvVar?: string | null;
   group?: string | null;
+  // Id of the profile this service belongs to (see AppSettings.profiles).
+  // Absent/null = unassigned, which shows under every profile. A value that no
+  // longer matches a known profile id is treated as unassigned.
+  profile?: string | null;
   autoRestart: boolean;
   // Spawn the service attached to a pseudo-terminal instead of pipes. Needed
   // for dev servers (Vite, WXT) whose HMR loop depends on a real TTY; without
@@ -46,6 +50,15 @@ export type LoadedServices = {
   problems: string[];
 };
 
+// A named profile. Profiles partition which services the sidebar shows: only
+// services whose `profile` matches the active one (plus unassigned services)
+// are visible. This list is the id→name registry; membership lives on each
+// service's `profile` field.
+export type Profile = {
+  id: string;
+  name: string;
+};
+
 export type AppSettings = {
   editorCommand: string;
   // Manual per-project "hide name" toggle (the sidebar eye button). Hides the
@@ -58,6 +71,11 @@ export type AppSettings = {
   // toggle above — these are hidden only while stream mode is on.
   sensitiveProjectNames: Record<string, boolean>;
   projectNameAliases: Record<string, string>;
+  // The user's managed profiles (id→name registry). Empty = feature unused.
+  profiles: Profile[];
+  // Id of the active profile, or null for "All profiles". Cleared by the
+  // backend if it no longer names an existing profile.
+  activeProfile: string | null;
   // Auto-restart guardrails — when a service crashes (status: failed), we
   // re-spawn up to `autoRestartMaxAttempts` times within `autoRestartWindowMs`.
   // A quiet period exceeding the window resets the budget.

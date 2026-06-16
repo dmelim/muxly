@@ -118,6 +118,7 @@ mod tests {
             auto_port: auto,
             port_env_var: None,
             group: None,
+            profile: None,
             auto_restart: false,
             use_pty: false,
             pre_run: None,

@@ -13,6 +13,7 @@ export type ServiceFormDraft = {
   autoPort: boolean; // roll to next free port if `port` is busy, and inject it
   portEnvVar: string; // env var to receive the chosen port (blank = PORT)
   group: string;
+  profile: string; // profile id, or "" for unassigned
   autoRestart: boolean;
   usePty: boolean;
   preRun: string; // shell prelude run before the command, same shell
@@ -32,6 +33,7 @@ export function toDraft(service: ServiceConfig | null): ServiceFormDraft {
       autoPort: false,
       portEnvVar: "",
       group: "",
+      profile: "",
       autoRestart: false,
       usePty: false,
       preRun: "",
@@ -56,6 +58,7 @@ export function toDraft(service: ServiceConfig | null): ServiceFormDraft {
     autoPort: service.autoPort ?? false,
     portEnvVar: service.portEnvVar ?? "",
     group: service.group ?? "",
+    profile: service.profile ?? "",
     autoRestart: service.autoRestart,
     usePty: service.usePty,
     preRun: service.preRun ?? "",
@@ -100,6 +103,7 @@ export function fromDraft(draft: ServiceFormDraft): ServiceConfig {
     autoPort: draft.autoPort,
     portEnvVar: draft.autoPort ? draft.portEnvVar.trim() || null : null,
     group: groupValue || null,
+    profile: draft.profile.trim() || null,
     autoRestart: draft.autoRestart,
     usePty: draft.usePty,
     preRun: draft.preRun.trim() || null,

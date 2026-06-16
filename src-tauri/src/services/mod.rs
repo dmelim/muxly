@@ -31,6 +31,12 @@ pub struct ServiceConfig {
     pub port_env_var: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
+    /// Id of the profile this service belongs to (see `AppSettings.profiles`).
+    /// Absent/empty = unassigned, which shows under every profile. A service
+    /// pointing at a deleted profile id is treated as unassigned. Purely a
+    /// frontend visibility concern — the backend just persists the value.
+    #[serde(default)]
+    pub profile: Option<String>,
     /// When true, the frontend re-spawns the service if it exits with a
     /// non-zero code (subject to a retry cap). Defaults to false for configs
     /// written before this field existed.
@@ -170,6 +176,7 @@ mod tests {
             auto_port: false,
             port_env_var: None,
             group: None,
+            profile: None,
             auto_restart: false,
             use_pty: false,
             pre_run: None,

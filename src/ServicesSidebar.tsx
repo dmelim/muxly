@@ -1,10 +1,11 @@
 ﻿import type { MutableRefObject } from "react";
-import type { AppSettings, ServiceConfig, ServiceStatus } from "./types";
+import type { AppSettings, Profile, ServiceConfig, ServiceStatus } from "./types";
 import type { EditTarget } from "./appTypes";
 import { formatCommand } from "./types";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { ServiceIconBadge } from "./ServiceIconBadge";
+import { ProfileSwitcher } from "./ProfileSwitcher";
 import { statusLabels } from "./appUtils";
 import {
   ChevronRightIcon,
@@ -30,6 +31,14 @@ type Props = {
   statuses: Record<string, ServiceStatus>;
   collapsedGroups: Record<string, boolean>;
   settings: AppSettings;
+  // Managed profiles + the active selection. The switcher filters the list to
+  // the active profile (plus unassigned services); null = "All profiles".
+  profiles: Profile[];
+  activeProfile: string | null;
+  setActiveProfile: (profileId: string | null) => void;
+  // How many running/starting services are hidden by the active profile, so the
+  // user is reminded something is alive outside the current view.
+  runningElsewhere: number;
   dropIndicator: DropIndicator;
   dragId: string | null;
   dragIdRef: MutableRefObject<string | null>;
@@ -61,6 +70,10 @@ export function ServicesSidebar({
   statuses,
   collapsedGroups,
   settings,
+  profiles,
+  activeProfile,
+  setActiveProfile,
+  runningElsewhere,
   dropIndicator,
   dragId,
   dragIdRef,
@@ -131,6 +144,23 @@ export function ServicesSidebar({
             </Button>
           </Tooltip>
         </div>
+
+        {profiles.length > 0 ? (
+          <div className="mt-3">
+            <ProfileSwitcher
+              profiles={profiles}
+              activeProfile={activeProfile}
+              setActiveProfile={setActiveProfile}
+            />
+            {activeProfile && runningElsewhere > 0 ? (
+              <p className="mt-2 flex items-center gap-1.5 text-[11px] text-cyan-300/90">
+                <span className="size-1.5 rounded-full bg-cyan-400" aria-hidden="true" />
+                {runningElsewhere} running in other{" "}
+                {runningElsewhere === 1 ? "profile" : "profiles"}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -142,6 +172,22 @@ export function ServicesSidebar({
         }}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
       >
+        {groupedServices.length === 0 && activeProfile ? (
+          <div className="px-3 py-8 text-center">
+            <p className="text-sm text-zinc-400">No services in this profile</p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Assign a service to it when editing, create a new one, or switch to{" "}
+              <button
+                type="button"
+                onClick={() => setActiveProfile(null)}
+                className="text-cyan-400 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+              >
+                All profiles
+              </button>
+              .
+            </p>
+          </div>
+        ) : null}
         {groupedServices.map(([groupName, groupServicesList]) => {
           const anyRunning = groupServicesList.some((service) => {
             const status = statuses[service.id];

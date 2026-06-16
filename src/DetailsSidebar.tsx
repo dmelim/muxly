@@ -14,6 +14,9 @@ type Props = {
   services: ServiceConfig[];
   selected: ServiceConfig | null;
   settings: AppSettings;
+  // The active profile id (or null) — used to pre-select the profile for a new
+  // service created while a profile is active.
+  activeProfile: string | null;
   statuses: Record<string, ServiceStatus>;
   pids: Record<string, number>;
   // The port a running service actually bound to. For an auto-port service this
@@ -37,6 +40,7 @@ export function DetailsSidebar({
   services,
   selected,
   settings,
+  activeProfile,
   statuses,
   pids,
   actualPorts,
@@ -68,6 +72,8 @@ export function DetailsSidebar({
         existingIds={services
           .filter((service) => editing.mode !== "edit" || service.id !== editing.service.id)
           .map((service) => service.id)}
+        profiles={settings.profiles}
+        defaultProfile={editing.mode === "new" ? activeProfile : null}
         onSave={onSaveService}
         onCancel={() => onEdit(null)}
         onDelete={
@@ -153,6 +159,10 @@ export function DetailsSidebar({
               <Detail label="Group">
                 {selected.group ? displayProjectName(groupKey(selected)) : "None"}
               </Detail>
+              <Detail label="Profile">
+                {settings.profiles.find((profile) => profile.id === selected.profile)?.name ??
+                  "None"}
+              </Detail>
               <Detail label="Port">
                 {actualPorts[selected.id] != null && actualPorts[selected.id] !== selected.port
                   ? `${actualPorts[selected.id]} (auto, prefers ${selected.port ?? "any"})`
@@ -192,9 +202,9 @@ export function DetailsSidebar({
   );
 }
 
-// Lists only the service's enabled option flags, each as green text. Disabled
-// flags are omitted entirely; when none are on we fall back to a dim "None" so
-// the row never reads as missing data.
+// Lists only the service's enabled option flags, each in the brand cyan accent.
+// Disabled flags are omitted entirely; when none are on we fall back to a dim
+// "None" so the row never reads as missing data.
 function EnabledOptions({ service }: { service: ServiceConfig }) {
   const enabled = [
     service.autoPort && "Auto-roll port if busy",
@@ -210,7 +220,7 @@ function EnabledOptions({ service }: { service: ServiceConfig }) {
   return (
     <ul className="mt-0.5 space-y-1">
       {enabled.map((label) => (
-        <li key={label} className="text-xs text-emerald-400">
+        <li key={label} className="text-xs text-cyan-400">
           {label}
         </li>
       ))}

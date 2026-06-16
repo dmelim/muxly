@@ -11,6 +11,17 @@ pub const DEFAULT_MAX_LOG_CHUNKS: u32 = 5_000;
 pub const DEFAULT_PANE_GRID_COLUMNS: u32 = 5;
 pub const DEFAULT_SHOW_TIMESTAMPS: bool = true;
 
+/// A named profile. Profiles partition which services are shown in the sidebar:
+/// only services whose `profile` matches the active profile (plus unassigned
+/// ones) are visible. Membership lives on each `ServiceConfig.profile` as an id;
+/// this list is just the id→name registry, edited from Settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -31,6 +42,13 @@ pub struct AppSettings {
     pub sensitive_project_names: BTreeMap<String, bool>,
     #[serde(default)]
     pub project_name_aliases: BTreeMap<String, String>,
+    /// The user's managed profiles (id→name registry). Empty = feature unused.
+    #[serde(default)]
+    pub profiles: Vec<Profile>,
+    /// Id of the currently selected profile, or `None`/absent for "All
+    /// profiles". Cleared on load/save if it doesn't match an existing profile.
+    #[serde(default)]
+    pub active_profile: Option<String>,
     #[serde(default = "default_auto_restart_max_attempts")]
     pub auto_restart_max_attempts: u32,
     #[serde(default = "default_auto_restart_window_ms")]
@@ -52,6 +70,8 @@ impl Default for AppSettings {
             collapsed_project_names: BTreeMap::new(),
             sensitive_project_names: BTreeMap::new(),
             project_name_aliases: BTreeMap::new(),
+            profiles: Vec::new(),
+            active_profile: None,
             auto_restart_max_attempts: DEFAULT_AUTO_RESTART_MAX_ATTEMPTS,
             auto_restart_window_ms: DEFAULT_AUTO_RESTART_WINDOW_MS,
             max_log_chunks: DEFAULT_MAX_LOG_CHUNKS,
@@ -108,6 +128,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
     settings.pane_grid_columns = settings.pane_grid_columns.clamp(1, 10);
     migrate_global_project_privacy(&mut settings);
+    normalize_active_profile(&mut settings);
 
     Ok(settings)
 }
@@ -127,6 +148,7 @@ pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSet
     settings.auto_restart_window_ms = settings.auto_restart_window_ms.clamp(1_000, 3_600_000);
     settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
     settings.pane_grid_columns = settings.pane_grid_columns.clamp(1, 10);
+    normalize_active_profile(&mut settings);
 
     let path = settings_path(&app)?;
     let parent = path.parent().ok_or_else(|| {
@@ -175,6 +197,17 @@ fn migrate_global_project_privacy(settings: &mut AppSettings) {
             .or_insert(true);
     }
     settings.hide_project_names = false;
+}
+
+/// Drop `active_profile` if it doesn't name an existing profile, so a deleted
+/// or renamed-away profile can never leave the app stuck on a phantom filter.
+fn normalize_active_profile(settings: &mut AppSettings) {
+    if let Some(active) = &settings.active_profile {
+        let exists = settings.profiles.iter().any(|profile| &profile.id == active);
+        if !exists {
+            settings.active_profile = None;
+        }
+    }
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, AppError> {

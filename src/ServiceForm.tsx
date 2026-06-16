@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import type { ServiceConfig } from "./types";
+import type { Profile, ServiceConfig } from "./types";
 import { Button } from "./Button";
+import { Dropdown } from "./Dropdown";
 import { Field } from "./FormField";
 import { ServiceIconInput } from "./ServiceIconInput";
 import { looksLikeDevServer } from "./devServerHeuristics";
@@ -14,13 +15,31 @@ const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
 type Props = {
   initial: ServiceConfig | null; // null = new service
   existingIds: string[]; // for id-uniqueness validation (excluding the one being edited)
+  profiles: Profile[]; // managed profiles, for the Profile dropdown
+  defaultProfile?: string | null; // pre-select this profile id for a new service
   onSave: (service: ServiceConfig) => Promise<void>;
   onCancel: () => void;
   onDelete?: () => Promise<void>; // omit for new services
 };
 
-export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }: Props) {
-  const [draft, setDraft] = useState<ServiceFormDraft>(() => toDraft(initial));
+export function ServiceForm({
+  initial,
+  existingIds,
+  profiles,
+  defaultProfile,
+  onSave,
+  onCancel,
+  onDelete
+}: Props) {
+  const [draft, setDraft] = useState<ServiceFormDraft>(() => {
+    const initialDraft = toDraft(initial);
+    // A brand-new service created while a profile is active defaults into it,
+    // so the user doesn't immediately lose sight of what they just made.
+    if (!initial && defaultProfile) {
+      initialDraft.profile = defaultProfile;
+    }
+    return initialDraft;
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -183,6 +202,23 @@ export function ServiceForm({ initial, existingIds, onSave, onCancel, onDelete }
             />
           </Field>
         </div>
+
+        {profiles.length > 0 ? (
+          <Field
+            label="Profile"
+            hint="Which profile this service belongs to. None = unassigned (shows in every profile). Manage profiles in Settings."
+          >
+            <Dropdown
+              ariaLabel="Profile"
+              value={draft.profile}
+              options={[
+                { value: "", label: "None (shows everywhere)" },
+                ...profiles.map((profile) => ({ value: profile.id, label: profile.name }))
+              ]}
+              onChange={(value) => setDraft({ ...draft, profile: value })}
+            />
+          </Field>
+        ) : null}
 
         <label className="flex items-start gap-2">
           <input

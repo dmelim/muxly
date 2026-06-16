@@ -39,6 +39,10 @@ type Props = {
   // curation list below toggles a single service, or every service in a
   // project at once via the project checkbox.
   onSetServicesSensitive: (serviceIds: string[], sensitive: boolean) => Promise<void>;
+  // Delete a profile: reassigns its services to unassigned, drops it from the
+  // registry, and clears the active filter if it pointed there. Handled in App
+  // because it touches both the service list and settings.
+  onDeleteProfile: (profileId: string) => Promise<void>;
   // Whether stream mode is currently on. When it is, the sensitive curation
   // list masks the very names it controls (so the list itself doesn't leak
   // them on a shared screen), with an in-section reveal toggle to edit it.
@@ -53,6 +57,7 @@ export function SettingsView({
   onClose,
   onSave,
   onSetServicesSensitive,
+  onDeleteProfile,
   streamMode
 }: Props) {
   const [editorCommand, setEditorCommand] = useState(settings.editorCommand);
@@ -427,6 +432,18 @@ export function SettingsView({
           </Section>
 
           <Section
+            title="Profiles"
+            description="Group services into profiles (e.g. Day job, Personal) and switch the sidebar to show one at a time. A service belongs to one profile or none; unassigned services show in every profile. Assign a service to a profile when editing it."
+          >
+            <ProfilesSection
+              settings={settings}
+              services={services}
+              onSave={onSave}
+              onDeleteProfile={onDeleteProfile}
+            />
+          </Section>
+
+          <Section
             title="Sensitive services"
             description="Mark projects and services as sensitive. While Stream mode is on (command palette — Ctrl/Cmd+P), every sensitive project and service name is hidden; This list masks those names too while Stream mode is on — use the eye button to reveal them temporarily so you can keep editing."
           >
@@ -593,6 +610,217 @@ function FormRow({
       <label className="text-xs uppercase tracking-[0.14em] text-zinc-500">{label}</label>
       {children}
       {hint ? <p className="text-[11px] text-zinc-500">{hint}</p> : null}
+    </div>
+  );
+}
+
+// Create / rename / delete the managed profiles. Create and rename are plain
+// settings saves; delete is delegated to App because it also reassigns the
+// profile's services to unassigned. Names must be unique (case-insensitive).
+function ProfilesSection({
+  settings,
+  services,
+  onSave,
+  onDeleteProfile
+}: {
+  settings: AppSettings;
+  services: ServiceConfig[];
+  onSave: (next: AppSettings) => Promise<AppSettings>;
+  onDeleteProfile: (profileId: string) => Promise<void>;
+}) {
+  const profiles = settings.profiles;
+  const [newName, setNewName] = useState("");
+  const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // How many services are assigned to each profile id (for the row count and
+  // the delete confirmation).
+  const counts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const service of services) {
+      const id = service.profile?.trim();
+      if (id) map[id] = (map[id] ?? 0) + 1;
+    }
+    return map;
+  }, [services]);
+
+  const nameTaken = (name: string, exceptId?: string) =>
+    profiles.some(
+      (profile) =>
+        profile.id !== exceptId &&
+        profile.name.trim().toLowerCase() === name.trim().toLowerCase()
+    );
+
+  const clearRenameDraft = (id: string) =>
+    setRenameDrafts((drafts) => {
+      const next = { ...drafts };
+      delete next[id];
+      return next;
+    });
+
+  const handleCreate = async () => {
+    const name = newName.trim();
+    setError(null);
+    if (!name) return;
+    if (nameTaken(name)) {
+      setError(`A profile named "${name}" already exists.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave({
+        ...settings,
+        profiles: [...profiles, { id: crypto.randomUUID(), name }]
+      });
+      setNewName("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRename = async (id: string) => {
+    const draft = renameDrafts[id];
+    const existing = profiles.find((profile) => profile.id === id);
+    if (draft === undefined || !existing) return;
+    const name = draft.trim();
+    if (name === existing.name) {
+      clearRenameDraft(id);
+      return;
+    }
+    setError(null);
+    if (!name) {
+      setError("Profile name can't be empty.");
+      return;
+    }
+    if (nameTaken(name, id)) {
+      setError(`A profile named "${name}" already exists.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave({
+        ...settings,
+        profiles: profiles.map((profile) =>
+          profile.id === id ? { ...profile, name } : profile
+        )
+      });
+      clearRenameDraft(id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    const count = counts[id] ?? 0;
+    const message =
+      count > 0
+        ? `Delete profile "${name}"? Its ${count} service${
+            count === 1 ? "" : "s"
+          } will become unassigned (shown in every profile). The services themselves are not deleted.`
+        : `Delete profile "${name}"?`;
+    if (!confirm(message)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await onDeleteProfile(id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <input
+          value={newName}
+          onChange={(event) => {
+            setNewName(event.target.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void handleCreate();
+            }
+          }}
+          className="form-input flex-1 text-sm"
+          placeholder="New profile name (e.g. Day job)"
+          aria-label="New profile name"
+          disabled={busy}
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void handleCreate()}
+          disabled={busy || !newName.trim()}
+        >
+          Add profile
+        </Button>
+      </div>
+
+      {profiles.length === 0 ? (
+        <p className="text-xs text-zinc-500">
+          No profiles yet. Add one above to start separating services.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {profiles.map((profile) => {
+            const draft = renameDrafts[profile.id] ?? profile.name;
+            const count = counts[profile.id] ?? 0;
+            return (
+              <li
+                key={profile.id}
+                className="flex items-center gap-2 rounded-md border border-white/10 px-3 py-2"
+              >
+                <input
+                  value={draft}
+                  onChange={(event) =>
+                    setRenameDrafts((drafts) => ({
+                      ...drafts,
+                      [profile.id]: event.target.value
+                    }))
+                  }
+                  onBlur={() => void handleRename(profile.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      (event.target as HTMLInputElement).blur();
+                    }
+                    if (event.key === "Escape") {
+                      clearRenameDraft(profile.id);
+                    }
+                  }}
+                  className="form-input min-w-0 flex-1 text-sm"
+                  aria-label={`Rename profile ${profile.name}`}
+                  disabled={busy}
+                />
+                <span className="shrink-0 text-[11px] text-zinc-500">
+                  {count} service{count === 1 ? "" : "s"}
+                </span>
+                <Button
+                  variant="destructive"
+                  size="xs"
+                  onClick={() => void handleDelete(profile.id, profile.name)}
+                  disabled={busy}
+                >
+                  Delete
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {error ? (
+        <p className="rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>
+      ) : null}
     </div>
   );
 }

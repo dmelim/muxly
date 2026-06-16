@@ -24,6 +24,17 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Added
 
+- **Profiles.** Group services into named profiles (e.g. Day job, Personal) and
+  switch the sidebar to show one at a time via a switcher at the top of the
+  services list. A service belongs to one profile or none — unassigned services
+  show in every profile. Switching is a pure view filter: hidden services keep
+  running, and a "N running in other profiles" hint reminds you when something is
+  alive outside the current view. Manage profiles (create / rename / delete) in
+  Settings; deleting a profile reassigns its services to unassigned rather than
+  deleting them. Assign a service to a profile in the edit form. A **New
+  profile** command in the command palette (Ctrl/Cmd+P) creates one by name and
+  switches to it. Backward compatible — existing `services.json`/`settings.json`
+  need no changes.
 - **Details panel shows the service's enabled options.** An "Options" row lists
   any of Auto-roll port if busy, Auto-restart on crash, Run in pseudo-terminal,
   and Sensitive name that are turned on (as green text; disabled ones are
@@ -32,6 +43,11 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Changed
 
+- **Unified, themed dropdowns.** Replaced the remaining native `<select>`
+  controls with a single shared, app-styled dropdown (keyboard navigation,
+  click-outside to close, a cyan check on the selected option). The service
+  edit form's icon-type and profile pickers now share this look instead of
+  rendering OS-native chrome.
 - **Pane lifecycle controls use a single slot.** Start, Restart, and Stop now
   replace each other in the terminal pane header instead of showing separate
   Start and Stop buttons with one disabled.
@@ -59,6 +75,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- **Buttons show the pointer cursor on hover again.** Tailwind v4's Preflight
+  dropped the `cursor: pointer` rule v3 applied to buttons, leaving the default
+  arrow on every control. A base style restores the pointer for enabled buttons
+  and `role="button"` elements (cards, dropdown triggers).
 - **Terminal search no longer blanks the app on addon errors.** In-pane search
   enables xterm's proposed decoration API and catches SearchAddon failures, with
   a root error boundary as a final fallback instead of an empty window.

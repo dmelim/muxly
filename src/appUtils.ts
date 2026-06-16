@@ -31,6 +31,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   collapsedProjectNames: {},
   sensitiveProjectNames: {},
   projectNameAliases: {},
+  profiles: [],
+  activeProfile: null,
   autoRestartMaxAttempts: 3,
   autoRestartWindowMs: 60_000,
   maxLogChunks: 5_000,
@@ -68,6 +70,29 @@ export function annotateChunkWithTimestamps(
 
 export function groupKey(service: ServiceConfig) {
   return service.group?.trim() || "Ungrouped";
+}
+
+// Whether a service is visible under the given active profile. "All profiles"
+// (null) shows everything; otherwise a service shows when it belongs to the
+// active profile OR is unassigned (unassigned services act as globals and show
+// under every profile).
+export function isServiceInProfile(
+  service: ServiceConfig,
+  activeProfile: string | null
+): boolean {
+  if (!activeProfile) return true;
+  const profile = service.profile?.trim();
+  return !profile || profile === activeProfile;
+}
+
+// Services visible under the active profile, preserving order. Returns the
+// input untouched for "All profiles" so the common case allocates nothing.
+export function visibleForProfile(
+  services: ServiceConfig[],
+  activeProfile: string | null
+): ServiceConfig[] {
+  if (!activeProfile) return services;
+  return services.filter((service) => isServiceInProfile(service, activeProfile));
 }
 
 export function groupServices(services: ServiceConfig[]): Array<[string, ServiceConfig[]]> {
