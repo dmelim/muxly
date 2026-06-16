@@ -11,6 +11,18 @@
   box-sizing: border-box;
 }
 
+/* Tailwind v4's Preflight removed the `cursor: pointer` rule that v3 applied to
+   buttons, so interactive controls now fall back to the default arrow. Restore
+   the pointer for enabled buttons and role="button" elements (service cards,
+   dropdown triggers, etc.). Disabled controls keep the default cursor. Utility
+   classes still win — they live in a later cascade layer. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}
+
 /* Custom scrollbars — the app runs in a Chromium-based webview (WebView2 on
    Windows, WebKit on macOS), so the ::-webkit-scrollbar pseudo-elements apply.
    The standard scrollbar-* properties are kept as a fallback. */
