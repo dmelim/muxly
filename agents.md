@@ -16,6 +16,41 @@ creating or linking it.
 When making visual or frontend changes, read `docs/design.md` first and keep
 the implementation aligned with the design system.
 
+Never ship browser-native form controls that don't match the app's look. Native
+`<select>` dropdowns, the default `window.prompt`/`alert`/`confirm` dialogs, and
+unstyled inputs render with OS chrome that clashes with the dark, cyan-accented
+design — a custom `<select>`'s option list in particular is OS-drawn and cannot
+be themed with CSS. Build (or reuse) a themed component instead. For dropdowns, use the shared
+`Dropdown.tsx` (a button-plus-popover with dark surface, `white/10` border, cyan
+focus ring, keyboard nav + click-outside) rather than `<select>` — extend it if
+it's missing something instead of hand-rolling another popover. For prompts, use
+an in-app modal (see `ProfilePrompt.tsx`) instead of `window.prompt`/`confirm`.
+This has bitten us repeatedly (the service icon dropdown, the profile switcher,
+the new-profile prompt) — default to a themed component from the start.
+
+Mind the small spacing details — they read as "unfinished" even when the logic
+is right. Watch padding between an element and its container edge (e.g. a
+dropdown chevron crammed against the border), gaps between adjacent controls,
+and alignment within a row. Prefer a flex row with `justify-between` and the
+spacing tokens in `docs/design.md` (`gap-2`/`gap-3`, `px-3`, etc.) over ad-hoc
+values, and give an icon room from the edge rather than letting it touch it.
+
+When adding a field to `ServiceConfig` or `AppSettings`, keep the on-disk schema
+backwards compatible: make the field optional with a serde default on the Rust
+side (`#[serde(default)]`) and optional (`field?: T`) on the TS side, and update
+`DEFAULT_SETTINGS` / any struct literals. A user's existing `services.json` /
+`settings.json` must always keep loading — never introduce a change that makes an
+old file fail to parse. The loader is deliberately resilient (see the per-entry
+parsing in `src-tauri/src/services/config.rs`); don't undo that by adding a
+required field.
+
+Some validation lives on both sides of the bridge and must move together. The
+numeric clamps in `src-tauri/src/settings.rs` are mirrored by the bounds in
+`src/SettingsView.tsx` (which even cites them in a comment); service-field
+validation exists in both `serviceFormModel.ts` and `src-tauri/src/services`.
+When you change a limit or rule on one side, update the other in the same change
+so the UI and backend never disagree.
+
 When asked to create a script, create a Bash script for Git Bash unless another shell is explicitly requested.
 
 ## Versioning and the changelog
