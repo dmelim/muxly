@@ -24,6 +24,7 @@ use crate::{
     process::{ProcessRegistry, RunToken, RunningProcess},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
+use super::utf8::Utf8ChunkDecoder;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::{
@@ -172,7 +173,7 @@ pub fn spawn_service_pty(
         .map_err(|err| AppError::ProcessStart {
             program: service.program.clone(),
             cwd: cwd.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::Other, format!("openpty: {err}")),
+            source: std::io::Error::other(format!("openpty: {err}")),
         })?;
 
     // A non-empty `preRun` wraps the spawn in a shell so the prelude and the
@@ -206,7 +207,7 @@ pub fn spawn_service_pty(
         .map_err(|err| AppError::ProcessStart {
             program: service.program.clone(),
             cwd: cwd.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::Other, err.to_string()),
+            source: std::io::Error::other(err.to_string()),
         })?;
 
     let pid = child.process_id().unwrap_or(0);
@@ -352,27 +353,47 @@ fn pump_output(
     run_token: RunToken,
     on_output: &Channel<ProcessOutputEvent>,
 ) {
-    let mut buf = [0u8; 4096];
+    let send = |chunk: String| {
+        on_output
+            .send(ProcessOutputEvent {
+                service_id: service_id.to_string(),
+                run_token,
+                stream: OutputStream::Stdout,
+                chunk,
+            })
+            .is_ok()
+    };
+
+    // PTY emits arbitrary bytes (UTF-8 in practice). A multi-byte glyph — emoji,
+    // box-drawing, accented char — can straddle a read boundary; the decoder
+    // buffers the trailing partial sequence and stitches it to the next read so
+    // it isn't corrupted into U+FFFD. Matches the pipe path in `spawn.rs`. ASCII
+    // (including every escape byte) is never held back, so escape framing is
+    // untouched. Buffer sized to match the pipe path.
+    let mut decoder = Utf8ChunkDecoder::default();
+    let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
-            Ok(0) => break,
+            Ok(0) => {
+                // Flush any partial sequence held at end-of-stream so the final
+                // bytes aren't silently dropped.
+                if let Some(chunk) = decoder.finish() {
+                    let _ = send(chunk);
+                }
+                break;
+            }
             Ok(n) => {
-                // PTY emits arbitrary bytes (UTF-8 in practice, but a stray
-                // half-character from a chunk boundary would otherwise abort
-                // the stream). `from_utf8_lossy` substitutes U+FFFD instead.
-                let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
-                if on_output
-                    .send(ProcessOutputEvent {
-                        service_id: service_id.to_string(),
-                        run_token,
-                        stream: OutputStream::Stdout,
-                        chunk,
-                    })
-                    .is_err()
-                {
-                    break;
+                if let Some(chunk) = decoder.decode(&buf[..n]) {
+                    if !send(chunk) {
+                        break;
+                    }
                 }
             }
+            // Unlike the pipe path in `spawn.rs` (which emits PROCESS_FAILED on a
+            // read error), a read error here is the normal way a PTY signals the
+            // child has gone — the slave closes and the master read fails. The
+            // waiter thread's `child.wait()` is the authority on exit status, so
+            // we just stop pumping and let it emit the lifecycle event.
             Err(_) => break,
         }
     }

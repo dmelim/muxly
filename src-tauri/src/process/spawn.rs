@@ -11,10 +11,11 @@ use crate::{
     },
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
+use super::utf8::Utf8ChunkDecoder;
 use std::{
     io::{BufReader, Read},
     process::{Command, Stdio},
-    str, thread,
+    thread,
 };
 use tauri::{ipc::Channel, AppHandle, Emitter, Manager};
 
@@ -256,131 +257,3 @@ fn spawn_output_reader<R>(
     });
 }
 
-#[derive(Default)]
-struct Utf8ChunkDecoder {
-    pending: Vec<u8>,
-}
-
-impl Utf8ChunkDecoder {
-    /// Decode a fresh batch of bytes against any partial sequence carried over
-    /// from the previous call. Real invalid bytes are replaced with U+FFFD;
-    /// only a trailing incomplete sequence is buffered for the next read.
-    fn decode(&mut self, bytes: &[u8]) -> Option<String> {
-        let mut combined = Vec::with_capacity(self.pending.len() + bytes.len());
-        combined.extend_from_slice(&self.pending);
-        combined.extend_from_slice(bytes);
-        self.pending.clear();
-
-        let mut output = String::new();
-        let mut cursor = 0usize;
-
-        while cursor < combined.len() {
-            match str::from_utf8(&combined[cursor..]) {
-                Ok(rest) => {
-                    output.push_str(rest);
-                    break;
-                }
-                Err(error) => {
-                    let valid_up_to = error.valid_up_to();
-                    // Bytes [cursor..cursor + valid_up_to] are guaranteed valid UTF-8
-                    // by `Utf8Error::valid_up_to`; `from_utf8_lossy` will not replace.
-                    output.push_str(&String::from_utf8_lossy(
-                        &combined[cursor..cursor + valid_up_to],
-                    ));
-
-                    match error.error_len() {
-                        None => {
-                            // Trailing incomplete sequence — buffer for next read.
-                            self.pending
-                                .extend_from_slice(&combined[cursor + valid_up_to..]);
-                            break;
-                        }
-                        Some(invalid_len) => {
-                            // Real invalid bytes — emit one replacement and continue scanning.
-                            output.push('\u{fffd}');
-                            cursor += valid_up_to + invalid_len;
-                        }
-                    }
-                }
-            }
-        }
-
-        non_empty(output)
-    }
-
-    /// Flush any buffered partial sequence at end-of-stream. Anything still
-    /// pending is by definition incomplete and is emitted lossily.
-    fn finish(&mut self) -> Option<String> {
-        if self.pending.is_empty() {
-            None
-        } else {
-            let chunk = String::from_utf8_lossy(&self.pending).to_string();
-            self.pending.clear();
-            non_empty(chunk)
-        }
-    }
-}
-
-fn non_empty(value: String) -> Option<String> {
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Utf8ChunkDecoder;
-
-    #[test]
-    fn decoder_preserves_split_emoji() {
-        let mut decoder = Utf8ChunkDecoder::default();
-        let bytes = [
-            b'o', b'k', b' ', 0xf0, 0x9f, 0x98, 0x80, b' ', b'd', b'o', b'n', b'e',
-        ];
-        let expected =
-            String::from_utf8(vec![0xf0, 0x9f, 0x98, 0x80, b' ', b'd', b'o', b'n', b'e']).unwrap();
-
-        assert_eq!(decoder.decode(&bytes[..5]).as_deref(), Some("ok "));
-        assert_eq!(
-            decoder.decode(&bytes[5..]).as_deref(),
-            Some(expected.as_str())
-        );
-        assert_eq!(decoder.finish(), None);
-    }
-
-    #[test]
-    fn decoder_flushes_incomplete_sequence_lossily_at_eof() {
-        let mut decoder = Utf8ChunkDecoder::default();
-
-        assert_eq!(decoder.decode(&[0xf0, 0x9f]), None);
-        assert_eq!(decoder.finish().as_deref(), Some("\u{fffd}"));
-    }
-
-    #[test]
-    fn decoder_buffers_trailing_partial_after_midbuffer_invalid() {
-        // ok<INVALID>ok<PARTIAL EMOJI HEAD>
-        // Previously, the whole buffer was lossy-decoded, replacing the trailing
-        // partial sequence with U+FFFD. It must instead be buffered for the
-        // next read so the emoji is decoded correctly.
-        let mut decoder = Utf8ChunkDecoder::default();
-
-        let chunk = decoder.decode(&[b'o', b'k', 0xff, b'o', b'k', 0xf0, 0x9f]);
-        assert_eq!(chunk.as_deref(), Some("ok\u{fffd}ok"));
-
-        // Feeding the remaining 2 bytes of the smiley completes the emoji.
-        let rest = decoder.decode(&[0x98, 0x80]);
-        assert_eq!(rest.as_deref(), Some("\u{1f600}"));
-        assert_eq!(decoder.finish(), None);
-    }
-
-    #[test]
-    fn decoder_handles_multiple_invalid_runs() {
-        let mut decoder = Utf8ChunkDecoder::default();
-        let chunk = decoder.decode(&[b'a', 0xff, 0xff, b'b', 0xfe, b'c']);
-        // Each contiguous invalid run emits a single replacement char,
-        // matching `String::from_utf8_lossy`'s behavior.
-        assert_eq!(chunk.as_deref(), Some("a\u{fffd}\u{fffd}b\u{fffd}c"));
-    }
-}

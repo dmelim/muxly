@@ -54,6 +54,12 @@ type TerminalPanesProps = {
   pids: Record<string, number>;
   /** Max columns before the pane grid wraps to a new row. */
   gridColumns: number;
+  /** Per-service flag: a PTY run has started but not yet produced real output.
+   * Drives the in-pane "waiting for output…" affordance. */
+  awaitingOutput: Record<string, boolean>;
+  /** Per-service slow/stuck start health from the deadlock watchdog. Present
+   * while a PTY start is producing no output: `gaveUp` once retries ran out. */
+  startHealth: Record<string, { attempt: number; max: number; gaveUp: boolean }>;
   /** App-owned registry so log streaming can reach each pane's terminal. */
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   /** App-owned per-service log ring buffers, replayed when a pane mounts. */
@@ -94,6 +100,8 @@ export function TerminalPanes({
   statuses,
   pids,
   gridColumns,
+  awaitingOutput,
+  startHealth,
   terminalsRef,
   logsRef,
   searchPaneId,
@@ -145,6 +153,8 @@ export function TerminalPanes({
               streamMode={streamMode}
               status={statuses[service.id] ?? "stopped"}
               running={pids[service.id] != null || adoptedPids[service.id] != null}
+              awaitingOutput={awaitingOutput[service.id] ?? false}
+              startHealth={startHealth[service.id] ?? null}
               focused={service.id === focusedId}
               showClose={paneServices.length > 1}
               searchOpen={service.id === searchPaneId}
@@ -259,6 +269,61 @@ function PortBlockerBanner({
   );
 }
 
+// Subtle, non-interactive affordance shown over a PTY pane after the process
+// has started but before it has produced its first real output. Fills the
+// otherwise-blank gap (which can stretch across a ConPTY recycle) so a slow or
+// briefly-stuck start reads as "working" rather than hung. Pinned to the bottom
+// so it never covers the start banner the terminal prints at the top.
+function WaitingForOutput() {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+      <span className="inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-[#15181d]/90 px-3 py-1 text-[11px] text-cyan-200/90 shadow-sm backdrop-blur">
+        Waiting for output
+        <span className="inline-flex gap-1">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="size-1.5 rounded-full bg-cyan-400 animate-pulse"
+              style={{ animationDelay: `${i * 0.25}s` }}
+            />
+          ))}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+// Escalated start-health notice: shown once the watchdog has detected a PTY
+// start producing no output. Amber while it auto-retries, rose once it has
+// given up (likely a ConPTY deadlock). Replaces the calm "waiting" pill so a
+// slow/stuck start reads clearly as a problem worth a glance. Pinned bottom so
+// it doesn't cover the start banner.
+function StartHealthNotice({
+  startHealth
+}: {
+  startHealth: { attempt: number; max: number; gaveUp: boolean };
+}) {
+  const { attempt, max, gaveUp } = startHealth;
+  const tone = gaveUp
+    ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
+    : "border-amber-500/30 bg-amber-500/10 text-amber-100";
+  const dot = gaveUp ? "bg-rose-400" : "bg-amber-400";
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
+      <span
+        className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-[11px] shadow-sm backdrop-blur ${tone}`}
+      >
+        <span className={`size-1.5 shrink-0 rounded-full ${dot} ${gaveUp ? "" : "animate-pulse"}`} />
+        <span className="truncate">
+          {gaveUp
+            ? `No output after ${max} tries — start may be stuck. Stop and start again to retry.`
+            : `Slow start — no output yet, retrying (${attempt}/${max})…`}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 type PaneViewProps = {
   service: ServiceConfig;
   /** When true and the service is sensitive, its name is masked in the header. */
@@ -266,6 +331,10 @@ type PaneViewProps = {
   status: ServiceStatus;
   /** True while the process has a live PID — gates the Stop button. */
   running: boolean;
+  /** True for a PTY run that has started but not yet emitted real output. */
+  awaitingOutput: boolean;
+  /** Slow/stuck start health from the watchdog, or null when healthy. */
+  startHealth: { attempt: number; max: number; gaveUp: boolean } | null;
   focused: boolean;
   showClose: boolean;
   /** Whether the in-pane search bar should be shown for this pane. */
@@ -296,6 +365,8 @@ function PaneView({
   streamMode,
   status,
   running,
+  awaitingOutput,
+  startHealth,
   focused,
   showClose,
   searchOpen,
@@ -571,6 +642,11 @@ function PaneView({
       ) : null}
       <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3">
         <div ref={hostRef} className="h-full w-full overflow-hidden" />
+        {startHealth ? (
+          <StartHealthNotice startHealth={startHealth} />
+        ) : awaitingOutput ? (
+          <WaitingForOutput />
+        ) : null}
         {searchOpen && searchAddon ? (
           <PaneSearchBar
             searchAddon={searchAddon}

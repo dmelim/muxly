@@ -3,6 +3,7 @@ mod port;
 mod shell;
 mod spawn;
 mod spawn_pty;
+mod utf8;
 
 use parking_lot::Mutex;
 use std::collections::HashMap;

@@ -57,10 +57,36 @@ import {
 
 const PTY_CARRIAGE_RETURN_SETTLE_MS = 75;
 
+// How long the one-shot "waiting for output…" hint stays up after a *user-
+// initiated* PTY start when no real output has arrived yet. It also clears the
+// instant real output lands. Deliberately one-shot: automatic recycles and
+// auto-restarts do NOT re-show it — only a fresh Start/Restart does.
+const WAITING_FOR_OUTPUT_MAX_MS = 8_000;
+
 type PendingPtyCarriageReturn = {
   text: string;
   timer: ReturnType<typeof window.setTimeout>;
 };
+
+// Opt-in tracing for PTY start/watchdog behaviour, to debug ConPTY deadlocks
+// (a start that hangs with no real output). Off unless explicitly enabled, so
+// it costs nothing in normal use. Turn it on from the devtools console and
+// reproduce a stuck restart:
+//   localStorage.setItem("muxly:ptyDebug", "1")   // then reproduce
+//   localStorage.removeItem("muxly:ptyDebug")      // to turn back off
+// Lines land as `[pty-debug] <serviceId> …` in the devtools console.
+function ptyDebug(serviceId: string, message: string, detail?: unknown) {
+  try {
+    if (localStorage.getItem("muxly:ptyDebug") !== "1") return;
+  } catch {
+    return;
+  }
+  if (detail !== undefined) {
+    console.debug(`[pty-debug] ${serviceId} ${message}`, detail);
+  } else {
+    console.debug(`[pty-debug] ${serviceId} ${message}`);
+  }
+}
 
 export function App() {
   const [services, setServices] = useState<ServiceConfig[]>([]);
@@ -74,6 +100,18 @@ export function App() {
   // on exit. Drives the "Open localhost:N" affordance and the manager note.
   const [actualPorts, setActualPorts] = useState<Record<string, number>>({});
   const [lastExit, setLastExit] = useState<Record<string, string>>({});
+  // PTY services only: true from PROCESS_STARTED until the run produces its
+  // first real (newline) output. Drives the in-pane "waiting for output…"
+  // affordance so a briefly-silent or recycling start never just looks hung.
+  const [awaitingOutput, setAwaitingOutput] = useState<Record<string, boolean>>({});
+  // Escalated start-health, set by the deadlock watchdog when a PTY start
+  // produces no output within the window: `retrying` while it auto-recycles,
+  // `gaveUp` once it has exhausted its retries and is likely stuck. Surfaced as
+  // a pane notice so a slow/stuck start is visible at a glance, not just in the
+  // log. Cleared on first real output, a fresh user start, or a genuine stop.
+  const [startHealth, setStartHealth] = useState<
+    Record<string, { attempt: number; max: number; gaveUp: boolean }>
+  >({});
   const [managerMessage, setManagerMessage] = useState("Loading service config...");
   // One xterm terminal per open pane, keyed by service id.
   const terminalsRef = useRef<Map<string, Terminal>>(new Map());
@@ -121,6 +159,13 @@ export function App() {
   // retries are capped. See PTY_WATCHDOG_MS / PTY_RECYCLE_MAX.
   const sawPtyOutputRef = useRef<Record<string, number>>({});
   const ptyRecycleRef = useRef<Record<string, number>>({});
+  // Service ids whose *next* PROCESS_STARTED was triggered by an explicit user
+  // Start/Restart (not an automatic recycle/auto-restart). Consumed once on that
+  // start to show the one-shot "waiting for output…" hint, then cleared.
+  const userStartedRef = useRef<Set<string>>(new Set());
+  // Pending hide-timers for the "waiting for output…" hint, keyed by service id,
+  // so a stale timer can't hide a fresh hint and we can cancel on output/exit.
+  const awaitingTimersRef = useRef<Record<string, ReturnType<typeof window.setTimeout>>>({});
   const [editing, setEditing] = useState<EditTarget | null>(null);
   // Map of serviceId → true when its configured port is held by another process.
   // Only meaningful when the service is not running — we never flag our own
@@ -639,6 +684,16 @@ export function App() {
       appendLog(serviceId, `\r\n\x1b[38;2;34;211;238m[manager] started pid ${pid}\x1b[0m\r\n`);
       refreshHistory(serviceId);
 
+      // Consume the user-start flag on every start (PTY or not) so it can't
+      // linger or arm the hint on an unrelated later spawn. Only PTY starts
+      // actually use it below.
+      const userStarted = userStartedRef.current.delete(serviceId);
+      // A fresh user start clears any prior slow/stuck notice — the new attempt
+      // starts clean. Automatic recycles keep it (they're the same struggle).
+      if (userStarted) {
+        clearStartHealth(serviceId);
+      }
+
       // Arm the PTY deadlock watchdog: a ConPTY `.cmd`-shim hang produces no
       // output and never spawns its real child, so if this run emits nothing
       // within the window we recycle it. Pipe-mode spawns don't hit this.
@@ -664,7 +719,29 @@ export function App() {
           });
         }
 
+        // One-shot "waiting for output…" hint. Only a user-initiated Start/
+        // Restart arms it (userStarted, captured above); automatic recycles/
+        // auto-restarts don't, so it never re-appears on its own. It hides on
+        // the first real output or after WAITING_FOR_OUTPUT_MAX_MS, whichever
+        // comes first.
+        const alreadySawOutput = sawPtyOutputRef.current[serviceId] === runToken;
+        if (userStarted && !alreadySawOutput) {
+          if (awaitingTimersRef.current[serviceId] !== undefined) {
+            window.clearTimeout(awaitingTimersRef.current[serviceId]);
+          }
+          setAwaitingOutput((current) =>
+            current[serviceId] ? current : { ...current, [serviceId]: true }
+          );
+          awaitingTimersRef.current[serviceId] = window.setTimeout(() => {
+            delete awaitingTimersRef.current[serviceId];
+            setAwaitingOutput((current) =>
+              current[serviceId] ? { ...current, [serviceId]: false } : current
+            );
+          }, WAITING_FOR_OUTPUT_MAX_MS);
+        }
+
         const watchedToken = runToken;
+        ptyDebug(serviceId, "watchdog armed", { runToken, pid, windowMs: PTY_WATCHDOG_MS });
         window.setTimeout(() => {
           maybeRecyclePtyStart(serviceId, watchedToken);
         }, PTY_WATCHDOG_MS);
@@ -684,6 +761,13 @@ export function App() {
         ? "exited"
         : "failed";
       setStatuses((current) => ({ ...current, [serviceId]: nextStatus }));
+      clearAwaitingOutput(serviceId);
+      // A genuine stop clears the slow/stuck notice. An in-flight recycle or
+      // user-restart (pendingRestart) keeps it — the respawn's user-start or its
+      // eventual output clears it instead, so the notice doesn't flicker.
+      if (!pendingRestartRef.current.has(serviceId)) {
+        clearStartHealth(serviceId);
+      }
       setPids((current) => {
         const next = { ...current };
         delete next[serviceId];
@@ -778,6 +862,8 @@ export function App() {
       delete activeRunTokensRef.current[serviceId];
       delete outputChannelsRef.current[serviceId];
       setStatuses((current) => ({ ...current, [serviceId]: "failed" }));
+      clearAwaitingOutput(serviceId);
+      clearStartHealth(serviceId);
       appendLog(serviceId, `\r\n\x1b[31m[manager] ${message}\x1b[0m\r\n`);
       scheduleRescan(serviceId);
       refreshHistory(serviceId);
@@ -796,21 +882,46 @@ export function App() {
     // working tool can't loop forever.
     function maybeRecyclePtyStart(serviceId: string, token: number) {
       // Only the still-live run that never emitted output is a candidate.
-      if (activeRunTokensRef.current[serviceId] !== token) return;
-      if (sawPtyOutputRef.current[serviceId] === token) return;
+      if (activeRunTokensRef.current[serviceId] !== token) {
+        ptyDebug(serviceId, "watchdog skip: a newer run replaced this one", {
+          token,
+          active: activeRunTokensRef.current[serviceId]
+        });
+        return;
+      }
+      if (sawPtyOutputRef.current[serviceId] === token) {
+        ptyDebug(serviceId, "watchdog skip: real (newline) output seen → healthy", { token });
+        return;
+      }
       const service = servicesRef.current.find((s) => s.id === serviceId);
       if (!service) return;
 
       const attempts = (ptyRecycleRef.current[serviceId] ?? 0) + 1;
+      ptyDebug(serviceId, "watchdog fired: no real output within window", {
+        token,
+        attempt: attempts,
+        max: PTY_RECYCLE_MAX
+      });
+      // The one-shot "waiting…" hint is done — escalate to a visible slow/stuck
+      // notice so the user knows this start isn't producing output.
+      clearAwaitingOutput(serviceId);
       if (attempts > PTY_RECYCLE_MAX) {
         appendLog(
           serviceId,
           `\r\n\x1b[31m[manager] start still produced no output after ${PTY_RECYCLE_MAX} recycles — leaving it; press restart to try again\x1b[0m\r\n`
         );
         delete ptyRecycleRef.current[serviceId];
+        setStartHealth((current) => ({
+          ...current,
+          [serviceId]: { attempt: PTY_RECYCLE_MAX, max: PTY_RECYCLE_MAX, gaveUp: true }
+        }));
         return;
       }
       ptyRecycleRef.current[serviceId] = attempts;
+      setStartHealth((current) => ({
+        ...current,
+        [serviceId]: { attempt: attempts, max: PTY_RECYCLE_MAX, gaveUp: false }
+      }));
       appendLog(
         serviceId,
         `\r\n\x1b[33m[manager] no output in ${Math.round(
@@ -871,6 +982,10 @@ export function App() {
         window.clearTimeout(pending.timer);
       }
       pendingPtyCarriageReturnsRef.current.clear();
+      for (const timer of Object.values(awaitingTimersRef.current)) {
+        window.clearTimeout(timer);
+      }
+      awaitingTimersRef.current = {};
     };
   }, []);
 
@@ -967,6 +1082,29 @@ export function App() {
     enqueueLiveTerminalWrite(serviceId, annotated, isPty);
   }, [enqueueLiveTerminalWrite]);
 
+  // Hide the "waiting for output…" hint for a service and cancel its pending
+  // hide-timer. Idempotent — safe to call on output, exit, failure, or unmount.
+  const clearAwaitingOutput = useCallback((serviceId: string) => {
+    const timer = awaitingTimersRef.current[serviceId];
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      delete awaitingTimersRef.current[serviceId];
+    }
+    setAwaitingOutput((current) =>
+      current[serviceId] ? { ...current, [serviceId]: false } : current
+    );
+  }, []);
+
+  // Drop any slow/stuck start-health notice for a service.
+  const clearStartHealth = useCallback((serviceId: string) => {
+    setStartHealth((current) => {
+      if (!current[serviceId]) return current;
+      const next = { ...current };
+      delete next[serviceId];
+      return next;
+    });
+  }, []);
+
   const startService = useCallback(
     async (service: ServiceConfig) => {
       const currentStatus = statuses[service.id];
@@ -987,10 +1125,39 @@ export function App() {
         if (activeRunToken != null && activeRunToken !== runToken) {
           return;
         }
-        // Real process output proves the PTY came up — disarm the deadlock
-        // watchdog for this run and reset its recycle budget.
-        sawPtyOutputRef.current[serviceId] = runToken;
-        delete ptyRecycleRef.current[serviceId];
+        // ConPTY emits its own init burst (an OSC set-title plus cursor
+        // show/hide escapes) before the child runs, and none of it carries a
+        // newline. Only real *line* output proves the child actually came up,
+        // so gate the watchdog signal on a newline — otherwise that boilerplate
+        // masks a deadlocked start as "alive" and the recycle retry never
+        // fires. appendLog still runs for every chunk, so rendering is
+        // unaffected; only the "saw output" / recycle-budget signals are gated.
+        const accepted = sawPtyOutputRef.current[serviceId] === runToken;
+        if (!accepted) {
+          // Trace only the startup window (until this run is accepted): this is
+          // exactly where ConPTY's newline-free init burst shows up on a stuck
+          // start. Goes quiet once real output lands, so it never floods.
+          ptyDebug(serviceId, "startup chunk", {
+            runToken,
+            stream,
+            bytes: chunk.length,
+            hasNewline: chunk.includes("\n"),
+            preview: JSON.stringify(chunk.slice(0, 80))
+          });
+        }
+        if (chunk.includes("\n")) {
+          if (!accepted) {
+            ptyDebug(serviceId, "accepted: first newline output → watchdog disarmed", {
+              runToken
+            });
+            // First real output — drop the "waiting for output…" hint and any
+            // slow/stuck notice (the start recovered).
+            clearAwaitingOutput(serviceId);
+            clearStartHealth(serviceId);
+          }
+          sawPtyOutputRef.current[serviceId] = runToken;
+          delete ptyRecycleRef.current[serviceId];
+        }
         appendLog(serviceId, stream === "stderr" ? `\x1b[31m${chunk}\x1b[0m` : chunk);
       };
       outputChannelsRef.current[service.id] = onOutput;
@@ -999,11 +1166,16 @@ export function App() {
         await invoke("start_service", { service, onOutput });
       } catch (error) {
         delete outputChannelsRef.current[service.id];
+        // The start never reached PROCESS_STARTED — drop the user-start flag so
+        // it can't arm the hint on some unrelated later spawn, and hide any hint.
+        userStartedRef.current.delete(service.id);
+        clearAwaitingOutput(service.id);
+        clearStartHealth(service.id);
         setStatuses((current) => ({ ...current, [service.id]: "failed" }));
         appendLog(service.id, `\r\n\x1b[31m[manager] ${errorMessage(error)}\x1b[0m\r\n`);
       }
     },
-    [appendLog, statuses]
+    [appendLog, statuses, clearAwaitingOutput, clearStartHealth]
   );
 
   useEffect(() => {
@@ -1011,10 +1183,12 @@ export function App() {
   }, [startService]);
 
   // A start triggered explicitly by the user. Clears the auto-restart budget so
-  // a manual start after "gave up" gets a fresh set of retries.
+  // a manual start after "gave up" gets a fresh set of retries, and flags this
+  // start as user-initiated so the one-shot "waiting for output…" hint shows.
   const manualStart = useCallback(
     (service: ServiceConfig) => {
       delete autoRestartRef.current[service.id];
+      userStartedRef.current.add(service.id);
       return startService(service);
     },
     [startService]
@@ -1187,6 +1361,9 @@ export function App() {
   const restartService = useCallback(
     async (service: ServiceConfig) => {
       if (pids[service.id] != null) {
+        // User-initiated: the respawn happens via the exit handler (not
+        // manualStart), so flag it here for the "waiting for output…" hint.
+        userStartedRef.current.add(service.id);
         pendingRestartRef.current.add(service.id);
         await stopService(service);
         return;
@@ -1864,6 +2041,8 @@ export function App() {
             statuses={statuses}
             pids={pids}
             gridColumns={settings.paneGridColumns}
+            awaitingOutput={awaitingOutput}
+            startHealth={startHealth}
             terminalsRef={terminalsRef}
             logsRef={logsRef}
             searchPaneId={searchPaneId}

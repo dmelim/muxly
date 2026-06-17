@@ -4,6 +4,7 @@ import { displayServiceName, maskSensitiveName } from "./types";
 import { groupServices } from "./appUtils";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { CloseIcon, EyeIcon, EyeOffIcon } from "./icons";
 
 // Bounds — must match the clamps in `src-tauri/src/settings.rs` so the form
@@ -633,6 +634,13 @@ function ProfilesSection({
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Pending profile deletion awaiting confirmation in the themed modal. Holds
+  // the precomputed message so the dialog stays a dumb presenter.
+  const [confirmDelete, setConfirmDelete] = useState<{
+    id: string;
+    name: string;
+    message: string;
+  } | null>(null);
 
   // How many services are assigned to each profile id (for the row count and
   // the delete confirmation).
@@ -715,7 +723,9 @@ function ProfilesSection({
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
+  // Open the themed confirmation modal for a delete. The actual delete runs in
+  // `performDelete` once the user confirms.
+  const requestDelete = (id: string, name: string) => {
     const count = counts[id] ?? 0;
     const message =
       count > 0
@@ -723,13 +733,22 @@ function ProfilesSection({
             count === 1 ? "" : "s"
           } will become unassigned (shown in every profile). The services themselves are not deleted.`
         : `Delete profile "${name}"?`;
-    if (!confirm(message)) return;
+    setError(null);
+    setConfirmDelete({ id, name, message });
+  };
+
+  const performDelete = async () => {
+    if (!confirmDelete) return;
+    const { id } = confirmDelete;
     setError(null);
     setBusy(true);
     try {
       await onDeleteProfile(id);
+      setConfirmDelete(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+      // Dismiss the modal so the inline error below the list is visible.
+      setConfirmDelete(null);
     } finally {
       setBusy(false);
     }
@@ -807,7 +826,7 @@ function ProfilesSection({
                 <Button
                   variant="destructive"
                   size="xs"
-                  onClick={() => void handleDelete(profile.id, profile.name)}
+                  onClick={() => requestDelete(profile.id, profile.name)}
                   disabled={busy}
                 >
                   Delete
@@ -820,6 +839,18 @@ function ProfilesSection({
 
       {error ? (
         <p className="rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>
+      ) : null}
+
+      {confirmDelete ? (
+        <ConfirmDialog
+          title="Delete profile"
+          message={confirmDelete.message}
+          confirmLabel="Delete"
+          destructive
+          busy={busy}
+          onConfirm={() => void performDelete()}
+          onClose={() => setConfirmDelete(null)}
+        />
       ) : null}
     </div>
   );
