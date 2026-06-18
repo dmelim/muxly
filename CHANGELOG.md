@@ -7,20 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Versioning policy
 
-- **MAJOR** â€” breaking changes to the `services.json` schema or app behaviour.
-- **MINOR** â€” new features, backwards-compatible.
-- **PATCH** â€” bug fixes and internal changes with no user-visible feature change.
+- **MAJOR** — breaking changes to the `services.json` schema or app behaviour.
+  While the version is `0.x`, breaking changes still bump **MINOR** (the `0.`
+  prefix signals "not yet stable"); the first `1.0.0` is a deliberate stability
+  commitment, made only when explicitly chosen, never as a reflex to a breaking
+  change.
+- **MINOR** — new features, backwards-compatible.
+- **PATCH** — bug fixes and internal changes with no user-visible feature change.
 
 The version is declared in **three files that must always match**:
 
-- `package.json` â†’ `version`
-- `src-tauri/Cargo.toml` â†’ `[package] version`
-- `src-tauri/tauri.conf.json` â†’ `version`
+- `package.json` → `version`
+- `src-tauri/Cargo.toml` → `[package] version`
+- `src-tauri/tauri.conf.json` → `version`
 
 When releasing: bump all three, move `[Unreleased]` items into a new dated
 section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-06-18
 
 ### Added
 
@@ -40,88 +46,6 @@ section, and tag the commit `vX.Y.Z`.
   and Sensitive name that are turned on (as green text; disabled ones are
   omitted, "None" when nothing is on), so you can see the active flags without
   opening the edit form.
-
-### Changed
-
-- **Unified, themed dropdowns.** Replaced the remaining native `<select>`
-  controls with a single shared, app-styled dropdown (keyboard navigation,
-  click-outside to close, a cyan check on the selected option). The service
-  edit form's icon-type and profile pickers now share this look instead of
-  rendering OS-native chrome.
-- **Pane lifecycle controls use a single slot.** Start, Restart, and Stop now
-  replace each other in the terminal pane header instead of showing separate
-  Start and Stop buttons with one disabled.
-- **Frontend component structure.** Split large app/form files into focused
-  components and helpers for service forms, service icon inputs, sidebars, app
-  utilities, and detail rows. Behaviour is intended to stay unchanged.
-- **Sensitive services are now curated as a project tree.** The Settings list
-  groups services under their project with a checkbox per project and per
-  service. Marking a project or service sensitive hides/masks it **only while
-  Stream mode is on** — sensitive project names show their alias and sensitive
-  service names are masked to their last 3 characters; turning Stream mode off
-  reveals them. This is independent of the sidebar eye toggle, which still hides
-  a project name manually regardless of Stream mode. Checking a project also
-  marks all of its services as a convenience, after which you can uncheck
-  individual services without unchecking the project. While Stream mode is on,
-  the curation list masks the names it controls (so it doesn't leak them on a
-  shared screen) and exposes an eye button to reveal them temporarily for
-  editing — the reveal starts hidden on entering Stream mode and resets on
-  exit. Adds a `sensitiveProjectNames` field to settings (backward-compatible
-  default).
-- **Masked service names now keep their last 3 characters** (e.g.
-  `••••tor`) instead of a fixed bullet run, so panes and cards stay
-  distinguishable while Stream mode is on. Names of 3 characters or fewer are
-  still fully masked.
-
-### Fixed
-
-- **Buttons show the pointer cursor on hover again.** Tailwind v4's Preflight
-  dropped the `cursor: pointer` rule v3 applied to buttons, leaving the default
-  arrow on every control. A base style restores the pointer for enabled buttons
-  and `role="button"` elements (cards, dropdown triggers).
-- **Terminal search no longer blanks the app on addon errors.** In-pane search
-  enables xterm's proposed decoration API and catches SearchAddon failures, with
-  a root error boundary as a final fallback instead of an empty window.
-- **Backspacing in Windows PTY panes no longer flashes the cursor at the prompt.**
-  Standalone carriage-return chunks from ConPTY are now held briefly and merged
-  with the following redraw chunk, avoiding the intermediate column-0 cursor
-  paint while preserving the original PTY stream.
-- **PTY pane input lands on the correct row.** The backend opens each PTY at a
-  default 120×30 because it can't know the pane size until the child exists. The
-  pane fitted xterm to its real (narrower) geometry on mount, but that resize was
-  a no-op since the process wasn't running yet, and nothing re-fired afterwards —
-  leaving the PTY's width disagreeing with xterm's. readline-driven REPLs (node,
-  python) then computed cursor-relative redraws against the wrong width, so
-  echoed input rendered on the wrong line. The measured size is now pushed to the
-  PTY on `PROCESS_STARTED` so the two always agree.
-- **Stale restart events no longer clobber the new run.** Service lifecycle and
-  output events now include the run token, and the frontend ignores exit,
-  failure, and output events from older runs once a newer run has started.
-- **Restarting a service no longer hangs with a blank pane.** A stop→start of
-  the same service could leave the new run started but producing no output (and
-  unstoppable) until you stopped and started again. The previous run's waiter
-  thread tears down by `service_id`, and on a fast restart it could remove the
-  *new* run's registry entry and PTY session — dropping the master and killing
-  the output pump out from under the live process. Each run now carries a
-  monotonic run token and cleanup is a compare-and-remove, so a stale waiter
-  can never clobber a newer run. Affects both the PTY and pipe spawn paths.
-- **Garbled punctuation in the UI.** `App.tsx` and `ServiceForm.tsx` had been
-  double-encoded (UTF-8 read as Windows-1252 and re-saved), so em dashes and
-  curly quotes rendered as mojibake — most visibly in the command palette's
-  Stream mode description and the "Sensitive name" form hint. Restored the
-  intended characters and stripped the stray byte-order marks.
-- **PTY services now kill their whole process tree on stop (Windows).**
-  Previously, stopping a PTY-backed service killed only the immediate child,
-  so any grandchildren it spawned could leak as orphans. `portable_pty`
-  spawns the child for us (we can't set `CREATE_SUSPENDED` like the pipe
-  path), so the spawner now re-opens the running child by PID and assigns it
-  to a `KILL_ON_JOB_CLOSE` Job Object after the fact; terminating reaps the
-  whole tree. If the Job Object can't be created or assigned, it degrades to
-  the previous single-child kill. A narrow race remains for grandchildren
-  forked in the moment before assignment (acceptable for dev servers, which
-  don't fork that early). Unix PTY children are unchanged.
-
-### Added
 
 - **Auto-roll a busy port (opt-in port management).** A new per-service
   **Auto-roll port if busy** toggle turns the service's `port` into a
@@ -271,7 +195,109 @@ section, and tag the commit `vX.Y.Z`.
 - The bottom shell drawer's height is now drag-resizable from its top edge
   (clamped between 120px and ~80% of the window height).
 
+### Changed
+
+- **Unified, themed dropdowns.** Replaced the remaining native `<select>`
+  controls with a single shared, app-styled dropdown (keyboard navigation,
+  click-outside to close, a cyan check on the selected option). The service
+  edit form's icon-type and profile pickers now share this look instead of
+  rendering OS-native chrome.
+- **Pane lifecycle controls use a single slot.** Start, Restart, and Stop now
+  replace each other in the terminal pane header instead of showing separate
+  Start and Stop buttons with one disabled.
+- **Frontend component structure.** Split large app/form files into focused
+  components and helpers for service forms, service icon inputs, sidebars, app
+  utilities, and detail rows. Behaviour is intended to stay unchanged.
+- **Sensitive services are now curated as a project tree.** The Settings list
+  groups services under their project with a checkbox per project and per
+  service. Marking a project or service sensitive hides/masks it **only while
+  Stream mode is on** — sensitive project names show their alias and sensitive
+  service names are masked to their last 3 characters; turning Stream mode off
+  reveals them. This is independent of the sidebar eye toggle, which still hides
+  a project name manually regardless of Stream mode. Checking a project also
+  marks all of its services as a convenience, after which you can uncheck
+  individual services without unchecking the project. While Stream mode is on,
+  the curation list masks the names it controls (so it doesn't leak them on a
+  shared screen) and exposes an eye button to reveal them temporarily for
+  editing — the reveal starts hidden on entering Stream mode and resets on
+  exit. Adds a `sensitiveProjectNames` field to settings (backward-compatible
+  default).
+- **Masked service names now keep their last 3 characters** (e.g.
+  `••••tor`) instead of a fixed bullet run, so panes and cards stay
+  distinguishable while Stream mode is on. Names of 3 characters or fewer are
+  still fully masked.
+
+- The in-pane search bar's match decorations switched from cyan to amber so
+  hits stand out against the cyan focus ring / cursor / status indicators
+  used elsewhere in the chrome.
+- Clicking a service in the sidebar now **replaces the focused pane only**
+  instead of wiping the whole layout. With panes 1,2,3 open and pane 2
+  focused, clicking 4 yields 1,4,3. **Shift+click** adds the service as an
+  additional pane (replacing the previous `Ctrl/Cmd+click` split shortcut).
+  `Ctrl/Cmd+1..9` still jumps to a single pane.
+- Sidebar group headers now tint the start/stop-all icons cyan and rose so the
+  bulk actions are easier to scan against the neutral header row.
+- The run-history SQLite table is pruned on startup to keep the most recent
+  200 runs per service, bounding `history.db` growth over time.
+- Removed the unused `md` button size; the `Button` default size is now `sm`,
+  matching what the UI actually uses.
+- The built-in icon picker now opens as a compact popover instead of expanding
+  the full icon grid inline in the form.
+- Removed the redundant "Workspace" eyebrow from the services sidebar header.
+- Sidebar service cards no longer use a cyan left-border accent to mark
+  selected/open state. Any card whose service is open in a terminal pane now
+  gets the tinted card background, with a small cyan `square-terminal` icon
+  pinned to the card's top-right corner. The "open in split view" hover
+  affordance moved to the card's bottom-right corner so the open-in-pane
+  indicator and the split button no longer overlap.
+
 ### Fixed
+
+- **Buttons show the pointer cursor on hover again.** Tailwind v4's Preflight
+  dropped the `cursor: pointer` rule v3 applied to buttons, leaving the default
+  arrow on every control. A base style restores the pointer for enabled buttons
+  and `role="button"` elements (cards, dropdown triggers).
+- **Terminal search no longer blanks the app on addon errors.** In-pane search
+  enables xterm's proposed decoration API and catches SearchAddon failures, with
+  a root error boundary as a final fallback instead of an empty window.
+- **Backspacing in Windows PTY panes no longer flashes the cursor at the prompt.**
+  Standalone carriage-return chunks from ConPTY are now held briefly and merged
+  with the following redraw chunk, avoiding the intermediate column-0 cursor
+  paint while preserving the original PTY stream.
+- **PTY pane input lands on the correct row.** The backend opens each PTY at a
+  default 120×30 because it can't know the pane size until the child exists. The
+  pane fitted xterm to its real (narrower) geometry on mount, but that resize was
+  a no-op since the process wasn't running yet, and nothing re-fired afterwards —
+  leaving the PTY's width disagreeing with xterm's. readline-driven REPLs (node,
+  python) then computed cursor-relative redraws against the wrong width, so
+  echoed input rendered on the wrong line. The measured size is now pushed to the
+  PTY on `PROCESS_STARTED` so the two always agree.
+- **Stale restart events no longer clobber the new run.** Service lifecycle and
+  output events now include the run token, and the frontend ignores exit,
+  failure, and output events from older runs once a newer run has started.
+- **Restarting a service no longer hangs with a blank pane.** A stop→start of
+  the same service could leave the new run started but producing no output (and
+  unstoppable) until you stopped and started again. The previous run's waiter
+  thread tears down by `service_id`, and on a fast restart it could remove the
+  *new* run's registry entry and PTY session — dropping the master and killing
+  the output pump out from under the live process. Each run now carries a
+  monotonic run token and cleanup is a compare-and-remove, so a stale waiter
+  can never clobber a newer run. Affects both the PTY and pipe spawn paths.
+- **Garbled punctuation in the UI.** `App.tsx` and `ServiceForm.tsx` had been
+  double-encoded (UTF-8 read as Windows-1252 and re-saved), so em dashes and
+  curly quotes rendered as mojibake — most visibly in the command palette's
+  Stream mode description and the "Sensitive name" form hint. Restored the
+  intended characters and stripped the stray byte-order marks.
+- **PTY services now kill their whole process tree on stop (Windows).**
+  Previously, stopping a PTY-backed service killed only the immediate child,
+  so any grandchildren it spawned could leak as orphans. `portable_pty`
+  spawns the child for us (we can't set `CREATE_SUSPENDED` like the pipe
+  path), so the spawner now re-opens the running child by PID and assigns it
+  to a `KILL_ON_JOB_CLOSE` Job Object after the fact; terminating reaps the
+  whole tree. If the Job Object can't be created or assigned, it degrades to
+  the previous single-child kill. A narrow race remains for grandchildren
+  forked in the moment before assignment (acceptable for dev servers, which
+  don't fork that early). Unix PTY children are unchanged.
 
 - Stopping PTY-backed services is less noisy on Windows: duplicate lifecycle
   listeners are cleaned up reliably in development, and the contradictory
@@ -298,32 +324,6 @@ section, and tag the commit `vX.Y.Z`.
 - The emoji picker popup is no longer clipped when opened from the compact
   value field.
 
-### Changed
-
-- The in-pane search bar's match decorations switched from cyan to amber so
-  hits stand out against the cyan focus ring / cursor / status indicators
-  used elsewhere in the chrome.
-- Clicking a service in the sidebar now **replaces the focused pane only**
-  instead of wiping the whole layout. With panes 1,2,3 open and pane 2
-  focused, clicking 4 yields 1,4,3. **Shift+click** adds the service as an
-  additional pane (replacing the previous `Ctrl/Cmd+click` split shortcut).
-  `Ctrl/Cmd+1..9` still jumps to a single pane.
-- Sidebar group headers now tint the start/stop-all icons cyan and rose so the
-  bulk actions are easier to scan against the neutral header row.
-- The run-history SQLite table is pruned on startup to keep the most recent
-  200 runs per service, bounding `history.db` growth over time.
-- Removed the unused `md` button size; the `Button` default size is now `sm`,
-  matching what the UI actually uses.
-- The built-in icon picker now opens as a compact popover instead of expanding
-  the full icon grid inline in the form.
-- Removed the redundant "Workspace" eyebrow from the services sidebar header.
-- Sidebar service cards no longer use a cyan left-border accent to mark
-  selected/open state. Any card whose service is open in a terminal pane now
-  gets the tinted card background, with a small cyan `square-terminal` icon
-  pinned to the card's top-right corner. The "open in split view" hover
-  affordance moved to the card's bottom-right corner so the open-in-pane
-  indicator and the split button no longer overlap.
-
 ## [0.2.0] - 2026-05-24
 
 ### Added
@@ -334,22 +334,22 @@ section, and tag the commit `vX.Y.Z`.
 
 - `.gitignore` for local dependencies, build outputs, runtime data, logs, and
   editor/OS files.
-- **Split view** â€” open multiple services side by side in resizable panes.
+- **Split view** — open multiple services side by side in resizable panes.
   Clicking a service card replaces the view; `Ctrl/Cmd`-click (or the
   card's split icon) opens it in an additional pane. Each pane has its own
   Start / Stop / Restart / Clear controls and a close button in its header,
   plus a focused-pane highlight; the inspector acts on the focused pane.
-- **Live config reload** â€” the app watches `services.json` and reloads when it
+- **Live config reload** — the app watches `services.json` and reloads when it
   changes on disk, so edits from an agent, a script, or your editor appear
   instantly.
-- **Tooltips** â€” custom hover tooltips on toolbar and sidebar buttons,
+- **Tooltips** — custom hover tooltips on toolbar and sidebar buttons,
   replacing native `title` tooltips.
-- **Suggested import entries** â€” the Import panel pre-selects long-running
-  scripts (`dev`, `start`, `serve`, â€¦) and all Procfile entries, and marks
+- **Suggested import entries** — the Import panel pre-selects long-running
+  scripts (`dev`, `start`, `serve`, …) and all Procfile entries, and marks
   them with a "suggested" badge.
-- `docs/services-config.md` â€” schema, file location, and an agent guide for
+- `docs/services-config.md` — schema, file location, and an agent guide for
   adding services by editing `services.json` directly.
-- **Collapsible & resizable sidebars** â€” toggle the services sidebar
+- **Collapsible & resizable sidebars** — toggle the services sidebar
   (`Ctrl/Cmd+←`) and the details inspector (`Ctrl/Cmd+→`) from header
   buttons or the keyboard, and drag either edge to resize it.
 - `docs/design.md` — the Muxly design system: colour, typography, spacing,
@@ -371,7 +371,10 @@ section, and tag the commit `vX.Y.Z`.
   drag dividers, the terminal cursor, Muxly's in-terminal chrome (the pane
   header and `[manager]` lifecycle lines, previously green), and the
   "suggested" import badge.
-- Regenerated app icons from `logo-m.png` using Tauri's icon generator.`r`n- Regenerated app icons from `Logo-fat.png` using Tauri's icon generator.`r`n- Regenerated app icons from `Logo-tall.png` using Tauri's icon generator for a proper multi-size Windows ICO.`r`n- Regenerated the transparent full app icon set from `Logo4.png`.
+- Regenerated app icons from `logo-m.png` using Tauri's icon generator.
+- Regenerated app icons from `Logo-fat.png` using Tauri's icon generator.
+- Regenerated app icons from `Logo-tall.png` using Tauri's icon generator for a proper multi-size Windows ICO.
+- Regenerated the transparent full app icon set from `Logo4.png`.
 - Regenerated the full app icon set from `Logo3.png` with transparent backgrounds and sharpened small-size frames.
 - Regenerated the full `Logo2.png` lockup icon set with explicit sharpened small-size frames.
 - Regenerated the Muxly app icons from `Logo2.png` for comparison.
@@ -381,7 +384,7 @@ section, and tag the commit `vX.Y.Z`.
 - Per-terminal controls (Start / Restart / Stop / Clear) moved out of the
   global header and into each pane's own header bar, so it is unambiguous
   which terminal an action targets in split view. The header now carries only
-  global controls â€” sidebar toggles and log search.
+  global controls — sidebar toggles and log search.
 
 ### Fixed
 
@@ -400,7 +403,7 @@ section, and tag the commit `vX.Y.Z`.
   "is a text field" check, so shortcuts work even with a terminal focused.
 - Stray horizontal scrollbar (and the thin vertical bar it induced) along the
   window's bottom edge. `body` had a `min-width: 1024px` while `overflow:
-  hidden` sat only on `body`, not `html` â€” so a window narrower than 1024px
+  hidden` sat only on `body`, not `html` — so a window narrower than 1024px
   let `html` scroll. The redundant `min-width` is gone (the Tauri window
   already enforces a 1024px minimum) and `overflow: hidden` now covers the
   document root and the app shell.
@@ -412,20 +415,20 @@ section, and tag the commit `vX.Y.Z`.
   `overflow: auto` inline on each panel's inner element, which overrode the
   `overflow-hidden` class and made the panel itself a scroll container. Panels
   now pass `style={{ overflow: "hidden" }}` (which the library merges over its
-  own default) so a pane clips instead of scrolling â€” xterm owns its own
+  own default) so a pane clips instead of scrolling — xterm owns its own
   scrolling. As defence in depth, xterm 6.0's own `ScrollableElement`
   horizontal scrollbar and scrollbar arrow buttons are hidden in CSS too.
-- Garbled / overlapping text when opening a new split pane â€” the terminal was
+- Garbled / overlapping text when opening a new split pane — the terminal was
   sized and replayed before `react-resizable-panels` had applied the pane's
   final width. Terminal setup is now deferred until layout settles.
-- Continuous flicker in terminal panes â€” the `ResizeObserver` watched the same
+- Continuous flicker in terminal panes — the `ResizeObserver` watched the same
   element xterm rendered into, so `fit()` perturbed its box and re-triggered
   the observer in a loop. The observer now watches a separate wrapper element,
   and fits are debounced to one per frame.
 
 ## [0.1.0] - 2026-05-22
 
-First coherent release â€” a local desktop command center for development
+First coherent release — a local desktop command center for development
 processes, built with Tauri 2, React, TypeScript and xterm.js. It replaces a
 sprawl of terminal windows with one surface: services on the left, live logs
 in the center, service details and actions on the right.
@@ -434,39 +437,39 @@ in the center, service details and actions on the right.
 
 - Added the PolyForm Noncommercial 1.0.0 license for source-available non-commercial use.
 
-- **Service management** â€” define services (program, args, cwd, env, optional
+- **Service management** — define services (program, args, cwd, env, optional
   port, optional group) and start / stop / restart them individually.
-- **Live logs** â€” stdout/stderr streamed from Rust over per-spawn
+- **Live logs** — stdout/stderr streamed from Rust over per-spawn
   `tauri::ipc::Channel`s into xterm.js, with ANSI colour and a bounded
   in-memory ring buffer. Lifecycle events stay on the global event bus.
-- **Three-pane UI** â€” services sidebar, terminal view, details inspector,
+- **Three-pane UI** — services sidebar, terminal view, details inspector,
   with a fixed-height layout and independently scrolling panels.
-- **Service groups** â€” services render under their `group` in the sidebar,
+- **Service groups** — services render under their `group` in the sidebar,
   each with "Start all" / "Stop all" controls.
-- **Edit / create / delete services** â€” in-app form, validated client-side
+- **Edit / create / delete services** — in-app form, validated client-side
   (id uniqueness, port range, env format) and re-validated in the backend
   before writing to `app_config_dir/services.json`.
-- **Import** â€” scan a project folder for `package.json` scripts (npm / pnpm /
+- **Import** — scan a project folder for `package.json` scripts (npm / pnpm /
   yarn / bun, detected from the lockfile) and `Procfile` entries, and import
   the selected ones as services.
-- **Process-tree termination** â€” Windows Job Objects with
+- **Process-tree termination** — Windows Job Objects with
   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (children die with the app even on a
   crash); Unix process groups. Children are spawned `CREATE_SUSPENDED` on
   Windows and resumed only after job assignment, so grandchildren cannot
   escape the job.
-- **Auto-restart on crash** â€” opt-in per service, capped at 3 retries per
+- **Auto-restart on crash** — opt-in per service, capped at 3 retries per
   minute to avoid crash loops.
-- **Port-conflict detection** â€” a service's port is probed before start and
+- **Port-conflict detection** — a service's port is probed before start and
   scanned on launch; conflicts show as a sidebar warning.
-- **Run history** â€” SQLite-backed (`history.db`); the inspector shows total
+- **Run history** — SQLite-backed (`history.db`); the inspector shows total
   runs, failed runs, last run, and last failure.
-- **Workspace actions** â€” open a service's folder in VS Code or the file
+- **Workspace actions** — open a service's folder in VS Code or the file
   manager, or open its `localhost` port in the browser.
-- **Global log search** â€” search every service's log buffer
+- **Global log search** — search every service's log buffer
   (`Ctrl/Cmd+Shift+F`) and jump to a match.
-- **Keyboard shortcuts** â€” start/restart, stop, clear, new service, jump to
+- **Keyboard shortcuts** — start/restart, stop, clear, new service, jump to
   service by number, global search.
-- **Consistent UI** â€” shared `Button` component (variants + sizes), an
+- **Consistent UI** — shared `Button` component (variants + sizes), an
   icon-only toolbar, and custom dark scrollbars.
 
 ### Engineering notes
@@ -485,6 +488,7 @@ in the center, service details and actions on the right.
 
 - No production build (`tauri build`) has been verified yet.
 
-[Unreleased]: https://github.com/dmelim/muxly/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dmelim/muxly/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/dmelim/muxly/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dmelim/muxly/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dmelim/muxly/releases/tag/v0.1.0
