@@ -28,7 +28,7 @@ import { SettingsView } from "./SettingsView";
 import { DetailsSidebar } from "./DetailsSidebar";
 import { ServicesSidebar } from "./ServicesSidebar";
 import { describeExitCode, shortExitCode } from "./exitCodes";
-import type { EditTarget } from "./appTypes";
+import type { EditTarget, StartHealth } from "./appTypes";
 import {
   AUTO_RESTART_DELAY_MS,
   PTY_WATCHDOG_MS,
@@ -99,19 +99,20 @@ export function App() {
   // auto-port service this may differ from its configured preference; cleared
   // on exit. Drives the "Open localhost:N" affordance and the manager note.
   const [actualPorts, setActualPorts] = useState<Record<string, number>>({});
+  // Mirror of `actualPorts` for the once-mounted watchdog/probe closures, which
+  // need the live bound port without re-subscribing on every change.
+  const actualPortsRef = useRef<Record<string, number>>({});
   const [lastExit, setLastExit] = useState<Record<string, string>>({});
   // PTY services only: true from PROCESS_STARTED until the run produces its
   // first real (newline) output. Drives the in-pane "waiting for output…"
   // affordance so a briefly-silent or recycling start never just looks hung.
   const [awaitingOutput, setAwaitingOutput] = useState<Record<string, boolean>>({});
-  // Escalated start-health, set by the deadlock watchdog when a PTY start
-  // produces no output within the window: `retrying` while it auto-recycles,
-  // `gaveUp` once it has exhausted its retries and is likely stuck. Surfaced as
-  // a pane notice so a slow/stuck start is visible at a glance, not just in the
-  // log. Cleared on first real output, a fresh user start, or a genuine stop.
-  const [startHealth, setStartHealth] = useState<
-    Record<string, { attempt: number; max: number; gaveUp: boolean }>
-  >({});
+  // Surfaced health of an in-progress start that hasn't produced output yet
+  // (see StartHealth). A service WITH a port is never killed on silence — we
+  // show `waiting-port` and let its port-readiness probe decide. A portless
+  // service falls back to the output watchdog (`retrying`/`stuck`). Cleared on
+  // first real output, the port coming up, a fresh user start, or a real stop.
+  const [startHealth, setStartHealth] = useState<Record<string, StartHealth>>({});
   const [managerMessage, setManagerMessage] = useState("Loading service config...");
   // One xterm terminal per open pane, keyed by service id.
   const terminalsRef = useRef<Map<string, Terminal>>(new Map());
@@ -397,6 +398,10 @@ export function App() {
   useEffect(() => {
     servicesRef.current = services;
   }, [services]);
+
+  useEffect(() => {
+    actualPortsRef.current = actualPorts;
+  }, [actualPorts]);
 
   useEffect(() => {
     invoke<AppSettings>("load_settings")
@@ -896,15 +901,36 @@ export function App() {
       const service = servicesRef.current.find((s) => s.id === serviceId);
       if (!service) return;
 
+      // The one-shot "waiting…" hint is done — escalate to a visible notice.
+      clearAwaitingOutput(serviceId);
+
+      // A service WITH a port is never killed for output-silence: its port-
+      // readiness probe is the reliable "it started" signal and keeps running,
+      // so we only inform. A genuinely deadlocked server never binds its port,
+      // and the notice simply stays up for the user to restart. This is the
+      // "don't kill healthy-but-quiet servers" rule — output isn't a heartbeat.
+      const effectivePort = actualPortsRef.current[serviceId] ?? service.port ?? null;
+      if (effectivePort != null || service.autoPort) {
+        ptyDebug(serviceId, "watchdog: no output but service has a port — informing, not recycling", {
+          token,
+          port: effectivePort
+        });
+        setStartHealth((current) => ({
+          ...current,
+          [serviceId]: { kind: "waiting-port", port: effectivePort }
+        }));
+        return;
+      }
+
+      // Portless: output is the only signal we have, so keep the narrow ConPTY-
+      // deadlock recovery — kill + respawn on a fresh ConPTY (the race usually
+      // wins on the next try), capped so a truly silent tool can't loop forever.
       const attempts = (ptyRecycleRef.current[serviceId] ?? 0) + 1;
-      ptyDebug(serviceId, "watchdog fired: no real output within window", {
+      ptyDebug(serviceId, "watchdog fired: portless, no output — recycling", {
         token,
         attempt: attempts,
         max: PTY_RECYCLE_MAX
       });
-      // The one-shot "waiting…" hint is done — escalate to a visible slow/stuck
-      // notice so the user knows this start isn't producing output.
-      clearAwaitingOutput(serviceId);
       if (attempts > PTY_RECYCLE_MAX) {
         appendLog(
           serviceId,
@@ -913,14 +939,14 @@ export function App() {
         delete ptyRecycleRef.current[serviceId];
         setStartHealth((current) => ({
           ...current,
-          [serviceId]: { attempt: PTY_RECYCLE_MAX, max: PTY_RECYCLE_MAX, gaveUp: true }
+          [serviceId]: { kind: "stuck", max: PTY_RECYCLE_MAX }
         }));
         return;
       }
       ptyRecycleRef.current[serviceId] = attempts;
       setStartHealth((current) => ({
         ...current,
-        [serviceId]: { attempt: attempts, max: PTY_RECYCLE_MAX, gaveUp: false }
+        [serviceId]: { kind: "retrying", attempt: attempts, max: PTY_RECYCLE_MAX }
       }));
       appendLog(
         serviceId,
@@ -1303,6 +1329,56 @@ export function App() {
     return () => window.clearInterval(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adoptedPids]);
+
+  // Port-readiness probe. For a *server* (a service with a port), the port
+  // becoming "listening" is a far more reliable "it started" signal than stdout
+  // — a quiet server may never print anything. While such a service is running
+  // but its current run hasn't been marked up yet, poll the port; once it
+  // listens we treat the run as up: disarm the deadlock watchdog and clear the
+  // start notices, without waiting on (or killing for the absence of) output.
+  // The `sawPtyOutputRef` guard means we only announce for a run that came up
+  // silently — a service that already printed output skips this entirely.
+  useEffect(() => {
+    const servers = services.filter(
+      (service) =>
+        statuses[service.id] === "running" &&
+        (actualPorts[service.id] ?? service.port ?? null) != null
+    );
+    if (servers.length === 0) return;
+
+    const probe = () => {
+      servers.forEach((service) => {
+        const token = activeRunTokensRef.current[service.id];
+        if (token == null) return;
+        if (sawPtyOutputRef.current[service.id] === token) return; // already up
+        const port = actualPortsRef.current[service.id] ?? service.port ?? null;
+        if (port == null) return;
+        void invoke<boolean>("check_port", { port })
+          .then((available) => {
+            if (available) return; // nothing listening yet
+            // Re-check ownership after the await — a stop/restart may have
+            // landed in the meantime.
+            if (activeRunTokensRef.current[service.id] !== token) return;
+            if (sawPtyOutputRef.current[service.id] === token) return;
+            sawPtyOutputRef.current[service.id] = token;
+            delete ptyRecycleRef.current[service.id];
+            clearAwaitingOutput(service.id);
+            clearStartHealth(service.id);
+            appendLog(
+              service.id,
+              `\r\n\x1b[38;2;34;211;238m[manager] port ${port} is listening — service is up\x1b[0m\r\n`
+            );
+          })
+          .catch(() => {
+            /* probe failed — try again next tick */
+          });
+      });
+    };
+
+    probe();
+    const handle = window.setInterval(probe, 800);
+    return () => window.clearInterval(handle);
+  }, [services, statuses, actualPorts, appendLog, clearAwaitingOutput, clearStartHealth]);
 
   const stopService = useCallback(
     async (service: ServiceConfig) => {

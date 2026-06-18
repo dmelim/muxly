@@ -6,6 +6,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import type { ServiceConfig, ServiceStatus } from "./types";
+import type { StartHealth } from "./appTypes";
 import { displayServiceName, formatCommand } from "./types";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
@@ -57,9 +58,9 @@ type TerminalPanesProps = {
   /** Per-service flag: a PTY run has started but not yet produced real output.
    * Drives the in-pane "waiting for output…" affordance. */
   awaitingOutput: Record<string, boolean>;
-  /** Per-service slow/stuck start health from the deadlock watchdog. Present
-   * while a PTY start is producing no output: `gaveUp` once retries ran out. */
-  startHealth: Record<string, { attempt: number; max: number; gaveUp: boolean }>;
+  /** Per-service start health for a run that hasn't produced output yet:
+   * `waiting-port` (server, informational), `retrying`/`stuck` (portless). */
+  startHealth: Record<string, StartHealth>;
   /** App-owned registry so log streaming can reach each pane's terminal. */
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   /** App-owned per-service log ring buffers, replayed when a pane mounts. */
@@ -293,32 +294,36 @@ function WaitingForOutput() {
   );
 }
 
-// Escalated start-health notice: shown once the watchdog has detected a PTY
-// start producing no output. Amber while it auto-retries, rose once it has
-// given up (likely a ConPTY deadlock). Replaces the calm "waiting" pill so a
-// slow/stuck start reads clearly as a problem worth a glance. Pinned bottom so
-// it doesn't cover the start banner.
-function StartHealthNotice({
-  startHealth
-}: {
-  startHealth: { attempt: number; max: number; gaveUp: boolean };
-}) {
-  const { attempt, max, gaveUp } = startHealth;
-  const tone = gaveUp
+// Notice for a run that started but hasn't produced output yet. Three honest
+// flavours (see StartHealth):
+//  - waiting-port: the service has a port; we are NOT killing it — just waiting
+//    for that port to come up (the reliable "started" signal). Calm/amber.
+//  - retrying: a portless start produced no output; the watchdog is recycling.
+//  - stuck: a portless start gave up — likely a genuine ConPTY deadlock; rose.
+// Pinned to the bottom so it doesn't cover the start banner.
+function StartHealthNotice({ startHealth }: { startHealth: StartHealth }) {
+  const stuck = startHealth.kind === "stuck";
+  const tone = stuck
     ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
     : "border-amber-500/30 bg-amber-500/10 text-amber-100";
-  const dot = gaveUp ? "bg-rose-400" : "bg-amber-400";
+  const dot = stuck ? "bg-rose-400" : "bg-amber-400";
+
+  const message =
+    startHealth.kind === "waiting-port"
+      ? startHealth.port != null
+        ? `Starting — waiting for port ${startHealth.port} to come up…`
+        : "Starting — waiting for the server to come up…"
+      : startHealth.kind === "retrying"
+      ? `No output yet — retrying (${startHealth.attempt}/${startHealth.max})…`
+      : `No output after ${startHealth.max} tries — start may be stuck. Stop and start again to retry.`;
+
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
       <span
         className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-[11px] shadow-sm backdrop-blur ${tone}`}
       >
-        <span className={`size-1.5 shrink-0 rounded-full ${dot} ${gaveUp ? "" : "animate-pulse"}`} />
-        <span className="truncate">
-          {gaveUp
-            ? `No output after ${max} tries — start may be stuck. Stop and start again to retry.`
-            : `Slow start — no output yet, retrying (${attempt}/${max})…`}
-        </span>
+        <span className={`size-1.5 shrink-0 rounded-full ${dot} ${stuck ? "" : "animate-pulse"}`} />
+        <span className="truncate">{message}</span>
       </span>
     </div>
   );
@@ -333,8 +338,8 @@ type PaneViewProps = {
   running: boolean;
   /** True for a PTY run that has started but not yet emitted real output. */
   awaitingOutput: boolean;
-  /** Slow/stuck start health from the watchdog, or null when healthy. */
-  startHealth: { attempt: number; max: number; gaveUp: boolean } | null;
+  /** Start health for a not-yet-producing run, or null when healthy. */
+  startHealth: StartHealth | null;
   focused: boolean;
   showClose: boolean;
   /** Whether the in-pane search bar should be shown for this pane. */
