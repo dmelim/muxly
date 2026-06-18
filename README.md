@@ -90,7 +90,7 @@ per-OS file location, and a guide for adding services programmatically
 | `Ctrl/Cmd + 1…9` | Open the Nth service |
 | `Esc` | Close search / forms |
 
-`Ctrl/Cmd`-click a service card to open it in an additional split pane.
+`Shift`-click a service card to open it in an additional split pane.
 
 ## Project structure
 
