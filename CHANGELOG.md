@@ -37,6 +37,17 @@ section, and tag the commit `vX.Y.Z`.
   and the two never interfere. Order persists to `services.json` (group order is
   derived from the order services appear in the file).
 
+### Changed
+
+- **Native context menu is suppressed on non-editable app chrome.** Right-clicking
+  the sidebar or other chrome no longer shows the WebView's browser page menu
+  (Back, Refresh, Save as, Print, More tools → Share) — options that are useless
+  or actively harmful here (Refresh reloads the whole webview and wipes UI state,
+  and collides with the Ctrl/Cmd+R "restart service" shortcut). The useful native
+  menu (Cut/Copy/Paste/Select all/Emoji) is preserved where editing or selection
+  matters: text inputs and xterm terminal panes. PROD-gated, so right-click
+  "Inspect element" stays available in `tauri dev`.
+
 ## [0.3.0] - 2026-06-18
 
 ### Added

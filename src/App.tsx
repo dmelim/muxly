@@ -2044,6 +2044,36 @@ export function App() {
     profilePromptOpen
   ]);
 
+  // Suppress the WebView's native context menu on non-editable app chrome.
+  // The right-click menu it shows there is pure browser leftovers — Back,
+  // Refresh (which reloads the whole webview and wipes UI state — and clashes
+  // with our own Ctrl/Cmd+R "restart service" shortcut), Save as, Print — none
+  // of which make sense for a desktop process manager. We keep the genuinely
+  // useful native menu (Cut/Copy/Paste/Select all/Emoji) where editing or
+  // selection matters: text inputs and the xterm terminal panes.
+  //
+  // PROD-gated so the inspector's right-click "Inspect element" stays available
+  // in `tauri dev`. The inspector is off in release builds anyway (no `devtools`
+  // Cargo feature), so this only ever strips the browser page menu, never tools.
+  useEffect(() => {
+    if (!import.meta.env.PROD) {
+      return;
+    }
+    function onContextMenu(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      const allowNative =
+        target != null &&
+        target.closest(
+          "input, textarea, [contenteditable='true'], .xterm"
+        ) != null;
+      if (!allowNative) {
+        event.preventDefault();
+      }
+    }
+    window.addEventListener("contextmenu", onContextMenu);
+    return () => window.removeEventListener("contextmenu", onContextMenu);
+  }, []);
+
   return (
     <>
     <main
