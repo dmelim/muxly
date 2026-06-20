@@ -34,7 +34,19 @@ Built with Tauri 2, React, TypeScript, and xterm.js.
 - **Auto-restart** — opt-in per service, capped to avoid crash loops.
 - **Port-conflict detection** — a service's port is probed before launch.
 - **Run history** — total runs, failures, and timing, persisted in SQLite.
-- **Global log search** — search every service's log buffer at once.
+- **Global log search** — search every service's log buffer at once, plus
+  in-pane search (`Ctrl/Cmd + F`) within a single terminal's scrollback.
+- **Command palette** — `Ctrl/Cmd + P` runs named actions, including **stream
+  mode**, which masks services flagged sensitive so the window is safe to
+  screen-share or stream.
+- **Pseudo-terminal mode** — opt-in `usePty` spawn attaches a service to a real
+  PTY so TTY-dependent dev servers (Vite, WXT, Next, …) survive HMR reloads.
+- **Pre-run prelude** — an optional `preRun` command runs in the same shell
+  before the service starts, so `nvm use`, venv activation, or codegen carry
+  over to the main command.
+- **Drag-to-reorder** — reorder services and groups in the sidebar; the order
+  is persisted.
+- **Profiles** — filter the sidebar to a chosen subset of services.
 - **Live config reload** — edits to `services.json` (from an editor, a script,
   or an AI agent) apply instantly.
 - **Workspace actions** — open a service's folder in your configured editor
@@ -82,10 +94,14 @@ per-OS file location, and a guide for adding services programmatically
 |----------|--------|
 | `Ctrl/Cmd + ←` | Toggle the services panel |
 | `Ctrl/Cmd + →` | Toggle the details panel |
+| `Ctrl/Cmd + ↓` | Toggle the bottom shell drawer |
+| `Ctrl/Cmd + P` | Open the command palette |
 | `Ctrl/Cmd + R` | Start / restart the focused service |
 | `Ctrl/Cmd + S` | Stop the focused service |
 | `Ctrl/Cmd + K` | Clear the focused terminal |
 | `Ctrl/Cmd + N` | New service |
+| `Ctrl/Cmd + W` | Close the focused pane |
+| `Ctrl/Cmd + F` | Search within the focused pane |
 | `Ctrl/Cmd + Shift + F` | Search all logs |
 | `Ctrl/Cmd + 1…9` | Open the Nth service |
 | `Esc` | Close search / forms |
