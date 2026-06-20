@@ -245,9 +245,18 @@ export function App() {
   // "forbidden" cursor on the very first dragover events.
   const [dragId, setDragId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
+  // Reordering whole groups is a separate gesture from reordering services
+  // (you drag a group's grip handle, not a card). It has its own drag state so
+  // the two never interfere: a service drag sets `dragIdRef`, a group drag sets
+  // `dragGroupRef`, and the sidebar's shared drop handlers branch on which is
+  // active. The "group" drop indicator carries an edge so a group can be
+  // dropped after the last one, not just before some other group.
+  const [dragGroup, setDragGroup] = useState<string | null>(null);
+  const dragGroupRef = useRef<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<
     | { kind: "before-service"; serviceId: string }
     | { kind: "end-of-group"; groupName: string }
+    | { kind: "group"; groupName: string; edge: "before" | "after" }
     | null
   >(null);
 
@@ -259,6 +268,17 @@ export function App() {
   const endDrag = useCallback(() => {
     dragIdRef.current = null;
     setDragId(null);
+    setDropIndicator(null);
+  }, []);
+
+  const beginGroupDrag = useCallback((groupName: string) => {
+    dragGroupRef.current = groupName;
+    setDragGroup(groupName);
+  }, []);
+
+  const endGroupDrag = useCallback(() => {
+    dragGroupRef.current = null;
+    setDragGroup(null);
     setDropIndicator(null);
   }, []);
 
@@ -1593,6 +1613,50 @@ export function App() {
     [services, reloadServices]
   );
 
+  // Reorder whole groups. Group order is derived from the order services first
+  // appear in `services.json`, so moving a group means moving all of its
+  // services as one block. We rebuild the array group-block by group-block in
+  // the new order (preserving each group's internal service order), which keeps
+  // every other field untouched.
+  const reorderGroup = useCallback(
+    async (
+      sourceGroup: string,
+      target: { groupName: string; edge: "before" | "after" }
+    ) => {
+      if (sourceGroup === target.groupName) return;
+
+      const grouped = groupServices(services);
+      const order = grouped.map(([name]) => name);
+      if (order.indexOf(sourceGroup) === -1 || order.indexOf(target.groupName) === -1) {
+        return;
+      }
+
+      const without = order.filter((name) => name !== sourceGroup);
+      let insertAt = without.indexOf(target.groupName);
+      if (target.edge === "after") insertAt += 1;
+
+      const nextOrder = [
+        ...without.slice(0, insertAt),
+        sourceGroup,
+        ...without.slice(insertAt)
+      ];
+      // No-op if nothing actually moved.
+      if (nextOrder.every((name, i) => name === order[i])) return;
+
+      const byGroup = new Map(grouped);
+      const next = nextOrder.flatMap((name) => byGroup.get(name) ?? []);
+      if (sameServiceOrder(services, next)) return;
+
+      try {
+        await invoke("save_services", { services: next });
+        await reloadServices();
+      } catch (error) {
+        setManagerMessage(errorMessage(error));
+      }
+    },
+    [services, reloadServices]
+  );
+
   const stopGroup = (groupName: string) => {
     services
       .filter((service) => groupKey(service) === groupName)
@@ -2006,6 +2070,8 @@ export function App() {
         dropIndicator={dropIndicator}
         dragId={dragId}
         dragIdRef={dragIdRef}
+        dragGroup={dragGroup}
+        dragGroupRef={dragGroupRef}
         paneIds={paneIds}
         portConflicts={portConflicts}
         selected={selected}
@@ -2021,6 +2087,9 @@ export function App() {
         beginDrag={beginDrag}
         endDrag={endDrag}
         reorderService={reorderService}
+        beginGroupDrag={beginGroupDrag}
+        endGroupDrag={endGroupDrag}
+        reorderGroup={reorderGroup}
         openService={openService}
         openInSplit={openInSplit}
       />

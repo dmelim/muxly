@@ -26,6 +26,17 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- **Drag-and-drop to reorder groups.** Each group header now has a grip handle
+  (revealed on hover) you can drag to move the whole group — and all its
+  services as a block — to a new position in the sidebar. A cyan line shows
+  where it will land (above or below the hovered group, so a group can be moved
+  to the very end, not just before another). This is a separate gesture from
+  dragging a service card: services still drag between/into groups as before,
+  and the two never interfere. Order persists to `services.json` (group order is
+  derived from the order services appear in the file).
+
 ## [0.3.0] - 2026-06-18
 
 ### Added

@@ -11,6 +11,7 @@ import {
   ChevronRightIcon,
   EyeIcon,
   EyeOffIcon,
+  GripVerticalIcon,
   PlayIcon,
   PlusIcon,
   SplitIcon,
@@ -20,6 +21,7 @@ import {
 type DropIndicator =
   | { kind: "before-service"; serviceId: string }
   | { kind: "end-of-group"; groupName: string }
+  | { kind: "group"; groupName: string; edge: "before" | "after" }
   | null;
 
 type Props = {
@@ -42,6 +44,8 @@ type Props = {
   dropIndicator: DropIndicator;
   dragId: string | null;
   dragIdRef: MutableRefObject<string | null>;
+  dragGroup: string | null;
+  dragGroupRef: MutableRefObject<string | null>;
   paneIds: string[];
   portConflicts: Record<string, boolean>;
   selected: ServiceConfig | null;
@@ -56,7 +60,18 @@ type Props = {
   stopGroup: (groupName: string) => void;
   beginDrag: (serviceId: string) => void;
   endDrag: () => void;
-  reorderService: (sourceId: string, target: Exclude<DropIndicator, null>) => Promise<void>;
+  reorderService: (
+    sourceId: string,
+    target:
+      | { kind: "before-service"; serviceId: string }
+      | { kind: "end-of-group"; groupName: string }
+  ) => Promise<void>;
+  beginGroupDrag: (groupName: string) => void;
+  endGroupDrag: () => void;
+  reorderGroup: (
+    sourceGroup: string,
+    target: { groupName: string; edge: "before" | "after" }
+  ) => Promise<void>;
   openService: (serviceId: string) => void;
   openInSplit: (serviceId: string) => void;
 };
@@ -77,6 +92,8 @@ export function ServicesSidebar({
   dropIndicator,
   dragId,
   dragIdRef,
+  dragGroup,
+  dragGroupRef,
   paneIds,
   portConflicts,
   selected,
@@ -92,6 +109,9 @@ export function ServicesSidebar({
   beginDrag,
   endDrag,
   reorderService,
+  beginGroupDrag,
+  endGroupDrag,
+  reorderGroup,
   openService,
   openInSplit
 }: Props) {
@@ -165,10 +185,10 @@ export function ServicesSidebar({
 
       <div
         onDragEnter={(event) => {
-          if (dragIdRef.current) event.preventDefault();
+          if (dragIdRef.current || dragGroupRef.current) event.preventDefault();
         }}
         onDragOver={(event) => {
-          if (dragIdRef.current) event.preventDefault();
+          if (dragIdRef.current || dragGroupRef.current) event.preventDefault();
         }}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
       >
@@ -196,13 +216,54 @@ export function ServicesSidebar({
           const collapsed = collapsedGroups[groupName] ?? false;
           const groupHidden = settings.hiddenProjectNames[groupName] ?? false;
           const displayGroupName = displayProjectName(groupName);
+          // A service drag onto this header appends to the group (end-of-group);
+          // a group drag onto it reorders whole groups (before/after this one).
+          // The two never overlap — only one of dragIdRef / dragGroupRef is set.
           const headerHighlighted =
             dropIndicator?.kind === "end-of-group" && dropIndicator.groupName === groupName;
+          const groupDropEdge =
+            dropIndicator?.kind === "group" && dropIndicator.groupName === groupName
+              ? dropIndicator.edge
+              : null;
+          const isGroupDragging = dragGroup === groupName;
 
           return (
-            <div key={groupName} className="space-y-1.5">
+            <div
+              key={groupName}
+              className={`group/group relative space-y-1.5 transition-opacity ${
+                isGroupDragging ? "opacity-40" : ""
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute -top-2.5 left-0 right-0 h-0.5 rounded-full bg-cyan-400 transition-opacity ${
+                  groupDropEdge === "before" ? "opacity-100" : "opacity-0"
+                }`}
+              />
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-cyan-400 transition-opacity ${
+                  groupDropEdge === "after" ? "opacity-100" : "opacity-0"
+                }`}
+              />
               <div
                 onDragOver={(event) => {
+                  if (dragGroupRef.current) {
+                    if (dragGroupRef.current === groupName) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const edge =
+                      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                    setDropIndicator((current) =>
+                      current?.kind === "group" &&
+                      current.groupName === groupName &&
+                      current.edge === edge
+                        ? current
+                        : { kind: "group", groupName, edge }
+                    );
+                    return;
+                  }
                   if (!dragIdRef.current) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
@@ -214,13 +275,25 @@ export function ServicesSidebar({
                 }}
                 onDragLeave={(event) => {
                   if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-                  setDropIndicator((current) =>
-                    current?.kind === "end-of-group" && current.groupName === groupName
-                      ? null
-                      : current
-                  );
+                  setDropIndicator((current) => {
+                    if (current?.kind === "group" && current.groupName === groupName) return null;
+                    if (current?.kind === "end-of-group" && current.groupName === groupName) {
+                      return null;
+                    }
+                    return current;
+                  });
                 }}
                 onDrop={(event) => {
+                  if (dragGroupRef.current) {
+                    const sourceGroup = dragGroupRef.current;
+                    event.preventDefault();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const edge =
+                      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                    endGroupDrag();
+                    void reorderGroup(sourceGroup, { groupName, edge });
+                    return;
+                  }
                   const sourceId = dragIdRef.current;
                   if (!sourceId) return;
                   event.preventDefault();
@@ -231,22 +304,42 @@ export function ServicesSidebar({
                   headerHighlighted ? "bg-cyan-400/15" : ""
                 }`}
               >
-                <Tooltip label={displayGroupName} className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => toggleGroupCollapsed(groupName)}
-                    aria-expanded={!collapsed}
-                    aria-label={`${collapsed ? "Expand" : "Collapse"} ${displayGroupName}`}
-                    className="group/header flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                    draggable
+                    onDragStart={(event) => {
+                      beginGroupDrag(groupName);
+                      event.dataTransfer.effectAllowed = "move";
+                      try {
+                        event.dataTransfer.setData("text/plain", `group:${groupName}`);
+                      } catch {
+                        /* some browsers throw on custom MIME types */
+                      }
+                    }}
+                    onDragEnd={endGroupDrag}
+                    aria-label={`Reorder ${displayGroupName}`}
+                    className="shrink-0 cursor-grab rounded p-0.5 text-zinc-600 opacity-0 transition hover:text-zinc-300 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 group-hover/group:opacity-100 active:cursor-grabbing"
                   >
-                    <ChevronRightIcon
-                      className={`size-3 shrink-0 transition-transform ${collapsed ? "" : "rotate-90"}`}
-                    />
-                    <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.18em]">
-                      {displayGroupName}
-                    </span>
+                    <GripVerticalIcon className="size-3.5" />
                   </button>
-                </Tooltip>
+                  <Tooltip label={displayGroupName} className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroupCollapsed(groupName)}
+                      aria-expanded={!collapsed}
+                      aria-label={`${collapsed ? "Expand" : "Collapse"} ${displayGroupName}`}
+                      className="group/header flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                    >
+                      <ChevronRightIcon
+                        className={`size-3 shrink-0 transition-transform ${collapsed ? "" : "rotate-90"}`}
+                      />
+                      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.18em]">
+                        {displayGroupName}
+                      </span>
+                    </button>
+                  </Tooltip>
+                </div>
                 <div className="flex shrink-0 gap-0.5">
                   <Tooltip label={groupHidden ? "Show project name" : "Hide project name"}>
                     <Button
