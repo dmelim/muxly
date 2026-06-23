@@ -1,0 +1,6 @@
+# Optional metadata read only by Codex / OpenAI agents to render this skill in
+# their UI. Other Agent-Skills runtimes (e.g. Claude Code) ignore this file and
+# trigger off SKILL.md's frontmatter instead — it is safe to delete if unused.
+display_name: Muxly Register Service
+short_description: Register local repos as Muxly services.
+default_prompt: Add this project to Muxly as a service.

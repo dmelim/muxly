@@ -88,6 +88,10 @@ See **[docs/services-config.md](docs/services-config.md)** for the schema, the
 per-OS file location, and a guide for adding services programmatically
 (including from an AI agent).
 
+To let an AI coding agent register projects for you, install the
+**[muxly-register-service](skills/muxly-register-service/)** Agent Skill — it
+works with Claude Code, Codex, and other Agent-Skills-compatible tools.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -124,6 +128,7 @@ react-resizable-panels · SQLite
 ## Documentation
 
 - [docs/services-config.md](docs/services-config.md) — `services.json` schema and agent guide
+- [skills/](skills/) — agent-agnostic Agent Skills (e.g. registering a project as a service)
 - [docs/design.md](docs/design.md) — design system (colour, typography, components)
 - [CHANGELOG.md](CHANGELOG.md) — release history
 
