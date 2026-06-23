@@ -153,3 +153,97 @@ export function maskSensitiveName(name: string): string {
 export function displayServiceName(service: ServiceConfig, streamMode: boolean): string {
   return streamMode && service.sensitive ? maskSensitiveName(service.name) : service.name;
 }
+
+type AbsolutePath = { base: string; segments: string[] };
+
+// Split an absolute path into the root we keep (a drive like "C:", or "" for a
+// POSIX root) and the directory segments below it. Returns null for relative
+// paths — they carry no host/user-identifying prefix worth hiding.
+function parseAbsolutePath(p: string): AbsolutePath | null {
+  const drive = /^([A-Za-z]:)[\\/]+(.*)$/.exec(p);
+  if (drive) {
+    return { base: drive[1], segments: splitSegments(drive[2]) };
+  }
+  if (/^[\\/]/.test(p)) {
+    return { base: "", segments: splitSegments(p) };
+  }
+  return null;
+}
+
+function splitSegments(rest: string): string[] {
+  return rest.split(/[\\/]+/).filter(Boolean);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Names short enough that aliasing them risks matching unrelated substrings in
+// log output (e.g. a 2-letter project name inside ordinary words) are left
+// alone — the path redaction still covers their directory.
+const MIN_REDACTED_NAME = 3;
+
+// Hide the host/user-identifying parts of text emitted by a sensitive service:
+//   • filesystem paths under its working directory collapse to the project
+//     alias, keeping only the drive/root (`C:\work\diethos\app` →
+//     `C:\alpha-tango-sierra-42\app`). Every path segment can identify the
+//     user, so the whole body between root and alias is hidden while a child
+//     path keeps its generic tail.
+//   • the project (group) and service names are replaced by the same alias, so
+//     a leak like `> diethos@0.1.0 dev` becomes `> alpha-tango-sierra-42@0.1.0`.
+// localhost, URLs, ports, and relative paths are never matched — they neither
+// start with the cwd nor equal a name.
+//
+// Applied at display time only (raw logs stay verbatim), mirroring how
+// `displayServiceName` masks names. Gated on stream mode and the `sensitive`
+// flag so it's a no-op in the common case.
+export function redactSensitive(
+  text: string,
+  service: ServiceConfig,
+  alias: string,
+  streamMode: boolean
+): string {
+  if (!streamMode || !service.sensitive || !alias) return text;
+
+  const pairs: Array<{ needle: string; replacement: string }> = [];
+
+  // The cwd plus every ancestor directory, in both separator styles (tools
+  // print "\" or "/" interchangeably on Windows). Matching is case-insensitive
+  // — drive letters and Windows paths are, and tools sometimes lowercase the
+  // drive.
+  const cwd = service.cwd?.trim();
+  const parsed = cwd ? parseAbsolutePath(cwd) : null;
+  if (parsed && parsed.segments.length > 0) {
+    for (const sep of ["\\", "/"] as const) {
+      const root = parsed.base + sep; // "C:\", "C:/", or "/"
+      for (let depth = parsed.segments.length; depth >= 1; depth -= 1) {
+        pairs.push({
+          needle: parsed.base + sep + parsed.segments.slice(0, depth).join(sep),
+          replacement: root + alias
+        });
+      }
+    }
+  }
+
+  // The real group and service names, deduped case-insensitively.
+  const seen = new Set<string>();
+  for (const raw of [service.group, service.name]) {
+    const name = raw?.trim();
+    if (!name || name.length < MIN_REDACTED_NAME) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push({ needle: name, replacement: alias });
+  }
+
+  // Longest needles first so a child path keeps its tail, a replaced prefix is
+  // never re-matched by a shorter ancestor rule, and a name embedded in a path
+  // is consumed by the path rule before the bare-name rule runs.
+  pairs.sort((a, b) => b.needle.length - a.needle.length);
+
+  let out = text;
+  for (const { needle, replacement } of pairs) {
+    out = out.replace(new RegExp(escapeRegExp(needle), "gi"), () => replacement);
+  }
+  return out;
+}

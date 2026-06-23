@@ -57,6 +57,11 @@ pub struct PtyTerminator {
     killer: PtyKillHandle,
     #[cfg(windows)]
     job: Option<Arc<JobObject>>,
+    /// The PTY child's PID, kept so the Windows terminate path can run
+    /// `taskkill /T` to walk the live process tree by parent→child links and
+    /// catch grandchildren that escaped the Job Object assignment race.
+    #[cfg(windows)]
+    pid: u32,
 }
 
 impl ProcessTerminator {
@@ -74,10 +79,27 @@ impl ProcessTerminator {
 impl PtyTerminator {
     #[cfg(windows)]
     fn terminate(&self) -> Result<(), AppError> {
-        // Prefer the Job Object: `TerminateJobObject` reaps the immediate child
-        // *and* every grandchild that joined the job after assignment. We still
-        // poke the killer afterwards so `portable_pty`'s `wait()` returns
-        // promptly; it's harmless if the job already killed the child.
+        // First, walk and kill the whole live process tree by PID. `taskkill /T`
+        // follows parent→child links (not Job Object membership), so it reaps a
+        // grandchild that forked and escaped the job during the assignment race
+        // — e.g. the `next`/Turbopack server that actually binds the port.
+        // ConPTY spawns the child already running, so unlike the pipe path we
+        // can't suspend-assign-resume to close that window; this sweep is the
+        // backstop. It must run *before* we kill the root, while the parent
+        // chain is intact — once the root dies its children get reparented and
+        // escape the /T walk, leaking an orphan that keeps holding the port.
+        // Best-effort: taskkill returns non-zero ("not found") once the tree is
+        // already gone, which is expected, so we ignore its status.
+        if self.pid != 0 {
+            let _ = Command::new("taskkill")
+                .args(["/PID", &self.pid.to_string(), "/F", "/T"])
+                .status();
+        }
+
+        // Backstop: `TerminateJobObject` reaps anything the tree-walk missed
+        // (and anything captured in the job), and the killer makes
+        // `portable_pty`'s `wait()` return promptly. Harmless if the child is
+        // already gone.
         if let Some(job) = &self.job {
             let result = job.terminate();
             let _ = self.killer.lock().kill();
@@ -120,6 +142,7 @@ pub fn pty_terminator(killer: PtyKillHandle, pid: u32) -> ProcessTerminator {
     ProcessTerminator::Pty(PtyTerminator {
         killer,
         job: pty_job_for_pid(pid),
+        pid,
     })
 }
 

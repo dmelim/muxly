@@ -1,6 +1,6 @@
 ﻿import type { AppSettings, ServiceConfig, ServiceHistory, ServiceStatus } from "./types";
 import type { EditTarget } from "./appTypes";
-import { formatCommand } from "./types";
+import { formatCommand, redactSensitive } from "./types";
 import { Button } from "./Button";
 import { Detail } from "./Detail";
 import { ImportPanel } from "./ImportPanel";
@@ -17,6 +17,11 @@ type Props = {
   // The active profile id (or null) — used to pre-select the profile for a new
   // service created while a profile is active.
   activeProfile: string | null;
+  // When true, sensitive services have their paths/names redacted in this panel
+  // (stream mode), the same as the terminal logs.
+  streamMode: boolean;
+  // Project group name → stable alias, used for the redaction above.
+  projectNameAliases: Record<string, string>;
   statuses: Record<string, ServiceStatus>;
   pids: Record<string, number>;
   // The port a running service actually bound to. For an auto-port service this
@@ -41,6 +46,8 @@ export function DetailsSidebar({
   selected,
   settings,
   activeProfile,
+  streamMode,
+  projectNameAliases,
   statuses,
   pids,
   actualPorts,
@@ -82,6 +89,13 @@ export function DetailsSidebar({
       />
     );
   }
+
+  // Redact sensitive paths/names in the read-only detail rows while stream mode
+  // is on, matching the terminal logs. No-op unless the selected service is
+  // flagged sensitive.
+  const alias = selected ? projectNameAliases[groupKey(selected)] ?? "" : "";
+  const redact = (text: string) =>
+    selected ? redactSensitive(text, selected, alias, streamMode) : text;
 
   return (
     <>
@@ -150,14 +164,18 @@ export function DetailsSidebar({
               <Detail label="Last Exit">{lastExit[selected.id] ?? "None"}</Detail>
               <Detail label="Command">
                 <span className="block rounded-md bg-black/20 p-3 font-mono text-xs text-zinc-300">
-                  {formatCommand(selected)}
+                  {redact(formatCommand(selected))}
                 </span>
               </Detail>
               <Detail label="Working Dir">
-                <span className="font-mono text-xs text-zinc-300">{selected.cwd}</span>
+                <span className="font-mono text-xs text-zinc-300">{redact(selected.cwd)}</span>
               </Detail>
               <Detail label="Group">
-                {selected.group ? displayProjectName(groupKey(selected)) : "None"}
+                {selected.group
+                  ? streamMode && selected.sensitive && alias
+                    ? alias
+                    : displayProjectName(groupKey(selected))
+                  : "None"}
               </Detail>
               <Detail label="Profile">
                 {settings.profiles.find((profile) => profile.id === selected.profile)?.name ??

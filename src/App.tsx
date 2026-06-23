@@ -15,7 +15,7 @@ import type {
   ServiceStatus
 } from "./types";
 import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } from "./events";
-import { formatCommand, displayServiceName } from "./types";
+import { formatCommand, displayServiceName, redactSensitive } from "./types";
 import { CommandPalette } from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import { ProfilePrompt } from "./ProfilePrompt";
@@ -142,6 +142,11 @@ export function App() {
   // Kept in sync with `services` so closures captured by the long-lived event
   // listeners (which only mount once) always see the latest config.
   const servicesRef = useRef<ServiceConfig[]>([]);
+  // Stream mode and the project-name aliases, mirrored into refs so the
+  // long-lived output closure (appendLog) can redact sensitive paths in live
+  // log chunks without being re-created on every toggle.
+  const streamModeRef = useRef(false);
+  const projectNameAliasesRef = useRef<Record<string, string>>({});
   // Per-service auto-restart bookkeeping: how many times we've re-spawned and
   // when the last attempt happened, so we can enforce the retry cap/window.
   const autoRestartRef = useRef<Record<string, { count: number; lastAt: number }>>({});
@@ -319,6 +324,11 @@ export function App() {
     () => ensureProjectAliases(groupNames, settings),
     [groupNames, settings]
   );
+  // Mirror into refs so the once-mounted output closure can redact paths with
+  // the current values without re-subscribing on every toggle (same pattern as
+  // PaneView's streamModeRef).
+  projectNameAliasesRef.current = projectNameAliases;
+  streamModeRef.current = streamMode;
   // A project name is replaced by its alias for either of two independent
   // reasons: the manual sidebar toggle (`hiddenProjectNames`) is on, which
   // hides it regardless of stream mode; or stream mode is on and the project is
@@ -1105,7 +1115,8 @@ export function App() {
     // clear-screen escapes (spinners, progress bars, interactive prompts), and
     // injecting timestamps mid-stream would land between escape sequences and
     // corrupt the rendering. We take their output verbatim.
-    const isPty = servicesRef.current.find((s) => s.id === serviceId)?.usePty ?? false;
+    const service = servicesRef.current.find((s) => s.id === serviceId);
+    const isPty = service?.usePty ?? false;
     const annotated =
       settingsRef.current.showTimestamps && !isPty
         ? annotateChunkWithTimestamps(serviceId, chunk, lineStateRef.current)
@@ -1120,12 +1131,25 @@ export function App() {
     }
 
     logsRef.current[serviceId] = chunks;
+    // The buffer above keeps raw output (the source of truth); redaction is a
+    // display-only transform applied to the live write, so toggling stream mode
+    // off and reopening the pane shows real paths again. Mirrors how name
+    // masking is applied at display time, not stored.
+    const display =
+      service && streamModeRef.current
+        ? redactSensitive(
+            annotated,
+            service,
+            projectNameAliasesRef.current[groupKey(service)] ?? "",
+            true
+          )
+        : annotated;
     // Buffer the live write and flush it next frame (see pendingWritesRef).
     // Only buffer when a pane is actually showing this service; otherwise the
     // pane-mount replay from logsRef already covers it, and buffering here
     // could double-render against that replay. Registration in TerminalPanes
     // happens after the replay, so a present terminal means replay is done.
-    enqueueLiveTerminalWrite(serviceId, annotated, isPty);
+    enqueueLiveTerminalWrite(serviceId, display, isPty);
   }, [enqueueLiveTerminalWrite]);
 
   // Hide the "waiting for output…" hint for a service and cancel its pending
@@ -2213,6 +2237,7 @@ export function App() {
             paneServices={paneServices}
             focusedId={selected?.id ?? null}
             streamMode={streamMode}
+            projectNameAliases={projectNameAliases}
             statuses={statuses}
             pids={pids}
             gridColumns={settings.paneGridColumns}
@@ -2280,6 +2305,8 @@ export function App() {
           selected={selected}
           settings={settings}
           activeProfile={activeProfile}
+          streamMode={streamMode}
+          projectNameAliases={projectNameAliases}
           statuses={statuses}
           pids={pids}
           actualPorts={actualPorts}

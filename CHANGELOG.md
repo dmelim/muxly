@@ -48,6 +48,22 @@ section, and tag the commit `vX.Y.Z`.
   matters: text inputs and xterm terminal panes. PROD-gated, so right-click
   "Inspect element" stays available in `tauri dev`.
 
+### Fixed
+
+- **PTY services no longer leak an orphaned dev server that keeps holding the
+  port.** On Windows, stopping or restarting a service running in a
+  pseudo-terminal could leave a grandchild process alive — typically the
+  `next`/Turbopack worker that actually binds the port — so the restart found
+  the port still taken and sat forever at "waiting for port N to come up" (with
+  two dev servers racing each other's `.next` temp files). ConPTY spawns the
+  child already running, so the immediate suspend-assign-resume the pipe path
+  uses to keep grandchildren inside the Job Object isn't available; a worker
+  forked in the gap before job assignment escaped and survived
+  `TerminateJobObject`. The PTY stop path now runs `taskkill /PID <pid> /F /T`
+  first — walking the live process tree by parent→child links, which the Job
+  Object can't — and keeps the job terminate + killer as a backstop. (Pipe-mode
+  services were never affected.)
+
 ## [0.3.0] - 2026-06-18
 
 ### Added

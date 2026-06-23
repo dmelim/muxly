@@ -7,7 +7,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import type { ServiceConfig, ServiceStatus } from "./types";
 import type { StartHealth } from "./appTypes";
-import { displayServiceName, formatCommand } from "./types";
+import { displayServiceName, formatCommand, redactSensitive } from "./types";
+import { groupKey } from "./appUtils";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 
@@ -50,6 +51,9 @@ type TerminalPanesProps = {
   focusedId: string | null;
   /** When true, sensitive services show a masked name (stream mode). */
   streamMode: boolean;
+  /** Project group name → stable alias, used to redact sensitive paths in the
+   * pane banner and replayed scrollback while stream mode is on. */
+  projectNameAliases: Record<string, string>;
   statuses: Record<string, ServiceStatus>;
   /** Live PIDs, keyed by service id — a present pid means the process runs. */
   pids: Record<string, number>;
@@ -98,6 +102,7 @@ export function TerminalPanes({
   paneServices,
   focusedId,
   streamMode,
+  projectNameAliases,
   statuses,
   pids,
   gridColumns,
@@ -152,6 +157,7 @@ export function TerminalPanes({
             <PaneView
               service={service}
               streamMode={streamMode}
+              alias={projectNameAliases[groupKey(service)] ?? ""}
               status={statuses[service.id] ?? "stopped"}
               running={pids[service.id] != null || adoptedPids[service.id] != null}
               awaitingOutput={awaitingOutput[service.id] ?? false}
@@ -333,6 +339,9 @@ type PaneViewProps = {
   service: ServiceConfig;
   /** When true and the service is sensitive, its name is masked in the header. */
   streamMode: boolean;
+  /** Stable alias for this service's project group — substituted for sensitive
+   * paths in the banner and replayed scrollback while stream mode is on. */
+  alias: string;
   status: ServiceStatus;
   /** True while the process has a live PID — gates the Stop button. */
   running: boolean;
@@ -368,6 +377,7 @@ type PaneViewProps = {
 function PaneView({
   service,
   streamMode,
+  alias,
   status,
   running,
   awaitingOutput,
@@ -407,6 +417,10 @@ function PaneView({
   // later updates the header (reactive) but not already-written scrollback.
   const streamModeRef = useRef(streamMode);
   streamModeRef.current = streamMode;
+  // Same one-shot-effect concern for the alias used to redact sensitive paths
+  // in the banner and replayed scrollback.
+  const aliasRef = useRef(alias);
+  aliasRef.current = alias;
 
   // One terminal per pane, created once. The pane is keyed by service id in the
   // parent, so this component instance maps 1:1 to a service for its lifetime.
@@ -498,14 +512,20 @@ function PaneView({
       // default 120x30 until we know the pane's real dimensions).
       pushSize();
 
+      // Redact sensitive paths in the banner and replayed scrollback the same
+      // way the live stream does (App.appendLog). Reads the refs so a pane
+      // opened while stream mode is on starts masked.
+      const redact = (text: string) =>
+        redactSensitive(text, service, aliasRef.current, streamModeRef.current);
+
       terminal.writeln(
         `\x1b[1;38;2;34;211;238m${displayServiceName(service, streamModeRef.current)}\x1b[0m`
       );
-      terminal.writeln(`cwd: ${service.cwd}`);
-      terminal.writeln(`cmd: ${formatCommand(service)}`);
+      terminal.writeln(redact(`cwd: ${service.cwd}`));
+      terminal.writeln(redact(`cmd: ${formatCommand(service)}`));
       terminal.writeln("");
       for (const chunk of logsRef.current[service.id] ?? []) {
-        terminal.write(chunk);
+        terminal.write(redact(chunk));
       }
 
       // Register only after the replay, so live output appends in order.
