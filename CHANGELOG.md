@@ -39,6 +39,12 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Changed
 
+- **Stream mode now redacts sensitive service paths and commands, not just
+  names.** When Stream mode is on, services marked Sensitive replace their
+  working directory, command text, terminal banner paths, replayed scrollback,
+  live output, and details-panel paths with the project's stable alias. Raw log
+  buffers stay unchanged so turning Stream mode off restores the original text.
+
 - **Native context menu is suppressed on non-editable app chrome.** Right-clicking
   the sidebar or other chrome no longer shows the WebView's browser page menu
   (Back, Refresh, Save as, Print, More tools → Share) — options that are useless
