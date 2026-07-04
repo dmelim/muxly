@@ -572,7 +572,7 @@ function PaneView({
           <span
             className={`size-2 rounded-full ${
               adopted ? "bg-cyan-400" : statusDots[status]
-            }`}
+            } ${status === "stopping" ? "animate-pulse" : ""}`}
           />
           <span
             className={`truncate text-xs font-medium ${
@@ -581,6 +581,12 @@ function PaneView({
           >
             {displayServiceName(service, streamMode)}
           </span>
+          {status === "stopping" ? (
+            <span className="flex shrink-0 items-center gap-1 rounded-full border border-orange-500/40 bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-200">
+              <span className="size-2 animate-spin rounded-full border border-orange-300/40 border-t-orange-300" />
+              <span>Stopping…</span>
+            </span>
+          ) : null}
           {adopted ? (
             <Tooltip label="External process adopted — Muxly did not spawn this PID, so its stdout/stderr are not captured.">
               <button
@@ -601,8 +607,9 @@ function PaneView({
         <span className="flex shrink-0 items-center gap-0.5">
           {running ? (
             <PaneIconButton
-              label="Stop"
+              label={status === "stopping" ? "Stopping…" : "Stop"}
               accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+              disabled={status === "stopping"}
               onClick={onStop}
             >
               <StopIcon className="size-3.5" />

@@ -104,10 +104,16 @@ pub fn resolve_icon_image(
 }
 
 #[tauri::command]
-pub fn stop_service(
+pub async fn stop_service(
     registry: State<'_, ProcessRegistry>,
     service_id: String,
 ) -> Result<(), AppError> {
+    // `mark_stop_requested` is fast (flips state, hands back the terminator).
+    // The actual `terminate()` is slow on Windows — `taskkill /T` walks the
+    // whole live process tree and `.status()` blocks until it exits. This
+    // command is `async` so Tauri runs it off the main thread, and we push the
+    // blocking kill onto the blocking pool so a deep tree (cargo/next) can't
+    // freeze the UI while the button flips to "Stopped".
     let terminator =
         registry
             .mark_stop_requested(&service_id)
@@ -115,7 +121,11 @@ pub fn stop_service(
                 service_id: service_id.clone(),
             })?;
 
-    terminator.terminate()
+    tauri::async_runtime::spawn_blocking(move || terminator.terminate())
+        .await
+        .map_err(|error| {
+            AppError::ProcessStop(format!("stop task failed to join: {error}"))
+        })?
 }
 
 /// Open an interactive shell PTY. The frontend chooses `pty_id` so multiple
