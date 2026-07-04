@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MINOR** — new features, backwards-compatible.
 - **PATCH** — bug fixes and internal changes with no user-visible feature change.
 
+Cut a **PATCH** as soon as a fix or small cluster of fixes lands in
+`[Unreleased]`; do not hold bug fixes for the next feature release.
+
 The version is declared in **three files that must always match**:
 
 - `package.json` → `version`
@@ -25,6 +28,8 @@ When releasing: bump all three, move `[Unreleased]` items into a new dated
 section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-07-04
 
 ### Added
 
@@ -69,6 +74,23 @@ section, and tag the commit `vX.Y.Z`.
   first — walking the live process tree by parent→child links, which the Job
   Object can't — and keeps the job terminate + killer as a backstop. (Pipe-mode
   services were never affected.)
+
+- **Stopping a service no longer freezes the UI for a few seconds.** The
+  `stop_service` command was synchronous, so Tauri ran it on the main thread —
+  and the Windows PTY stop path blocks on `taskkill /F /T` while it walks the
+  whole live process tree. For services with deep trees (a `cargo run` app, a
+  `next` dev server) that `.status()` wait stalled the entire window until the
+  tree died. The command is now `async` and the blocking kill runs on the
+  blocking pool, so the button flips to "Stopped" and the log keeps draining
+  while the tree is reaped.
+
+- **Stopping a service now shows a visible in-progress indicator.** With the
+  kill no longer blocking, a deep process tree can take a moment to fully die —
+  so the pane header now surfaces that gap: the status dot pulses, a small
+  "Stopping…" pill with a spinner appears next to the service name, and the Stop
+  button is disabled until the exit lands (preventing a redundant second stop).
+  Previously the only cue was a static orange dot that was easy to miss while
+  reading the log.
 
 ## [0.3.0] - 2026-06-18
 
@@ -532,7 +554,8 @@ in the center, service details and actions on the right.
 
 - No production build (`tauri build`) has been verified yet.
 
-[Unreleased]: https://github.com/dmelim/muxly/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/dmelim/muxly/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dmelim/muxly/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dmelim/muxly/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dmelim/muxly/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dmelim/muxly/releases/tag/v0.1.0
