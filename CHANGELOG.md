@@ -18,16 +18,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Cut a **PATCH** as soon as a fix or small cluster of fixes lands in
 `[Unreleased]`; do not hold bug fixes for the next feature release.
 
-The version is declared in **three files that must always match**:
+The version is declared in **four files that must always match**:
 
 - `package.json` → `version`
+- `package-lock.json` → root and application package `version`
 - `src-tauri/Cargo.toml` → `[package] version`
 - `src-tauri/tauri.conf.json` → `version`
 
-When releasing: bump all three, move `[Unreleased]` items into a new dated
+When releasing: bump all four, move `[Unreleased]` items into a new dated
 section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-07-24
+
+### Added
+
+- **Muxly now checks service runtime requirements when configuration loads.** Missing executables and dependency runtimes are grouped by affected service in a themed warning, with recheck controls and safe candidates discovered from NVM, Bun, Python, and global package-manager locations. A chosen fallback is applied to both PTY and pipe-based launches for the current session, including child-process `PATH` resolution.
+
+### Fixed
+
+- **Long service commands now wrap inside the details inspector.** Unbroken executable paths stay contained when the sidebar is resized to a narrow width.
+
+- **Windows PTY starts no longer deadlock on ConPTY cursor inheritance.** Muxly answers the cursor-position handshake directly in the backend output thread instead of depending on a frontend round trip that could leave the child blocked after emitting only `ESC[6n`.
+
+- **Port collision checks now detect IPv6-only localhost listeners.** A service bound to `::1` can no longer be mistaken for a free IPv4 port during start or restart.
+
+- **Muxly service registration now carries project Node requirements into the launch configuration.** The agent skill checks version files and executable resolution before writing, handles inactive NVM for Windows installations through `preRun`, and avoids registering package-manager commands that are already known to be unavailable.
 
 ## [0.4.0] - 2026-07-04
 
