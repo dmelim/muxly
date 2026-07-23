@@ -1,6 +1,6 @@
 ---
 name: muxly-register-service
-description: Register the current project or another local repo as a service in Muxly by discovering long-running commands, locating the runtime services.json config for com.diethos.muxly, and safely appending a service entry. Use when the user asks to add, register, connect, run, monitor, or make a project/repo/app/service available in Muxly.
+description: Register or repair the current project or another local repo as a service in Muxly by discovering long-running commands, resolving project runtime and version-manager requirements, locating the runtime services.json config for com.diethos.muxly, and safely writing a launchable service entry. Use when the user asks to add, register, connect, run, monitor, fix, or make a project/repo/app/service available in Muxly.
 ---
 
 # Muxly Register Service
@@ -8,6 +8,8 @@ description: Register the current project or another local repo as a service in 
 ## Purpose
 
 Register a local project with Muxly from any repo. Muxly reads services from the OS runtime config file for `com.diethos.muxly` and watches that file for live reloads.
+
+This folder in the Muxly repository is the canonical skill source. When an agent installation is a symlink or junction to this folder, keep using the repository copy; do not create or maintain a divergent agent-specific copy. Treat [`../../docs/services-config.md`](../../docs/services-config.md) and the Muxly process implementation under `../../src-tauri/src/process/` as the product contract when behavior is unclear.
 
 Use a bundled helper for the final write unless the user explicitly asks for manual JSON editing:
 
@@ -23,11 +25,22 @@ Use a bundled helper for the final write unless the user explicitly asks for man
 2. Discover the service command.
    - For Node projects, read `package.json` and prefer long-running scripts in this order: `dev`, `start`, `serve`, `watch`.
    - Pick the package manager from the lockfile: `pnpm-lock.yaml` -> `pnpm`, `yarn.lock` -> `yarn`, `bun.lockb` or `bun.lock` -> `bun`, otherwise `npm`.
+   - Inspect the selected package script rather than treating the script name as the command. Preserve package-manager execution when the script relies on lifecycle hooks or package-manager-provided environment variables.
    - For `Procfile`, use the first likely web/process entry.
    - For Docker Compose projects, prefer `docker compose up` from the repo root only when that is clearly the intended dev command.
    - If multiple plausible services exist, ask the user which one to register.
 
-3. Infer fields.
+3. Resolve runtime requirements before constructing the service.
+   - For Node projects, inspect `.nvmrc`, `.node-version`, `package.json.engines.node`, and the `packageManager` field when present. Prefer an exact version from `.nvmrc` or `.node-version`; do not silently turn a range such as `>=22` into an arbitrary pinned version.
+   - Check that the chosen runtime and package-manager executable resolve in the environment Muxly will inherit. On Windows, use native checks such as `nvm current`, `where node`, and `where npm.cmd`; also verify that an NVM for Windows `path` from `settings.txt` actually exists. Do not register a bare executable that is already known not to resolve.
+   - If a required Node version is managed by NVM, carry that requirement into the service instead of assuming the user's current global version:
+     - On Windows with NVM for Windows, set `preRun` to `nvm use <exact-version>` and use the native package-manager launcher such as `npm.cmd`. A non-empty `preRun` makes Muxly run the complete command through `cmd.exe`, which also avoids direct PTY spawning of a `.cmd`/`.bat` file.
+     - On macOS/Linux with shell-based NVM, source NVM before selecting the version, for example `source "$NVM_DIR/nvm.sh" && nvm use <exact-version>`.
+     - NVM for Windows changes a machine-wide symlink. If concurrent services may require different Node versions, prefer a version-pinned executable path. When the selected package script is only a thin `node path/to/script` launcher and bypassing the package manager preserves its behavior, use that version's absolute `node.exe` as `program` and the script path as `args`.
+   - If activation would require elevation, prompt interactively, or cannot be made deterministic, stop and ask rather than writing a service that will fail unattended.
+   - Validate the resolved runtime before writing. At minimum, confirm the exact runtime exists and that the constructed shell context can resolve the main executable. Do not start the long-running service merely to perform this preflight.
+
+4. Infer fields.
    - `id`: unique slug, usually repo name plus role when needed, for example `my-app-web`.
    - `name`: short human-readable name, usually repo name or script role.
    - `icon`: optional. Use `{ "type": "builtin", "value": "globe" }` for web apps, `terminal`, `server`, `database`, or `worker` when appropriate.
@@ -42,10 +55,10 @@ Use a bundled helper for the final write unless the user explicitly asks for man
    - `profile`: optional profile id. Omit unless the user explicitly wants the service assigned to a known Muxly profile.
    - `autoRestart`: default to `false` unless the user asks for restart behavior.
    - `usePty`: default to `false`, but set to `true` for dev servers, watch-mode tools, and interactive CLIs that need a TTY. The Rust field is `use_pty`, but `services.json` uses camelCase `usePty`.
-   - `preRun`: optional shell prelude run before the command in the same shell, for example `nvm use 20` or `source .venv/bin/activate`. Use only when the command depends on environment changes made by the prelude.
+   - `preRun`: optional shell prelude run before the command in the same shell, for example `nvm use 24.4.0` or `source .venv/bin/activate`. Use it whenever runtime activation or another environment change is required for the main executable to resolve.
    - `sensitive`: optional boolean. Set `true` only when the service name should be masked while Muxly stream mode is active.
 
-4. Decide whether the service needs PTY mode.
+5. Decide whether the service needs PTY mode.
    - Set `usePty: true` when the command is a Vite-based dev server or a framework wrapping Vite, including Vite, WXT, Astro, SvelteKit, Nuxt, Remix, SolidStart, Qwik, Analog, and similar tools.
    - Set `usePty: true` for `next dev`, watch-mode test runners such as `vitest`, `vitest --watch`, and `jest --watch`, and watcher commands such as `tsx watch`, `node --watch`, and `nodemon` when they run or spawn a dev server.
    - Set `usePty: true` for Storybook, `webpack-dev-server`, `react-native start`, and interactive CLIs or tools with keypress prompts, for example `wrangler dev`, `expo start`, or anything that displays "press r to reload" style controls. Muxly's PTY panes forward keystrokes to the process, so the user can actually drive these controls (answer `r`/`u`/`q` prompts, confirm dialogs) directly in the pane; pipe-mode (`usePty: false`) panes are read-only.
@@ -54,14 +67,15 @@ Use a bundled helper for the final write unless the user explicitly asks for man
    - When in doubt, prefer `usePty: true` for any `dev`, `watch`, or `serve` script. Missing PTY mode can make these services silently exit with code 0 after the first hot reload; setting PTY unnecessarily is usually only a cosmetic output issue.
    - Leave `usePty: false` for builds, one-shot tests without watch mode, migrations, codegen, production-style servers with append-only logs, databases, compiled binaries, or commands that intentionally spawn detached/background child processes. PTY mode merges stdout and stderr, and stopping a PTY service only kills the immediate child.
 
-5. Check the existing Muxly config before writing.
+6. Check the existing Muxly config before writing.
    - Windows: `%APPDATA%/com.diethos.muxly/services.json`
    - macOS: `~/Library/Application Support/com.diethos.muxly/services.json`
    - Linux: `${XDG_CONFIG_HOME:-~/.config}/com.diethos.muxly/services.json`
    - If the file does not exist, create it as an empty array through the helper script.
    - If the desired `id` already exists, choose a unique ID or ask before replacing it.
+   - When repairing an existing entry, inspect its live `program`, `args`, and `preRun`. Use the helper's replacement mode only when the user asked to update or repair that service; do not append a duplicate.
 
-6. Register with the helper.
+7. Register with the helper.
    - Call the helper from this skill's directory using a relative path (`scripts/...`). Do not hardcode an agent-specific install path such as `~/.codex/skills/...` or `~/.claude/skills/...`; resolve it from wherever this skill was loaded.
    - In Windows PowerShell or cmd, prefer `scripts/Register-Service.cmd` so `%APPDATA%` resolves through the native Windows environment and script execution policy does not block the helper.
    - In Git Bash, macOS, or Linux, use `scripts/register-service.sh`.
@@ -81,7 +95,7 @@ PowerShell example:
 
 ```powershell
 # Run from this skill's directory; $PSScriptRoot is unavailable in an interactive shell, so use the relative path.
-'{"id":"web","name":"Web App","icon":{"type":"builtin","value":"globe"},"program":"npm","args":["run","dev"],"cwd":"C:/code/my-app","port":3000,"group":"my-app","autoRestart":false,"usePty":true}' |
+'{"id":"web","name":"Web App","icon":{"type":"builtin","value":"globe"},"program":"npm.cmd","args":["run","dev"],"cwd":"C:/code/my-app","port":3000,"group":"my-app","autoRestart":false,"usePty":true,"preRun":"nvm use 24.4.0"}' |
   & ".\scripts\Register-Service.cmd" -Stdin
 ```
 
