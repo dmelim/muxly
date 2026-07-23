@@ -49,7 +49,7 @@ const DEFAULT_PTY_ROWS: u16 = 30;
 /// `ProcessRegistry` via `ProcessTerminator::Pty` — this registry only owns the
 /// IO half of the session.
 struct ServicePtySession {
-    writer: Mutex<Box<dyn Write + Send>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     /// The run this session belongs to. A fast restart reuses the `service_id`
     /// key, so the waiter that tears down the *previous* run must not drop the
@@ -232,10 +232,10 @@ pub fn spawn_service_pty(
     // Take the writer so the UI can send keystrokes to the child. Both
     // `try_clone_reader` and `take_writer` borrow `&master`, so we do them
     // before moving the master into the session registry below.
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|err| AppError::ProcessStop(format!("take_writer failed: {err}")))?;
+    let writer =
+        Arc::new(Mutex::new(pair.master.take_writer().map_err(|err| {
+            AppError::ProcessStop(format!("take_writer failed: {err}"))
+        })?));
 
     let killer: PtyKillHandle = Arc::new(Mutex::new(child.clone_killer()));
     // On Windows this also captures the child in a Job Object so stopping the
@@ -265,7 +265,7 @@ pub fn spawn_service_pty(
     app.state::<ServicePtyRegistry>().insert(
         service.id.clone(),
         ServicePtySession {
-            writer: Mutex::new(writer),
+            writer: writer.clone(),
             master: Mutex::new(pair.master),
             run_token,
         },
@@ -292,7 +292,7 @@ pub fn spawn_service_pty(
         let service_id = service.id.clone();
         let on_output = on_output.clone();
         thread::spawn(move || {
-            pump_output(reader, &service_id, run_token, &on_output);
+            pump_output(reader, writer, &service_id, run_token, &on_output);
         });
     }
 
@@ -362,6 +362,7 @@ pub fn spawn_service_pty(
 
 fn pump_output(
     mut reader: Box<dyn Read + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     service_id: &str,
     run_token: RunToken,
     on_output: &Channel<ProcessOutputEvent>,
@@ -384,10 +385,18 @@ fn pump_output(
     // (including every escape byte) is never held back, so escape framing is
     // untouched. Buffer sized to match the pipe path.
     let mut decoder = Utf8ChunkDecoder::default();
+    let mut cursor_filter = CursorQueryFilter::default();
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => {
+                if let Some(bytes) = cursor_filter.finish() {
+                    if let Some(chunk) = decoder.decode(&bytes) {
+                        if !send(chunk) {
+                            break;
+                        }
+                    }
+                }
                 // Flush any partial sequence held at end-of-stream so the final
                 // bytes aren't silently dropped.
                 if let Some(chunk) = decoder.finish() {
@@ -396,7 +405,22 @@ fn pump_output(
                 break;
             }
             Ok(n) => {
-                if let Some(chunk) = decoder.decode(&buf[..n]) {
+                let (bytes, cursor_queries) = cursor_filter.filter(&buf[..n]);
+                if cursor_queries > 0 {
+                    // portable-pty creates ConPTY with
+                    // PSEUDOCONSOLE_INHERIT_CURSOR. Windows emits CSI 6 n on
+                    // hOutput and blocks the client until hInput receives a
+                    // cursor-position report. Answer in this background output
+                    // thread, as required by CreatePseudoConsole, instead of
+                    // relying on a Rust -> webview -> xterm -> Rust round trip.
+                    // A new service PTY starts at the home position.
+                    let mut input = writer.lock();
+                    for _ in 0..cursor_queries {
+                        let _ = input.write_all(b"\x1b[1;1R");
+                    }
+                    let _ = input.flush();
+                }
+                if let Some(chunk) = decoder.decode(&bytes) {
                     if !send(chunk) {
                         break;
                     }
@@ -409,5 +433,98 @@ fn pump_output(
             // we just stop pumping and let it emit the lifecycle event.
             Err(_) => break,
         }
+    }
+}
+
+#[derive(Default)]
+struct CursorQueryFilter {
+    pending: Vec<u8>,
+    answered_inherit_query: bool,
+}
+
+impl CursorQueryFilter {
+    fn filter(&mut self, bytes: &[u8]) -> (Vec<u8>, usize) {
+        const QUERIES: [&[u8]; 2] = [b"\x1b[6n", b"\x1b[?6n"];
+
+        // Only the first query belongs to ConPTY cursor inheritance. Later DSR
+        // requests may come from the actual child application and must reach
+        // xterm so it can report the real live cursor position.
+        if self.answered_inherit_query {
+            return (bytes.to_vec(), 0);
+        }
+
+        self.pending.extend_from_slice(bytes);
+        let mut output = Vec::with_capacity(self.pending.len());
+        let mut cursor_queries = 0;
+        let mut index = 0;
+
+        while index < self.pending.len() {
+            let remaining = &self.pending[index..];
+            if let Some(query) = QUERIES.iter().find(|query| remaining.starts_with(query)) {
+                cursor_queries += 1;
+                index += query.len();
+                self.answered_inherit_query = true;
+                output.extend_from_slice(&self.pending[index..]);
+                index = self.pending.len();
+                continue;
+            }
+            if QUERIES.iter().any(|query| query.starts_with(remaining)) {
+                break;
+            }
+            output.push(self.pending[index]);
+            index += 1;
+        }
+
+        self.pending.drain(..index);
+        (output, cursor_queries)
+    }
+
+    fn finish(&mut self) -> Option<Vec<u8>> {
+        if self.pending.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.pending))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CursorQueryFilter;
+
+    #[test]
+    fn cursor_query_filter_removes_and_counts_queries() {
+        let mut filter = CursorQueryFilter::default();
+
+        let (output, count) = filter.filter(b"before\x1b[6nafter");
+
+        assert_eq!(output, b"beforeafter");
+        assert_eq!(count, 1);
+        assert!(filter.finish().is_none());
+    }
+
+    #[test]
+    fn cursor_query_filter_handles_split_query() {
+        let mut filter = CursorQueryFilter::default();
+
+        let (first, first_count) = filter.filter(b"\x1b[");
+        let (second, second_count) = filter.filter(b"6noutput");
+
+        assert!(first.is_empty());
+        assert_eq!(first_count, 0);
+        assert_eq!(second, b"output");
+        assert_eq!(second_count, 1);
+    }
+
+    #[test]
+    fn cursor_query_filter_forwards_later_application_queries() {
+        let mut filter = CursorQueryFilter::default();
+
+        let (_, inherit_count) = filter.filter(b"\x1b[6n");
+        let (application_query, later_count) = filter.filter(b"\x1b[6n");
+
+        assert_eq!(inherit_count, 1);
+        assert_eq!(application_query, b"\x1b[6n");
+        assert_eq!(later_count, 0);
     }
 }

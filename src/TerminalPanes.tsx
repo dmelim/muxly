@@ -305,7 +305,7 @@ function WaitingForOutput() {
 //  - waiting-port: the service has a port; we are NOT killing it — just waiting
 //    for that port to come up (the reliable "started" signal). Calm/amber.
 //  - retrying: a portless start produced no output; the watchdog is recycling.
-//  - stuck: a portless start gave up — likely a genuine ConPTY deadlock; rose.
+//  - stuck: a portless start gave up and needs user attention; rose.
 // Pinned to the bottom so it doesn't cover the start banner.
 function StartHealthNotice({ startHealth }: { startHealth: StartHealth }) {
   const stuck = startHealth.kind === "stuck";

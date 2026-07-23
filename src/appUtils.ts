@@ -3,13 +3,10 @@ import { aliasProjectName } from "./privacyNames";
 
 export const AUTO_RESTART_DELAY_MS = 1_000;
 
-// PTY-only deadlock watchdog. On Windows a `.cmd`/`.bat` shim (npm, pnpm, wxt…)
-// launched into a freshly-created ConPTY can intermittently hang during console
-// init — the child sits at 0% CPU and never spawns its real process, so the pane
-// stays silent forever. It's a race, so killing and respawning (a fresh ConPTY)
-// almost always wins on the next try. A healthy PTY start emits its first bytes
-// within ~1–2s; if a PTY run produces *no* output within this window we treat it
-// as deadlocked and recycle it, up to PTY_RECYCLE_MAX times.
+// Last-resort watchdog for portless PTY services, where output is the only
+// readiness signal. The Windows cursor-inheritance handshake is handled
+// deterministically in the Rust output pump; this bounded recycle remains for
+// unrelated launchers that can fail silently before producing real output.
 export const PTY_WATCHDOG_MS = 8_000;
 export const PTY_RECYCLE_MAX = 4;
 

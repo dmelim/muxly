@@ -141,9 +141,7 @@ pub async fn stop_service(
 
     tauri::async_runtime::spawn_blocking(move || terminator.terminate())
         .await
-        .map_err(|error| {
-            AppError::ProcessStop(format!("stop task failed to join: {error}"))
-        })?
+        .map_err(|error| AppError::ProcessStop(format!("stop task failed to join: {error}")))?
 }
 
 /// Open an interactive shell PTY. The frontend chooses `pty_id` so multiple

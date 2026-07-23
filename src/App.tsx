@@ -759,9 +759,9 @@ export function App() {
         clearStartHealth(serviceId);
       }
 
-      // Arm the PTY deadlock watchdog: a ConPTY `.cmd`-shim hang produces no
-      // output and never spawns its real child, so if this run emits nothing
-      // within the window we recycle it. Pipe-mode spawns don't hit this.
+      // Arm the fallback watchdog for portless PTY services. The backend
+      // handles ConPTY's cursor handshake directly; this only covers unrelated
+      // launchers that remain completely silent. Pipe-mode spawns don't use it.
       const startedService = servicesRef.current.find((s) => s.id === serviceId);
       if (startedService?.usePty) {
         // The backend opens every PTY at a default 120×30 (it can't know the
@@ -940,11 +940,9 @@ export function App() {
       window.setTimeout(() => void scanPorts([service]), 300);
     }
 
-    // A PTY start that has produced no output within the watchdog window is
-    // almost certainly a ConPTY shim deadlock (0% CPU, no real child). Kill it
-    // and let the exit handler respawn it against a fresh pseudo-terminal — the
-    // race usually resolves on the retry. Capped so a genuinely silent-then-
-    // working tool can't loop forever.
+    // Last-resort recovery for a portless PTY start that produced no output.
+    // Kill it and let the exit handler respawn it against a fresh terminal,
+    // capped so a genuinely silent tool cannot loop forever.
     function maybeRecyclePtyStart(serviceId: string, token: number) {
       // Only the still-live run that never emitted output is a candidate.
       if (activeRunTokensRef.current[serviceId] !== token) {
@@ -964,11 +962,6 @@ export function App() {
       // The one-shot "waiting…" hint is done — escalate to a visible notice.
       clearAwaitingOutput(serviceId);
 
-      // A service WITH a port is never killed for output-silence: its port-
-      // readiness probe is the reliable "it started" signal and keeps running,
-      // so we only inform. A genuinely deadlocked server never binds its port,
-      // and the notice simply stays up for the user to restart. This is the
-      // "don't kill healthy-but-quiet servers" rule — output isn't a heartbeat.
       const effectivePort = actualPortsRef.current[serviceId] ?? service.port ?? null;
       if (effectivePort != null || service.autoPort) {
         ptyDebug(serviceId, "watchdog: no output but service has a port — informing, not recycling", {
