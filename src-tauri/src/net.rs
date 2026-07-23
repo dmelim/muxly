@@ -1,11 +1,11 @@
 //! Lightweight port-availability probe + helpers for identifying / killing
 //! the foreign process that's holding a port.
 //!
-//! `is_port_available` tries to bind a TcpListener on `0.0.0.0:port` for an
-//! instant. If the bind succeeds the port is free; we drop the listener
-//! immediately. Any `AddrInUse` error means something else has it. We treat
-//! other errors (permission denied, etc.) as "in use" too — better a false
-//! positive than letting the spawn fail later with an opaque message.
+//! `is_port_available` probes IPv4 and IPv6 localhost listeners, then attempts
+//! temporary wildcard binds in both families. A successful connection or a
+//! failed bind means something else owns the port. Other bind errors
+//! (permission denied, etc.) also count as "in use" — better a false positive
+//! than letting the spawn fail later with an opaque message.
 //!
 //! `find_port_holder_pid` and `kill_external_pid` exist so the UI can offer
 //! "stop blocker and restart" / "adopt running instance" when a service
@@ -14,11 +14,37 @@
 //! for this — `netstat` ships with every Windows install and `lsof`/`ss`
 //! with every reasonable Linux/macOS dev box.
 
-use std::net::TcpListener;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::process::Command;
+use std::time::Duration;
 
 pub fn is_port_available(port: u16) -> bool {
-    TcpListener::bind(("0.0.0.0", port)).is_ok()
+    // `localhost` commonly resolves to `::1` first on Windows. Checking only
+    // 0.0.0.0 therefore misses an IPv6-only Vite/Node listener and lets a
+    // restart proceed into a port collision that can persist indefinitely.
+    //
+    // A bind probe alone is also insufficient on Windows: without explicitly
+    // setting SO_EXCLUSIVEADDRUSE, a wildcard bind can succeed while another
+    // socket is already listening on a loopback address. Actively connect to
+    // both localhost families first, then keep the bind probes as a fallback
+    // for sockets bound but not yet listening.
+    let timeout = Duration::from_millis(120);
+    let ipv4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let ipv6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
+    if TcpStream::connect_timeout(&ipv4, timeout).is_ok()
+        || TcpStream::connect_timeout(&ipv6, timeout).is_ok()
+    {
+        return false;
+    }
+
+    // Probe the families separately, dropping each temporary listener before
+    // binding the other so a dual-stack IPv6 socket cannot conflict with our
+    // own IPv4 probe.
+    let ipv4_available = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).is_ok();
+    if !ipv4_available {
+        return false;
+    }
+    TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).is_ok()
 }
 
 /// Find a free port at or after `base`, probing up to `max_attempts` ports.
@@ -157,4 +183,28 @@ fn find_pid_via_ss(port: u16) -> Option<u32> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_port_available;
+    use std::net::{Ipv4Addr, Ipv6Addr, TcpListener};
+
+    #[test]
+    fn detects_ipv4_listener() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        assert!(!is_port_available(port));
+    }
+
+    #[test]
+    fn detects_ipv6_listener_when_ipv6_is_available() {
+        let Ok(listener) = TcpListener::bind((Ipv6Addr::LOCALHOST, 0)) else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+
+        assert!(!is_port_available(port));
+    }
 }
