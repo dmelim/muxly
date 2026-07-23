@@ -9,6 +9,7 @@ import type {
   ProcessStartedEvent,
   AppSettings,
   LoadedServices,
+  RuntimeRequirementReport,
   ServiceConfig,
   ServiceHistory,
   ServiceIcon,
@@ -19,6 +20,7 @@ import { formatCommand, displayServiceName, redactSensitive } from "./types";
 import { CommandPalette } from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import { ProfilePrompt } from "./ProfilePrompt";
+import { RuntimeRequirements } from "./RuntimeRequirements";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
@@ -47,6 +49,7 @@ import {
   visibleForProfile
 } from "./appUtils";
 import {
+  AlertTriangleIcon,
   CommandIcon,
   PanelLeftIcon,
   PanelRightIcon,
@@ -114,6 +117,8 @@ export function App() {
   // first real output, the port coming up, a fresh user start, or a real stop.
   const [startHealth, setStartHealth] = useState<Record<string, StartHealth>>({});
   const [managerMessage, setManagerMessage] = useState("Loading service config...");
+  const [runtimeReport, setRuntimeReport] = useState<RuntimeRequirementReport | null>(null);
+  const [runtimeWarningOpen, setRuntimeWarningOpen] = useState(false);
   // One xterm terminal per open pane, keyed by service id.
   const terminalsRef = useRef<Map<string, Terminal>>(new Map());
   const logsRef = useRef<Record<string, string[]>>({});
@@ -608,6 +613,23 @@ export function App() {
     });
   }, []);
 
+  const scanRuntimeRequirements = useCallback(async (servicesToScan: ServiceConfig[]) => {
+    const report = await invoke<RuntimeRequirementReport>("check_runtime_requirements", {
+      services: servicesToScan
+    });
+    setRuntimeReport(report);
+    setRuntimeWarningOpen(report.issues.length > 0);
+    return report;
+  }, []);
+
+  const activateRuntimeFallback = useCallback(
+    async (path: string) => {
+      await invoke("activate_runtime_fallback", { path });
+      await scanRuntimeRequirements(servicesRef.current);
+    },
+    [scanRuntimeRequirements]
+  );
+
   const reloadServices = useCallback(async () => {
     try {
       const { services: loaded, problems } =
@@ -647,17 +669,25 @@ export function App() {
           current.length > 0 ? current : first ? [first] : []
         );
         void scanPorts(loaded);
+        void scanRuntimeRequirements(loaded).catch((error) => {
+          console.warn("Failed to check runtime requirements:", errorMessage(error));
+        });
       })
       .catch(() => {
         /* error already surfaced in managerMessage */
       });
-  }, [reloadServices, scanPorts]);
+  }, [reloadServices, scanPorts, scanRuntimeRequirements]);
 
   // External edits to services.json (agent, script, editor) reload live.
   useEffect(() => {
     const unlisten = listen(SERVICES_CHANGED, () => {
       reloadServices()
-        .then((loaded) => void scanPorts(loaded))
+        .then((loaded) => {
+          void scanPorts(loaded);
+          void scanRuntimeRequirements(loaded).catch((error) => {
+            console.warn("Failed to check runtime requirements:", errorMessage(error));
+          });
+        })
         .catch(() => {
           /* error already surfaced in managerMessage */
         });
@@ -665,7 +695,7 @@ export function App() {
     return () => {
       void unlisten.then((fn) => fn());
     };
-  }, [reloadServices, scanPorts]);
+  }, [reloadServices, scanPorts, scanRuntimeRequirements]);
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
@@ -2161,6 +2191,29 @@ export function App() {
             </Button>
           </Tooltip>
           <div className="flex items-center gap-2">
+            {runtimeReport && runtimeReport.issues.length > 0 ? (
+              <Tooltip label="Runtime requirements missing">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setRuntimeWarningOpen(true)}
+                  aria-label="Show missing runtime requirements"
+                  className="text-amber-300"
+                >
+                  <AlertTriangleIcon className="size-4" />
+                </Button>
+              </Tooltip>
+            ) : runtimeReport && runtimeReport.activeFallbackPaths.length > 0 ? (
+              <Tooltip label="Runtime fallback active for this session">
+                <span
+                  role="status"
+                  aria-label="Runtime fallback active"
+                  className="flex size-7 items-center justify-center text-cyan-400"
+                >
+                  <AlertTriangleIcon className="size-4" />
+                </span>
+              </Tooltip>
+            ) : null}
             <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+↓)`}>
               <Button
                 variant="ghost"
@@ -2365,6 +2418,14 @@ export function App() {
         existingNames={settings.profiles.map((profile) => profile.name)}
         onCreate={createProfile}
         onClose={() => setProfilePromptOpen(false)}
+      />
+    ) : null}
+    {runtimeWarningOpen && runtimeReport && runtimeReport.issues.length > 0 ? (
+      <RuntimeRequirements
+        report={runtimeReport}
+        onActivate={activateRuntimeFallback}
+        onRecheck={() => scanRuntimeRequirements(servicesRef.current).then(() => undefined)}
+        onClose={() => setRuntimeWarningOpen(false)}
       />
     ) : null}
     </>

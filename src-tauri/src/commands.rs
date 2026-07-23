@@ -6,6 +6,7 @@ use crate::{
         resize_service_pty, spawn_process, write_service_pty, ProcessRegistry, ServicePtyRegistry,
     },
     pty::{self, PtyRegistry},
+    runtime::{activate_fallback, check_requirements, RuntimeFallbacks, RuntimeRequirementReport},
     services::{
         config::{load_service_config, resolve_cwd, save_service_config, ServicesConfigDir},
         LoadedServices, ServiceConfig,
@@ -48,6 +49,23 @@ pub fn load_services(
     config_dir: State<'_, ServicesConfigDir>,
 ) -> Result<LoadedServices, AppError> {
     load_service_config(&app, &config_dir)
+}
+
+#[tauri::command]
+pub fn check_runtime_requirements(
+    config_dir: State<'_, ServicesConfigDir>,
+    fallbacks: State<'_, RuntimeFallbacks>,
+    services: Vec<ServiceConfig>,
+) -> RuntimeRequirementReport {
+    check_requirements(&services, config_dir.current().as_deref(), &fallbacks)
+}
+
+#[tauri::command]
+pub fn activate_runtime_fallback(
+    fallbacks: State<'_, RuntimeFallbacks>,
+    path: String,
+) -> Result<(), AppError> {
+    activate_fallback(&path, &fallbacks)
 }
 
 #[tauri::command]

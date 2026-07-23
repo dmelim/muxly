@@ -50,6 +50,24 @@ export type LoadedServices = {
   problems: string[];
 };
 
+export type RuntimeCandidate = {
+  label: string;
+  path: string;
+};
+
+export type RuntimeRequirementIssue = {
+  runtime: string;
+  executable: string;
+  serviceIds: string[];
+  serviceNames: string[];
+  candidates: RuntimeCandidate[];
+};
+
+export type RuntimeRequirementReport = {
+  issues: RuntimeRequirementIssue[];
+  activeFallbackPaths: string[];
+};
+
 // A named profile. Profiles partition which services the sidebar shows: only
 // services whose `profile` matches the active one (plus unassigned services)
 // are visible. This list is the id→name registry; membership lives on each

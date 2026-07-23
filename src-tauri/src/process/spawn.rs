@@ -1,4 +1,5 @@
 use super::platform::process_terminator;
+use super::utf8::Utf8ChunkDecoder;
 use crate::{
     error::AppError,
     events::{
@@ -9,9 +10,9 @@ use crate::{
     process::{
         configure_process_group, resolve_program, resume_child, ProcessRegistry, RunningProcess,
     },
+    runtime::{inject_fallback_path, resolve_from_fallbacks, RuntimeFallbacks},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
-use super::utf8::Utf8ChunkDecoder;
 use std::{
     io::{BufReader, Read},
     process::{Command, Stdio},
@@ -44,7 +45,12 @@ pub fn spawn_process(
     // rolls a busy port to the next free one and injects the chosen value into
     // args/env (see `process::port`). Done BEFORE spawning so we never
     // half-start a service whose port belongs to someone else.
-    let resolved = super::port::resolve_spawn(&service)?;
+    let mut resolved = super::port::resolve_spawn(&service)?;
+    let fallback_paths = app
+        .try_state::<RuntimeFallbacks>()
+        .map(|fallbacks| fallbacks.paths())
+        .unwrap_or_default();
+    inject_fallback_path(&mut resolved.env, &fallback_paths);
 
     let base_dir = config_dir.current();
     let cwd = resolve_cwd(&service.cwd, base_dir.as_deref())?;
@@ -59,7 +65,12 @@ pub fn spawn_process(
                     super::shell::shell_prelude_command(prelude, &service.program, &resolved.args);
                 (std::ffi::OsString::from(sh), sh_args)
             }
-            None => (resolve_program(&service.program), resolved.args.clone()),
+            None => {
+                let program = resolve_from_fallbacks(&service.program, &fallback_paths)
+                    .map(|path| path.into_os_string())
+                    .unwrap_or_else(|| resolve_program(&service.program));
+                (program, resolved.args.clone())
+            }
         };
 
     let mut command = Command::new(&program);
@@ -256,4 +267,3 @@ fn spawn_output_reader<R>(
         }
     });
 }
-

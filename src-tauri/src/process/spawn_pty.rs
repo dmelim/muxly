@@ -14,6 +14,7 @@
 //! (always tagged `Stdout`) — PTYs do not preserve the stdout/stderr split.
 
 use super::platform::{pty_terminator, PtyKillHandle};
+use super::utf8::Utf8ChunkDecoder;
 use crate::{
     error::AppError,
     events::{
@@ -22,9 +23,9 @@ use crate::{
     },
     history::HistoryDb,
     process::{ProcessRegistry, RunToken, RunningProcess},
+    runtime::{inject_fallback_path, resolve_from_fallbacks, RuntimeFallbacks},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
-use super::utf8::Utf8ChunkDecoder;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::{
@@ -157,7 +158,12 @@ pub fn spawn_service_pty(
     // Resolve the effective port + command inputs (free-or-fail preflight for a
     // plain port; roll-and-inject for an auto-port service). Same as the pipe
     // path — see `process::port`.
-    let resolved = super::port::resolve_spawn(&service)?;
+    let mut resolved = super::port::resolve_spawn(&service)?;
+    let fallback_paths = app
+        .try_state::<RuntimeFallbacks>()
+        .map(|fallbacks| fallbacks.paths())
+        .unwrap_or_default();
+    inject_fallback_path(&mut resolved.env, &fallback_paths);
 
     let base_dir = config_dir.current();
     let cwd: PathBuf = resolve_cwd(&service.cwd, base_dir.as_deref())?;
@@ -180,8 +186,15 @@ pub fn spawn_service_pty(
     // command share one environment (see `process::shell`); otherwise we spawn
     // the program directly.
     let (program, args) = match super::shell::active_prelude(&service.pre_run) {
-        Some(prelude) => super::shell::shell_prelude_command(prelude, &service.program, &resolved.args),
-        None => (service.program.clone(), resolved.args.clone()),
+        Some(prelude) => {
+            super::shell::shell_prelude_command(prelude, &service.program, &resolved.args)
+        }
+        None => (
+            resolve_from_fallbacks(&service.program, &fallback_paths)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| service.program.clone()),
+            resolved.args.clone(),
+        ),
     };
 
     // CommandBuilder is portable_pty's analogue of std::process::Command. It

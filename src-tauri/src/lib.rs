@@ -7,19 +7,22 @@ mod net;
 mod open;
 mod process;
 mod pty;
+mod runtime;
 mod services;
 mod settings;
 
 use commands::{
-    app_version, check_port, find_port_holder, kill_pid, load_services, pty_close, pty_open,
-    pty_resize, pty_write, resolve_icon_image, save_services, service_pty_resize, service_pty_write,
-    start_service, stop_service,
+    activate_runtime_fallback, app_version, check_port, check_runtime_requirements,
+    find_port_holder, kill_pid, load_services, pty_close, pty_open, pty_resize, pty_write,
+    resolve_icon_image, save_services, service_pty_resize, service_pty_write, start_service,
+    stop_service,
 };
 use history::{get_service_history, HistoryDb};
 use import::scan_importable;
 use open::{open_in_editor, open_in_file_manager, open_url};
 use process::{ProcessRegistry, ProcessTerminator, ServicePtyRegistry};
 use pty::PtyRegistry;
+use runtime::RuntimeFallbacks;
 use services::config::ServicesConfigDir;
 use settings::{load_settings, save_settings};
 use std::{
@@ -37,6 +40,7 @@ pub fn run() {
         .manage(PtyRegistry::default())
         .manage(ServicePtyRegistry::default())
         .manage(ServicesConfigDir::default())
+        .manage(RuntimeFallbacks::default())
         .setup(|app| {
             // The history DB lives in the app data directory, which needs the
             // resolved app handle — hence setup() rather than an eager manage().
@@ -67,6 +71,8 @@ pub fn run() {
             find_port_holder,
             kill_pid,
             load_services,
+            check_runtime_requirements,
+            activate_runtime_fallback,
             load_settings,
             save_settings,
             resolve_icon_image,
