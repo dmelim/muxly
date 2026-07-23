@@ -163,7 +163,7 @@ export function DetailsSidebar({
               </Detail>
               <Detail label="Last Exit">{lastExit[selected.id] ?? "None"}</Detail>
               <Detail label="Command">
-                <span className="block rounded-md bg-black/20 p-3 font-mono text-xs text-zinc-300">
+                <span className="block min-w-0 max-w-full rounded-md bg-black/20 p-3 font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
                   {redact(formatCommand(selected))}
                 </span>
               </Detail>
