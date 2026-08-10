@@ -23,12 +23,13 @@ use crate::{
     },
     history::HistoryDb,
     process::{ProcessRegistry, RunToken, RunningProcess},
-    runtime::{inject_fallback_path, resolve_from_fallbacks, RuntimeFallbacks},
+    runtime::{inject_fallback_path, resolve_from_fallbacks, search_paths},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     io::{Read, Write},
     path::PathBuf,
@@ -159,10 +160,9 @@ pub fn spawn_service_pty(
     // plain port; roll-and-inject for an auto-port service). Same as the pipe
     // path — see `process::port`.
     let mut resolved = super::port::resolve_spawn(&service)?;
-    let fallback_paths = app
-        .try_state::<RuntimeFallbacks>()
-        .map(|fallbacks| fallbacks.paths())
-        .unwrap_or_default();
+    // Same search scope as the pipe path: activated fallbacks plus the login
+    // shell's PATH, which a GUI-launched app does not inherit (`shell_env`).
+    let fallback_paths = search_paths(&app);
     inject_fallback_path(&mut resolved.env, &fallback_paths);
 
     let base_dir = config_dir.current();
@@ -337,6 +337,7 @@ pub fn spawn_service_pty(
                         service_id,
                         run_token,
                         code,
+                        signal: pty_exit_signal(&status),
                         requested,
                     },
                 );
@@ -358,6 +359,20 @@ pub fn spawn_service_pty(
     });
 
     Ok(())
+}
+
+/// The signal that killed a PTY child, named to match the pipe path.
+///
+/// `portable_pty` reports the signal only as prose, so `signal_label` recovers
+/// the symbolic name from it where it can.
+#[cfg(unix)]
+fn pty_exit_signal(status: &portable_pty::ExitStatus) -> Option<String> {
+    status.signal().map(super::platform::signal_label)
+}
+
+#[cfg(not(unix))]
+fn pty_exit_signal(_status: &portable_pty::ExitStatus) -> Option<String> {
+    None
 }
 
 fn pump_output(
@@ -436,21 +451,47 @@ fn pump_output(
     }
 }
 
+/// Intercepts the one cursor-position report ConPTY demands at startup.
+///
+/// Windows only. `portable-pty` creates its pseudoconsole with
+/// `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes Windows emit `CSI 6 n` on the
+/// output handle and block the client until a cursor-position report arrives on
+/// the input handle. We answer it here rather than round-tripping through the
+/// webview.
+///
+/// Unix ptys have no such handshake, so on those platforms this is a
+/// passthrough. Filtering there would be actively wrong: the first `CSI 6 n` on
+/// a Unix pty is a genuine DSR from the child, and swallowing it — then
+/// answering with a synthetic "cursor is at 1;1" — feeds a real TUI a lie about
+/// where the cursor is.
 #[derive(Default)]
 struct CursorQueryFilter {
+    #[cfg(windows)]
     pending: Vec<u8>,
+    #[cfg(windows)]
     answered_inherit_query: bool,
 }
 
 impl CursorQueryFilter {
-    fn filter(&mut self, bytes: &[u8]) -> (Vec<u8>, usize) {
+    #[cfg(not(windows))]
+    fn filter<'a>(&mut self, bytes: &'a [u8]) -> (Cow<'a, [u8]>, usize) {
+        (Cow::Borrowed(bytes), 0)
+    }
+
+    #[cfg(not(windows))]
+    fn finish(&mut self) -> Option<Vec<u8>> {
+        None
+    }
+
+    #[cfg(windows)]
+    fn filter<'a>(&mut self, bytes: &'a [u8]) -> (Cow<'a, [u8]>, usize) {
         const QUERIES: [&[u8]; 2] = [b"\x1b[6n", b"\x1b[?6n"];
 
         // Only the first query belongs to ConPTY cursor inheritance. Later DSR
         // requests may come from the actual child application and must reach
         // xterm so it can report the real live cursor position.
         if self.answered_inherit_query {
-            return (bytes.to_vec(), 0);
+            return (Cow::Borrowed(bytes), 0);
         }
 
         self.pending.extend_from_slice(bytes);
@@ -476,9 +517,10 @@ impl CursorQueryFilter {
         }
 
         self.pending.drain(..index);
-        (output, cursor_queries)
+        (Cow::Owned(output), cursor_queries)
     }
 
+    #[cfg(windows)]
     fn finish(&mut self) -> Option<Vec<u8>> {
         if self.pending.is_empty() {
             None
@@ -492,18 +534,35 @@ impl CursorQueryFilter {
 mod tests {
     use super::CursorQueryFilter;
 
+    /// Unix ptys have no cursor-inheritance handshake, so a `CSI 6 n` from the
+    /// child must reach xterm untouched and unanswered — otherwise a TUI that
+    /// asks where the cursor is gets a fabricated reply.
     #[test]
+    #[cfg(not(windows))]
+    fn cursor_query_filter_is_a_passthrough_off_windows() {
+        let mut filter = CursorQueryFilter::default();
+
+        let (output, count) = filter.filter(b"before\x1b[6nafter");
+
+        assert_eq!(output.as_ref(), b"before\x1b[6nafter");
+        assert_eq!(count, 0);
+        assert!(filter.finish().is_none());
+    }
+
+    #[test]
+    #[cfg(windows)]
     fn cursor_query_filter_removes_and_counts_queries() {
         let mut filter = CursorQueryFilter::default();
 
         let (output, count) = filter.filter(b"before\x1b[6nafter");
 
-        assert_eq!(output, b"beforeafter");
+        assert_eq!(output.as_ref(), b"beforeafter");
         assert_eq!(count, 1);
         assert!(filter.finish().is_none());
     }
 
     #[test]
+    #[cfg(windows)]
     fn cursor_query_filter_handles_split_query() {
         let mut filter = CursorQueryFilter::default();
 
@@ -512,11 +571,12 @@ mod tests {
 
         assert!(first.is_empty());
         assert_eq!(first_count, 0);
-        assert_eq!(second, b"output");
+        assert_eq!(second.as_ref(), b"output");
         assert_eq!(second_count, 1);
     }
 
     #[test]
+    #[cfg(windows)]
     fn cursor_query_filter_forwards_later_application_queries() {
         let mut filter = CursorQueryFilter::default();
 
@@ -524,7 +584,7 @@ mod tests {
         let (application_query, later_count) = filter.filter(b"\x1b[6n");
 
         assert_eq!(inherit_count, 1);
-        assert_eq!(application_query, b"\x1b[6n");
+        assert_eq!(application_query.as_ref(), b"\x1b[6n");
         assert_eq!(later_count, 0);
     }
 }

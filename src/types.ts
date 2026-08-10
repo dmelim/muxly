@@ -129,6 +129,9 @@ export type ProcessExitedEvent = {
   serviceId: string;
   runToken: number;
   code: number | null;
+  /** Name of the signal that killed the process (`SIGKILL`, `SIGSEGV`), when it
+   * died from one. Unix only; a signal death carries no exit code. */
+  signal: string | null;
   requested: boolean;
 };
 

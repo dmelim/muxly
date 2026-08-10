@@ -1897,6 +1897,7 @@ dependencies = [
 name = "muxly"
 version = "0.5.0"
 dependencies = [
+ "libc",
  "notify",
  "parking_lot",
  "portable-pty",

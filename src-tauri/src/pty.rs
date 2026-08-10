@@ -215,23 +215,59 @@ pub fn close_pty(registry: &PtyRegistry, pty_id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Picks the shell to launch.
+/// Picks the shell to launch, and whether to launch it as a login shell.
 ///
 /// - **Windows**: `powershell.exe` (Windows PowerShell 5.1, always present on
 ///   modern Windows installs). PowerShell 7 / `pwsh.exe` is nicer but not
 ///   guaranteed, so we don't depend on it.
-/// - **Unix**: `$SHELL` if set, otherwise `/bin/bash`.
+/// - **macOS**: `$SHELL -l`. Terminal.app and iTerm both open login shells, so
+///   this is what a Mac user's dotfiles are written for — `~/.zprofile` is
+///   where Homebrew's `shellenv` and similar PATH setup conventionally live,
+///   and a non-login shell would silently skip it. The shell is still
+///   interactive (its stdin is a tty), so `~/.zshrc` is read as well.
+/// - **Other Unix**: `$SHELL` with no `-l`. Linux terminal emulators
+///   conventionally open *non-login* interactive shells, and bash in
+///   particular reads `~/.bashrc` only when non-login — adding `-l` there
+///   would skip the file most users actually configure.
 fn default_shell() -> (String, Vec<String>) {
     if cfg!(target_os = "windows") {
-        ("powershell.exe".to_string(), vec!["-NoLogo".to_string()])
-    } else {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        (shell, vec![])
+        return ("powershell.exe".to_string(), vec!["-NoLogo".to_string()]);
     }
+
+    let shell = std::env::var("SHELL")
+        .ok()
+        .map(|shell| shell.trim().to_string())
+        .filter(|shell| !shell.is_empty())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        });
+
+    let args = if cfg!(target_os = "macos") {
+        vec!["-l".to_string()]
+    } else {
+        Vec::new()
+    };
+
+    (shell, args)
 }
 
+/// The user's home directory, asking the platform's own variable first.
+///
+/// `HOME` is often set on Windows too (Git Bash, MSYS, WSL interop) and can
+/// point somewhere quite different from the real profile, so each platform
+/// leads with its native answer and keeps the other as a fallback.
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
+    let (primary, fallback) = if cfg!(windows) {
+        ("USERPROFILE", "HOME")
+    } else {
+        ("HOME", "USERPROFILE")
+    };
+
+    std::env::var_os(primary)
+        .or_else(|| std::env::var_os(fallback))
         .map(PathBuf::from)
 }

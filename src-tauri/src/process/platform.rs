@@ -4,6 +4,12 @@ use portable_pty::ChildKiller;
 use std::process::{Child, Command};
 use std::sync::Arc;
 
+/// How long a process tree gets to honour SIGTERM before we escalate to
+/// SIGKILL. Long enough for a dev server to flush state and close sockets,
+/// short enough to stay inside the 3s shutdown budget in `lib.rs`.
+#[cfg(unix)]
+const TERM_GRACE: std::time::Duration = std::time::Duration::from_millis(2000);
+
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
 
@@ -52,15 +58,21 @@ pub enum ProcessTerminator {
 /// Windows we *additionally* try to capture the running child in a Job Object
 /// after the fact — terminating that reaps the whole tree. Without it, only the
 /// immediate child dies and any grandchildren it spawned leak.
+///
+/// On Unix that same reach comes for free from the PTY itself: allocating a
+/// slave pty makes `portable_pty` call `setsid()`, so the child is a session
+/// *and* process-group leader whose pgid equals its pid. Signalling `-pid`
+/// therefore reaches the whole tree — which is what `npm run dev` needs, since
+/// killing only npm leaves the `node` grandchild holding the port.
 #[derive(Debug, Clone)]
 pub struct PtyTerminator {
     killer: PtyKillHandle,
     #[cfg(windows)]
     job: Option<Arc<JobObject>>,
-    /// The PTY child's PID, kept so the Windows terminate path can run
-    /// `taskkill /T` to walk the live process tree by parent→child links and
-    /// catch grandchildren that escaped the Job Object assignment race.
-    #[cfg(windows)]
+    /// The PTY child's PID. On Windows the terminate path runs `taskkill /T`
+    /// with it to walk the live process tree by parent→child links and catch
+    /// grandchildren that escaped the Job Object assignment race. On Unix it
+    /// doubles as the process-group id to signal (see the note above).
     pid: u32,
 }
 
@@ -108,8 +120,24 @@ impl PtyTerminator {
         self.kill_child_only()
     }
 
+    /// Unix: signal the child's whole process group, then escalate to SIGKILL
+    /// if anything is still alive after the grace period. Falls back to killing
+    /// just the immediate child if the pid isn't a process-group leader — i.e.
+    /// if `setsid()` didn't happen the way we expect — so an unusual pty
+    /// backend degrades to the old behaviour instead of signalling a group we
+    /// don't own.
     #[cfg(not(windows))]
     fn terminate(&self) -> Result<(), AppError> {
+        #[cfg(unix)]
+        if self.pid != 0 && unix::is_group_leader(self.pid) {
+            let result = unix::terminate_group(self.pid, TERM_GRACE);
+            // The killer makes `portable_pty`'s `wait()` return promptly even
+            // if the group signal raced the child's own exit. Harmless once
+            // the child is already gone.
+            let _ = self.killer.lock().kill();
+            return result;
+        }
+
         self.kill_child_only()
     }
 
@@ -147,8 +175,8 @@ pub fn pty_terminator(killer: PtyKillHandle, pid: u32) -> ProcessTerminator {
 }
 
 #[cfg(not(windows))]
-pub fn pty_terminator(killer: PtyKillHandle, _pid: u32) -> ProcessTerminator {
-    ProcessTerminator::Pty(PtyTerminator { killer })
+pub fn pty_terminator(killer: PtyKillHandle, pid: u32) -> ProcessTerminator {
+    ProcessTerminator::Pty(PtyTerminator { killer, pid })
 }
 
 #[cfg(windows)]
@@ -373,25 +401,12 @@ pub fn resume_child(_child: &Child) -> Result<(), AppError> {
 
 #[cfg(unix)]
 fn terminate_process_tree(pid: u32) -> Result<(), AppError> {
-    let group = format!("-{pid}");
-    let status = Command::new("kill")
-        .arg("-TERM")
-        .arg(&group)
-        .status()
-        .map_err(|error| AppError::ProcessStop(format!("Failed to run kill: {error}")))?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(AppError::ProcessStop(format!(
-            "kill failed for process group {group} with status {status}"
-        )))
-    }
+    unix::terminate_group(pid, TERM_GRACE)
 }
 
 #[cfg(all(not(unix), not(windows)))]
 fn terminate_process_tree(pid: u32) -> Result<(), AppError> {
-    let status = Command::new("kill")
+    let status = std::process::Command::new("kill")
         .arg(pid.to_string())
         .status()
         .map_err(|error| AppError::ProcessStop(format!("Failed to run kill: {error}")))?;
@@ -402,5 +417,495 @@ fn terminate_process_tree(pid: u32) -> Result<(), AppError> {
         Err(AppError::ProcessStop(format!(
             "kill failed for pid {pid} with status {status}"
         )))
+    }
+}
+
+/// Process-group signalling for Unix.
+///
+/// Both spawn paths put the child at the head of its own process group —
+/// `configure_process_group` calls `process_group(0)` for the pipe path, and
+/// `portable_pty` calls `setsid()` for the PTY path — so in both cases the
+/// child's pid *is* its pgid and `killpg` reaches every descendant that hasn't
+/// deliberately left the group.
+///
+/// We signal directly rather than shelling out to `kill(1)`: spawning a process
+/// to kill a process is slower, can't report per-signal errno, and gives us no
+/// way to poll for liveness between SIGTERM and SIGKILL.
+#[cfg(unix)]
+mod unix {
+    use super::AppError;
+    use std::io::Error;
+    use std::thread::sleep;
+    use std::time::{Duration, Instant};
+
+    /// How often we re-check whether the group has actually died during the
+    /// grace period. Fine-grained enough that a well-behaved dev server makes
+    /// the Stop button feel instant.
+    const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+    /// True when `pid` heads its own process group, i.e. signalling `-pid`
+    /// targets that process and its descendants rather than someone else's
+    /// group. Guards against signalling a group we don't own if a spawn path
+    /// ever stops calling `setsid`/`setpgid`.
+    pub fn is_group_leader(pid: u32) -> bool {
+        // SAFETY: getpgid is a pure query; a bad pid yields -1/ESRCH.
+        let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
+        pgid >= 0 && pgid == pid as libc::pid_t
+    }
+
+    /// SIGTERM the group, wait up to `grace` for it to die, then SIGKILL
+    /// whatever is left.
+    ///
+    /// Windows' `TerminateJobObject` is immediate and unconditional; without
+    /// this escalation the Unix path was strictly weaker, and a service that
+    /// ignores SIGTERM (or is wedged in an uninterruptible state) survived the
+    /// shutdown budget and leaked with the port still bound.
+    ///
+    /// Assumes the caller has a waiter thread reaping the child — both spawn
+    /// paths do. An unreaped zombie still answers `kill(pid, 0)`, so without
+    /// one every stop would sit out the full grace period before escalating.
+    pub fn terminate_group(pid: u32, grace: Duration) -> Result<(), AppError> {
+        if pid == 0 {
+            return Err(AppError::ProcessStop(
+                "refusing to signal process group 0 (would target our own group)".to_string(),
+            ));
+        }
+
+        // A failed SIGTERM is not fatal on its own — the group may already be
+        // winding down — so fall through to the sweep either way and let that
+        // report the outcome.
+        if let Err(err) = killpg(pid, libc::SIGTERM) {
+            if !is_already_gone(&err) {
+                return Err(AppError::ProcessStop(format!(
+                    "SIGTERM to process group {pid} failed: {err}"
+                )));
+            }
+        }
+
+        // Give the whole group the grace period to act on SIGTERM. Watching
+        // only the leader is not enough: launchers such as npm can exit before
+        // the server they spawned has finished flushing state and closing
+        // sockets.
+        let deadline = Instant::now() + grace;
+        while group_alive(pid) && Instant::now() < deadline {
+            sleep(POLL_INTERVAL);
+        }
+
+        if !group_alive(pid) {
+            return Ok(());
+        }
+
+        // The group still exists after the grace period. Sweep whatever is
+        // left; descendants retain their process-group id after the leader is
+        // reparented, so this still reaches an orphaned server.
+        match killpg(pid, libc::SIGKILL) {
+            Ok(()) => Ok(()),
+            Err(err) if is_already_gone(&err) => Ok(()),
+            Err(err) => Err(AppError::ProcessStop(format!(
+                "SIGKILL to process group {pid} failed: {err}"
+            ))),
+        }
+    }
+
+    /// Whether any process still belongs to the group. Signal 0 performs the
+    /// existence/permission check without delivering a signal. On Darwin an
+    /// otherwise-dead group containing only unreaped zombies can report EPERM;
+    /// every live process spawned in our group shares our uid and is signalable,
+    /// so that case counts as drained just like ESRCH.
+    fn group_alive(pid: u32) -> bool {
+        match killpg(pid, 0) {
+            Ok(()) => true,
+            Err(err) if is_already_gone(&err) => false,
+            Err(_) => true,
+        }
+    }
+
+    /// Errors that mean no signalable child remains in the group. Darwin uses
+    /// EPERM for a group containing only unreaped zombies; see `group_alive`.
+    fn is_already_gone(err: &Error) -> bool {
+        matches!(err.raw_os_error(), Some(libc::ESRCH) | Some(libc::EPERM))
+    }
+
+    fn killpg(pid: u32, signal: libc::c_int) -> Result<(), Error> {
+        // SAFETY: killpg with a positive pgid and a valid signal number. Any
+        // failure is reported through errno rather than by trapping.
+        let result = unsafe { libc::killpg(pid as libc::pid_t, signal) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    /// Poll for a process disappearing. SIGKILL delivery is not synchronous
+    /// with the killing thread, so the assertion needs a bounded wait rather
+    /// than an immediate check.
+    pub(super) fn wait_until_gone(pid: u32, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            // SAFETY: signal 0 performs existence/permission checks only.
+            if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    /// Spawn a shell that backgrounds a long-lived grandchild and prints its
+    /// pid. This is the shape that matters in practice: `npm run dev` is a
+    /// launcher whose *child* is the process actually holding the port, so
+    /// killing only the process we spawned leaves the port bound.
+    fn spawn_with_grandchild() -> (std::process::Child, u32) {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("sleep 30 & echo $!; wait")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+
+        let mut child = command.spawn().expect("spawn test shell");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let mut line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut line)
+            .expect("read grandchild pid");
+        let grandchild = line.trim().parse::<u32>().expect("grandchild pid");
+
+        (child, grandchild)
+    }
+
+    #[test]
+    fn terminating_a_service_reaps_its_grandchildren() {
+        let (child, grandchild) = spawn_with_grandchild();
+        assert!(
+            !wait_until_gone(grandchild, Duration::from_millis(0)),
+            "grandchild should be alive before we terminate anything"
+        );
+
+        let terminator = process_terminator(&child).expect("build terminator");
+        // Mirror production: both spawn paths run a waiter thread blocked in
+        // `wait()`, which reaps the child the instant it dies. Without one the
+        // child lingers as a zombie that still answers `kill(pid, 0)`, and the
+        // liveness poll below would sit out the whole grace period.
+        let reaped = reap_in_background(child);
+
+        let started = Instant::now();
+        terminator.terminate().expect("terminate process tree");
+        let elapsed = started.elapsed();
+
+        assert!(
+            wait_until_gone(grandchild, Duration::from_secs(5)),
+            "grandchild {grandchild} survived termination — it would keep holding the port"
+        );
+        // A service that honours SIGTERM must stop promptly. Burning the full
+        // grace period on every stop would make the Stop button feel broken.
+        assert!(
+            elapsed < TERM_GRACE,
+            "stopping a well-behaved service took {elapsed:?}, the whole grace period"
+        );
+        let _ = reaped.join();
+    }
+
+    /// A launcher may exit as soon as it receives SIGTERM while its child is
+    /// still performing asynchronous cleanup. The grace period belongs to the
+    /// process group, so the child's cleanup must be allowed to finish.
+    #[test]
+    fn termination_allows_descendant_cleanup_after_leader_exits() {
+        let cleanup_file = std::env::temp_dir().join(format!(
+            "muxly-shutdown-cleanup-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(
+                "trap 'exit 0' TERM; \
+                 /bin/sh -c 'trap \"sleep 0.3; printf done > \\\"$MUXLY_CLEANUP_FILE\\\"; exit 0\" TERM; \
+                 echo READY; while :; do sleep 0.1; done' & wait",
+            )
+            .env("MUXLY_CLEANUP_FILE", &cleanup_file)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+
+        let mut child = command.spawn().expect("spawn cleanup test tree");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let mut ready = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut ready)
+            .expect("wait for descendant readiness");
+        assert_eq!(ready.trim(), "READY");
+
+        let terminator = process_terminator(&child).expect("build terminator");
+        let reaped = reap_in_background(child);
+        terminator.terminate().expect("terminate process tree");
+        let _ = reaped.join();
+
+        let cleanup = std::fs::read_to_string(&cleanup_file)
+            .expect("descendant was force-killed before its SIGTERM cleanup completed");
+        assert_eq!(cleanup, "done");
+        let _ = std::fs::remove_file(cleanup_file);
+    }
+
+    /// Reap a child on its own thread, the way both spawn paths do.
+    fn reap_in_background(mut child: std::process::Child) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        })
+    }
+
+    /// A process that ignores SIGTERM must still die. Windows'
+    /// `TerminateJobObject` is unconditional; without the SIGKILL escalation
+    /// the Unix path would simply give up and leak the tree.
+    #[test]
+    fn termination_escalates_to_sigkill_when_sigterm_is_ignored() {
+        // The loop matters: a bare `sleep 30` would be killed by the SIGTERM
+        // even though the shell ignores it, and the test would pass without
+        // ever reaching the escalation. Re-spawning the sleep keeps the shell
+        // itself alive and signalable, so only SIGKILL can end this.
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("trap '' TERM; echo READY; while :; do sleep 0.2; done")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+
+        let mut child = command.spawn().expect("spawn SIGTERM-ignoring shell");
+        let pid = child.id();
+        let stdout = child.stdout.take().expect("piped stdout");
+        let mut ready = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut ready)
+            .expect("wait for signal trap readiness");
+        assert_eq!(ready.trim(), "READY");
+
+        // A short grace keeps the test quick; the escalation path is the same.
+        let started = Instant::now();
+        unix::terminate_group(pid, Duration::from_millis(250)).expect("terminate group");
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "should have waited out the grace period before escalating"
+        );
+
+        let exit = child.wait().expect("reap child");
+        assert!(
+            !exit.success(),
+            "a killed process should not report success, got {exit:?}"
+        );
+        assert!(
+            wait_until_gone(pid, Duration::from_secs(5)),
+            "process {pid} ignored SIGTERM and was never escalated to SIGKILL"
+        );
+    }
+
+    /// Signalling group 0 means "my own process group" — it would take down the
+    /// app itself. A zeroed pid should be rejected outright.
+    #[test]
+    fn refuses_to_signal_process_group_zero() {
+        assert!(unix::terminate_group(0, Duration::from_millis(10)).is_err());
+    }
+}
+
+/// PTY-path termination, tested separately from the pipe path because it
+/// reaches the process tree by a different route: `portable_pty` spawns the
+/// child itself, and the group-kill only happens if that spawn really did call
+/// `setsid()`. If it ever stops doing so, `is_group_leader` sends us down the
+/// kill-the-child-only fallback and grandchildren start leaking again — silently.
+#[cfg(all(test, unix))]
+mod pty_tests {
+    use super::*;
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use std::io::Read;
+    use std::time::Duration;
+
+    #[test]
+    fn terminating_a_pty_service_reaps_its_grandchildren() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+
+        // A launcher whose backgrounded child is the process that would be
+        // holding the port — and which ignores SIGHUP.
+        //
+        // That last part is what makes this a real test of the group kill.
+        // When a pty's session leader exits, the kernel SIGHUPs the foreground
+        // process group, which already reaps a well-behaved grandchild whether
+        // or not we do anything. Ignoring SIGHUP (inherited by the background
+        // job) removes that safety net and leaves only our explicit killpg —
+        // which is the case that actually leaked: a dev server that traps HUP,
+        // or that has moved itself out of the foreground group.
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.arg("-c");
+        command.arg("trap '' HUP; sleep 30 & echo READY:$!; wait");
+        let mut child = pair.slave.spawn_command(command).expect("spawn pty child");
+        let pid = child.process_id().expect("pty child pid");
+
+        // Read the grandchild pid off the pty. Line-buffered through a
+        // terminal, so scan the stream rather than assuming one clean read.
+        let mut reader = pair.master.try_clone_reader().expect("clone reader");
+        let mut seen = String::new();
+        let grandchild = loop {
+            let mut buf = [0u8; 256];
+            let n = reader.read(&mut buf).expect("read pty");
+            assert!(n > 0, "pty closed before the child reported its grandchild");
+            seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+            if let Some(rest) = seen.split("READY:").nth(1) {
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                if seen.split("READY:").nth(1).unwrap().len() > digits.len() && !digits.is_empty() {
+                    break digits.parse::<u32>().expect("grandchild pid");
+                }
+            }
+        };
+
+        assert!(
+            !super::tests::wait_until_gone(grandchild, Duration::from_millis(0)),
+            "grandchild should be alive before termination"
+        );
+
+        let killer: PtyKillHandle = Arc::new(Mutex::new(child.clone_killer()));
+        let terminator = pty_terminator(killer, pid);
+        // Mirror the waiter thread the real spawn path runs.
+        let reaped = std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+
+        terminator.terminate().expect("terminate pty service");
+
+        assert!(
+            super::tests::wait_until_gone(grandchild, Duration::from_secs(5)),
+            "grandchild {grandchild} survived a PTY service stop — it would keep holding the port"
+        );
+        let _ = reaped.join();
+    }
+
+    /// The group-kill is only correct because the pty child heads its own
+    /// process group. Asserted directly so a `portable_pty` change that drops
+    /// `setsid()` fails here with a clear reason instead of silently degrading.
+    #[test]
+    fn pty_children_lead_their_own_process_group() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.arg("-c");
+        command.arg("sleep 5");
+        let mut child = pair.slave.spawn_command(command).expect("spawn pty child");
+        let pid = child.process_id().expect("pty child pid");
+
+        assert!(
+            unix::is_group_leader(pid),
+            "pty child {pid} is not a process-group leader — the group kill would fall back \
+             to killing only the immediate child, leaking grandchildren"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// Canonical name for a Unix termination signal, e.g. `SIGKILL`.
+///
+/// Covers the signals a supervised dev process realistically dies from; the
+/// numeric form is a readable fallback for anything else. Deliberately not
+/// `strsignal`, whose output is a localised prose description ("Killed: 9")
+/// rather than the symbolic name people actually search for.
+#[cfg(unix)]
+pub fn signal_name(signal: i32) -> String {
+    let name = match signal {
+        libc::SIGHUP => "SIGHUP",
+        libc::SIGINT => "SIGINT",
+        libc::SIGQUIT => "SIGQUIT",
+        libc::SIGILL => "SIGILL",
+        libc::SIGABRT => "SIGABRT",
+        libc::SIGFPE => "SIGFPE",
+        libc::SIGKILL => "SIGKILL",
+        libc::SIGBUS => "SIGBUS",
+        libc::SIGSEGV => "SIGSEGV",
+        libc::SIGPIPE => "SIGPIPE",
+        libc::SIGALRM => "SIGALRM",
+        libc::SIGTERM => "SIGTERM",
+        libc::SIGXCPU => "SIGXCPU",
+        libc::SIGXFSZ => "SIGXFSZ",
+        _ => return format!("signal {signal}"),
+    };
+    name.to_string()
+}
+
+/// Normalise `portable_pty`'s signal description into the same symbolic name
+/// the pipe path reports.
+///
+/// `portable_pty` only exposes the signal as an already-rendered string, built
+/// from `strsignal` — "Killed: 9" on macOS, "Killed" on Linux. Where it carries
+/// the number we recover the canonical name so both spawn paths agree; where it
+/// doesn't, the prose is passed through as the best available answer.
+#[cfg(unix)]
+pub fn signal_label(description: &str) -> String {
+    let digits: String = description
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(char::is_ascii_digit)
+        .collect();
+
+    match digits.parse::<i32>() {
+        Ok(signal) => signal_name(signal),
+        Err(_) => description.to_string(),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod signal_tests {
+    use super::*;
+
+    #[test]
+    fn names_the_signals_a_dev_process_dies_from() {
+        assert_eq!(signal_name(libc::SIGKILL), "SIGKILL");
+        assert_eq!(signal_name(libc::SIGSEGV), "SIGSEGV");
+        assert_eq!(signal_name(libc::SIGTERM), "SIGTERM");
+    }
+
+    #[test]
+    fn unknown_signals_fall_back_to_the_number() {
+        assert_eq!(signal_name(4242), "signal 4242");
+    }
+
+    /// `portable_pty` hands us prose from `strsignal`, which differs by
+    /// platform: macOS includes the number ("Killed: 9"), Linux does not
+    /// ("Killed"). Recover the symbolic name when the number is there, and
+    /// pass the prose through when it isn't.
+    #[test]
+    fn recovers_signal_names_from_portable_pty_prose() {
+        assert_eq!(signal_label("Killed: 9"), "SIGKILL");
+        assert_eq!(signal_label("Segmentation fault: 11"), "SIGSEGV");
+        assert_eq!(signal_label("Signal 15"), "SIGTERM");
+        assert_eq!(signal_label("Killed"), "Killed");
     }
 }

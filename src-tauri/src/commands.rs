@@ -53,11 +53,20 @@ pub fn load_services(
 
 #[tauri::command]
 pub fn check_runtime_requirements(
+    app: AppHandle,
     config_dir: State<'_, ServicesConfigDir>,
     fallbacks: State<'_, RuntimeFallbacks>,
     services: Vec<ServiceConfig>,
 ) -> RuntimeRequirementReport {
-    check_requirements(&services, config_dir.current().as_deref(), &fallbacks)
+    // Search the login shell's PATH too, so a GUI-launched app doesn't report
+    // every service as broken just because launchd handed it a minimal PATH.
+    let login_paths = crate::shell_env::login_paths(&app);
+    check_requirements(
+        &services,
+        config_dir.current().as_deref(),
+        &fallbacks,
+        &login_paths,
+    )
 }
 
 #[tauri::command]

@@ -7,8 +7,18 @@ export const AUTO_RESTART_DELAY_MS = 1_000;
 // readiness signal. The Windows cursor-inheritance handshake is handled
 // deterministically in the Rust output pump; this bounded recycle remains for
 // unrelated launchers that can fail silently before producing real output.
+//
+// Recycling is Windows-only (see `isWindows`). It exists to break a ConPTY
+// startup deadlock, and Unix ptys have no equivalent failure mode — there,
+// killing a service purely for being quiet for 8s would be destroying a
+// perfectly healthy watcher or worker on no evidence at all.
 export const PTY_WATCHDOG_MS = 8_000;
 export const PTY_RECYCLE_MAX = 4;
+
+// Platform sniffing from the webview's user agent — the same signal `modKey`
+// uses. Good enough for choosing between platform workarounds, and it avoids a
+// round trip to the backend before the first render.
+export const isWindows = navigator.userAgent.includes("Windows");
 
 // Shorthand shown in shortcut tooltips. macOS uses Cmd, everything else Ctrl.
 export const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";

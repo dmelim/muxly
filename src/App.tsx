@@ -43,6 +43,7 @@ import {
   groupKey,
   groupServices,
   isServiceInProfile,
+  isWindows,
   modKey,
   sameAliases,
   sameServiceOrder,
@@ -134,7 +135,8 @@ export function App() {
   const flushRafRef = useRef(0);
   // Windows ConPTY can split readline redraws into a bare carriage return and a
   // later repaint. Hold that standalone CR briefly so xterm does not paint the
-  // cursor at column 0 between the two chunks.
+  // cursor at column 0 between the two chunks. Windows only — see
+  // `enqueueLiveTerminalWrite`.
   const pendingPtyCarriageReturnsRef = useRef<Map<string, PendingPtyCarriageReturn>>(new Map());
   // Per-service line-start tracker for the timestamp annotator. `true` means
   // the next non-newline byte we append begins a fresh line and should get a
@@ -814,7 +816,7 @@ export function App() {
     }));
 
     trackUnlisten(listen<ProcessExitedEvent>(PROCESS_EXITED, (event) => {
-      const { serviceId, runToken, code, requested } = event.payload;
+      const { serviceId, runToken, code, signal, requested } = event.payload;
       if (activeRunTokensRef.current[serviceId] !== runToken) {
         return;
       }
@@ -822,7 +824,7 @@ export function App() {
       delete outputChannelsRef.current[serviceId];
       const nextStatus: ServiceStatus = requested
         ? "stopped"
-        : code === 0 || code === null
+        : code === 0 && signal === null
         ? "exited"
         : "failed";
       setStatuses((current) => ({ ...current, [serviceId]: nextStatus }));
@@ -846,13 +848,15 @@ export function App() {
       });
       setLastExit((current) => ({
         ...current,
-        [serviceId]: shortExitCode(code, requested)
+        [serviceId]: shortExitCode(code, requested, signal)
       }));
-      const description = describeExitCode(code, requested);
+      const description = describeExitCode(code, requested, signal);
       // Failed exits get a red banner so a decoded NTSTATUS reads as the
       // diagnostic it is, rather than getting lost in the same cyan colour
       // we use for routine lifecycle events ("starting", "stopped").
-      const isError = !requested && code !== 0 && code !== null;
+      // A signal death is an error too — it has no exit code, so the numeric
+      // check alone would colour a SIGSEGV the same calm cyan as a clean stop.
+      const isError = !requested && (signal !== null || (code !== 0 && code !== null));
       const colour = isError ? "\x1b[31m" : "\x1b[38;2;34;211;238m";
       appendLog(
         serviceId,
@@ -895,10 +899,10 @@ export function App() {
       // `vite preview`, etc.). Resolve the holder and surface the banner
       // so the user can stop-and-restart or adopt without leaving the app.
       const service = servicesRef.current.find((s) => s.id === serviceId);
-      const nonZero = !requested && code !== 0 && code !== null;
+      const abnormal = !requested && (signal !== null || code === null || code !== 0);
       // Auto-port services can't fail *because* the preferred port was taken —
       // Muxly would have rolled to a free one — so skip the blocker probe.
-      if (nonZero && service && service.port != null && !service.autoPort) {
+      if (abnormal && service && service.port != null && !service.autoPort) {
         const port = service.port;
         // Tiny delay so we re-probe after the OS has had a moment to settle
         // — without it, our own freshly-released listener can briefly
@@ -972,6 +976,19 @@ export function App() {
           ...current,
           [serviceId]: { kind: "waiting-port", port: effectivePort }
         }));
+        return;
+      }
+
+      // Off Windows there is no ConPTY deadlock to recover from: a Unix pty
+      // either spawned the child or failed outright. Silence here means the
+      // service is simply quiet — a file watcher, a queue worker, anything that
+      // logs nothing until it has something to say — and killing it would be
+      // destroying a healthy process on no evidence. Report and stop.
+      if (!isWindows) {
+        ptyDebug(serviceId, "watchdog: portless and quiet, but not Windows — informing, not recycling", {
+          token
+        });
+        setStartHealth((current) => ({ ...current, [serviceId]: { kind: "quiet" } }));
         return;
       }
 
@@ -1112,7 +1129,12 @@ export function App() {
         return;
       }
 
-      if (isPty && data === "\r") {
+      // Windows only: ConPTY splits a readline redraw into a bare carriage
+      // return and a later repaint, and painting the gap shows as a cursor
+      // flicker at column 0. Unix ptys deliver the redraw in one piece, so the
+      // hold buys nothing there and only delays every spinner and progress-bar
+      // frame by the settle interval.
+      if (isWindows && isPty && data === "\r") {
         const current = takePendingPtyCarriageReturn(serviceId);
         const text = current + data;
         const timer = window.setTimeout(() => {

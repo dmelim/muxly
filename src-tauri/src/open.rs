@@ -7,18 +7,21 @@
 
 use crate::{
     error::AppError,
+    runtime::{resolve_from_fallbacks, search_paths},
     services::{config::resolve_cwd, config::ServicesConfigDir},
     settings::default_editor_command,
 };
 use std::{
+    ffi::OsString,
     path::{Path, PathBuf},
     process::Command,
 };
-use tauri::State;
+use tauri::{AppHandle, State};
 
 /// Open the given path in the user's editor of choice.
 #[tauri::command]
 pub fn open_in_editor(
+    app: AppHandle,
     config_dir: State<'_, ServicesConfigDir>,
     cwd: String,
     editor_command: Option<String>,
@@ -30,7 +33,14 @@ pub fn open_in_editor(
         .filter(|value| !value.is_empty())
         .unwrap_or(default_editor_command());
 
-    Command::new(program)
+    // `code` and friends are shims installed into the *shell's* PATH, which a
+    // GUI-launched app doesn't inherit — so resolve against the login shell's
+    // PATH before falling back to a bare name. See `shell_env`.
+    let resolved = resolve_from_fallbacks(program, &search_paths(&app))
+        .map(|path| path.into_os_string())
+        .unwrap_or_else(|| OsString::from(program));
+
+    Command::new(&resolved)
         .arg(&path)
         .spawn()
         .map(|_| ())

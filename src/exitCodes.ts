@@ -86,19 +86,44 @@ const WINDOWS_STATUS_HINTS: Record<string, ExitHint> = {
   }
 };
 
+// Plain-English hints for the signals a supervised dev process realistically
+// dies from. Signals the user caused (SIGTERM/SIGINT/SIGHUP) need no
+// explanation; the ones worth annotating are the crashes and the kills a user
+// did not ask for, where the signal name alone doesn't say what went wrong.
+const SIGNAL_HINTS: Record<string, string> = {
+  SIGKILL:
+    "force-killed — something outside the process ended it; on a dev box this is usually the macOS/Linux OOM killer or a manual kill -9",
+  SIGSEGV:
+    "segmentation fault — a native crash, typically inside a native addon or the runtime itself",
+  SIGBUS: "bus error — a misaligned or invalid memory access in native code",
+  SIGABRT:
+    "aborted — the runtime called abort(), usually after a failed assertion or an unhandled C++ exception",
+  SIGFPE: "arithmetic error in native code, such as an integer divide by zero",
+  SIGILL:
+    "illegal instruction — often a binary built for a different CPU than this machine has (an x86-only native module on Apple Silicon, say)",
+  SIGXCPU: "exceeded its CPU time limit",
+  SIGXFSZ: "exceeded the maximum file size limit"
+};
+
 /**
  * Format a process exit code for display. Returns strings like:
  *   "code 0"
  *   "code 1"
  *   "code -1073741502 (0xC0000142, STATUS_DLL_INIT_FAILED — …)"
- *   "signal"           // when code is null
+ *   "SIGSEGV — segmentation fault — a native crash, …"   // signal death
+ *   "signal"           // signal death we couldn't name
  *   "stopped by user"  // when requested is true
  */
 export function describeExitCode(
   code: number | null,
-  requested: boolean
+  requested: boolean,
+  signal: string | null = null
 ): string {
   if (requested) return "stopped by user";
+  if (signal) {
+    const hint = SIGNAL_HINTS[signal];
+    return hint ? `${signal} — ${hint}` : signal;
+  }
   if (code === null) return "signal";
 
   // Positive exit codes on every OS are just program-defined statuses. We
@@ -118,8 +143,13 @@ export function describeExitCode(
 }
 
 /** Compact form for the Details inspector's "Last Exit" row — no prose. */
-export function shortExitCode(code: number | null, requested: boolean): string {
+export function shortExitCode(
+  code: number | null,
+  requested: boolean,
+  signal: string | null = null
+): string {
   if (requested) return "stopped";
+  if (signal) return signal;
   if (code === null) return "signal";
   if (code >= 0) return String(code);
   const unsigned = (code >>> 0) >>> 0;

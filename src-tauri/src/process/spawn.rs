@@ -10,7 +10,7 @@ use crate::{
     process::{
         configure_process_group, resolve_program, resume_child, ProcessRegistry, RunningProcess,
     },
-    runtime::{inject_fallback_path, resolve_from_fallbacks, RuntimeFallbacks},
+    runtime::{inject_fallback_path, resolve_from_fallbacks, search_paths},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
 use std::{
@@ -46,10 +46,9 @@ pub fn spawn_process(
     // args/env (see `process::port`). Done BEFORE spawning so we never
     // half-start a service whose port belongs to someone else.
     let mut resolved = super::port::resolve_spawn(&service)?;
-    let fallback_paths = app
-        .try_state::<RuntimeFallbacks>()
-        .map(|fallbacks| fallbacks.paths())
-        .unwrap_or_default();
+    // Activated runtime fallbacks plus the login shell's PATH. The latter is
+    // what makes a GUI-launched app able to find `npm` at all — see `shell_env`.
+    let fallback_paths = search_paths(&app);
     inject_fallback_path(&mut resolved.env, &fallback_paths);
 
     let base_dir = config_dir.current();
@@ -191,6 +190,7 @@ pub fn spawn_process(
                         service_id,
                         run_token,
                         code: status.code(),
+                        signal: exit_signal(&status),
                         requested,
                     },
                 );
@@ -212,6 +212,21 @@ pub fn spawn_process(
     });
 
     Ok(())
+}
+
+/// The signal that killed the child, named, or `None` for a normal exit.
+///
+/// A signal death leaves `status.code()` as `None`, so without this the UI has
+/// nothing to show but the word "signal".
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<String> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal().map(super::platform::signal_name)
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<String> {
+    None
 }
 
 fn spawn_output_reader<R>(
@@ -266,4 +281,44 @@ fn spawn_output_reader<R>(
             }
         }
     });
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::exit_signal;
+    use std::process::{Command, Stdio};
+
+    /// End-to-end check of the pipe path's signal reporting: a real process,
+    /// really killed, must come back named. Guards the `ExitStatusExt::signal`
+    /// wiring, which is easy to get subtly wrong (a signal death reports
+    /// `code() == None`, so nothing else would notice if this returned `None`).
+    #[test]
+    fn reports_the_signal_that_killed_the_process() {
+        let mut child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 30")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn test process");
+
+        // SAFETY: SIGKILL to a child we just spawned and still own.
+        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGKILL) };
+        let status = child.wait().expect("reap child");
+
+        assert_eq!(status.code(), None, "a signal death carries no exit code");
+        assert_eq!(exit_signal(&status).as_deref(), Some("SIGKILL"));
+    }
+
+    #[test]
+    fn reports_no_signal_for_a_clean_exit() {
+        let status = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("exit 3")
+            .status()
+            .expect("run test process");
+
+        assert_eq!(status.code(), Some(3));
+        assert_eq!(exit_signal(&status), None);
+    }
 }

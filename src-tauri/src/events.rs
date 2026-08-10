@@ -47,6 +47,11 @@ pub struct ProcessExitedEvent {
     pub service_id: String,
     pub run_token: u64,
     pub code: Option<i32>,
+    /// The signal that killed the process, named (`SIGKILL`, `SIGSEGV`), when
+    /// it died from one. Unix only — a signal death has no exit code, so
+    /// without this the UI could only say "signal" and leave the user to guess
+    /// between "I stopped it", "the OOM killer took it", and "it segfaulted".
+    pub signal: Option<String>,
     pub requested: bool,
 }
 

@@ -300,10 +300,12 @@ function WaitingForOutput() {
   );
 }
 
-// Notice for a run that started but hasn't produced output yet. Three honest
+// Notice for a run that started but hasn't produced output yet. Four honest
 // flavours (see StartHealth):
 //  - waiting-port: the service has a port; we are NOT killing it — just waiting
 //    for that port to come up (the reliable "started" signal). Calm/amber.
+//  - quiet: a portless start produced no output and nothing is being done about
+//    it (everywhere except Windows). Purely informational; calm/amber.
 //  - retrying: a portless start produced no output; the watchdog is recycling.
 //  - stuck: a portless start gave up and needs user attention; rose.
 // Pinned to the bottom so it doesn't cover the start banner.
@@ -319,6 +321,8 @@ function StartHealthNotice({ startHealth }: { startHealth: StartHealth }) {
       ? startHealth.port != null
         ? `Starting — waiting for port ${startHealth.port} to come up…`
         : "Starting — waiting for the server to come up…"
+      : startHealth.kind === "quiet"
+      ? "Running — no output yet."
       : startHealth.kind === "retrying"
       ? `No output yet — retrying (${startHealth.attempt}/${startHealth.max})…`
       : `No output after ${startHealth.max} tries — start may be stuck. Stop and start again to retry.`;

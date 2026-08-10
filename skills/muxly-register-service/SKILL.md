@@ -32,10 +32,14 @@ Use a bundled helper for the final write unless the user explicitly asks for man
 
 3. Resolve runtime requirements before constructing the service.
    - For Node projects, inspect `.nvmrc`, `.node-version`, `package.json.engines.node`, and the `packageManager` field when present. Prefer an exact version from `.nvmrc` or `.node-version`; do not silently turn a range such as `>=22` into an arbitrary pinned version.
-   - Check that the chosen runtime and package-manager executable resolve in the environment Muxly will inherit. On Windows, use native checks such as `nvm current`, `where node`, and `where npm.cmd`; also verify that an NVM for Windows `path` from `settings.txt` actually exists. Do not register a bare executable that is already known not to resolve.
-   - If a required Node version is managed by NVM, carry that requirement into the service instead of assuming the user's current global version:
-     - On Windows with NVM for Windows, set `preRun` to `nvm use <exact-version>` and use the native package-manager launcher such as `npm.cmd`. A non-empty `preRun` makes Muxly run the complete command through `cmd.exe`, which also avoids direct PTY spawning of a `.cmd`/`.bat` file.
-     - On macOS/Linux with shell-based NVM, source NVM before selecting the version, for example `source "$NVM_DIR/nvm.sh" && nvm use <exact-version>`.
+   - Check that the chosen runtime and package-manager executable resolve in the environment Muxly will inherit. Do not register a bare executable that is already known not to resolve.
+     - Windows: use native checks such as `nvm current`, `where node`, and `where npm.cmd`; also verify that an NVM for Windows `path` from `settings.txt` actually exists.
+     - macOS/Linux: use `command -v node`, `command -v npm`, and `node --version`. Check whichever version manager is in play — `nvm current`, `fnm current`, `volta list node`, `asdf current nodejs`, `mise current node`.
+     - macOS specifically: do not assume your own shell's `PATH` is what Muxly sees. When Muxly is launched from Finder or the Dock it inherits launchd's minimal `PATH`, which excludes Homebrew and every version manager. Muxly recovers the login shell's `PATH` for spawning, so a tool that resolves in the user's terminal will resolve — but a tool installed only into a *non-login, non-interactive* context will not.
+   - If a required Node version is managed by a version manager, carry that requirement into the service instead of assuming the user's current global version:
+     - Windows (NVM for Windows): set `preRun` to `nvm use <exact-version>` and use the native package-manager launcher such as `npm.cmd`. A non-empty `preRun` makes Muxly run the complete command through `cmd.exe`, which also avoids direct PTY spawning of a `.cmd`/`.bat` file.
+     - macOS/Linux (shell-based nvm): source it before selecting the version, for example `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use <exact-version>`. A non-empty `preRun` on Unix runs the whole command through the user's non-interactive login shell (`$SHELL -lc`). It reads login profiles such as `~/.zprofile` and `~/.bash_profile`, but not interactive files such as `~/.zshrc` or `~/.bashrc`; explicitly source any version-manager or environment hook that lives there.
+     - macOS/Linux (fnm, Volta, asdf, mise): these expose real executables or shims on `PATH` rather than needing shell activation, so prefer a version-pinned absolute `program` path over a `preRun`.
      - NVM for Windows changes a machine-wide symlink. If concurrent services may require different Node versions, prefer a version-pinned executable path. When the selected package script is only a thin `node path/to/script` launcher and bypassing the package manager preserves its behavior, use that version's absolute `node.exe` as `program` and the script path as `args`.
    - If activation would require elevation, prompt interactively, or cannot be made deterministic, stop and ask rather than writing a service that will fail unattended.
    - Validate the resolved runtime before writing. At minimum, confirm the exact runtime exists and that the constructed shell context can resolve the main executable. Do not start the long-running service merely to perform this preflight.
@@ -55,7 +59,7 @@ Use a bundled helper for the final write unless the user explicitly asks for man
    - `profile`: optional profile id. Omit unless the user explicitly wants the service assigned to a known Muxly profile.
    - `autoRestart`: default to `false` unless the user asks for restart behavior.
    - `usePty`: default to `false`, but set to `true` for dev servers, watch-mode tools, and interactive CLIs that need a TTY. The Rust field is `use_pty`, but `services.json` uses camelCase `usePty`.
-   - `preRun`: optional shell prelude run before the command in the same shell, for example `nvm use 24.4.0` or `source .venv/bin/activate`. Use it whenever runtime activation or another environment change is required for the main executable to resolve.
+   - `preRun`: optional shell prelude run before the command in the same shell, for example `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 24.4.0` or `source .venv/bin/activate`. Use it whenever runtime activation or another environment change is required for the main executable to resolve. The shell is `cmd /c` on Windows and the user's non-interactive login shell (`$SHELL -lc`) on macOS/Linux, so write the prelude in the syntax of the platform you are registering on and explicitly source hooks otherwise loaded only by interactive rc files.
    - `sensitive`: optional boolean. Set `true` only when the service name should be masked while Muxly stream mode is active.
 
 5. Decide whether the service needs PTY mode.
@@ -65,7 +69,8 @@ Use a bundled helper for the final write unless the user explicitly asks for man
    - For package scripts, inspect the underlying `package.json` command before deciding. Treat `npm run dev`, `pnpm dev`, `bun run dev`, and `yarn dev` as PTY candidates when the script invokes any of the tools above.
    - Soft signals that should usually set `usePty: true`: script names containing `dev`, `watch`, `serve`, or `start` plus dependencies or config files for Vite, WXT, Next, Astro, Nuxt, SvelteKit, Remix, Storybook, webpack dev server, React Native, or similar frameworks; README mentions of hot reload, HMR, fast refresh, or file watching.
    - When in doubt, prefer `usePty: true` for any `dev`, `watch`, or `serve` script. Missing PTY mode can make these services silently exit with code 0 after the first hot reload; setting PTY unnecessarily is usually only a cosmetic output issue.
-   - Leave `usePty: false` for builds, one-shot tests without watch mode, migrations, codegen, production-style servers with append-only logs, databases, compiled binaries, or commands that intentionally spawn detached/background child processes. PTY mode merges stdout and stderr, and stopping a PTY service only kills the immediate child.
+   - Leave `usePty: false` for builds, one-shot tests without watch mode, migrations, codegen, production-style servers with append-only logs, databases, compiled binaries, or commands that intentionally spawn detached/background child processes. PTY mode merges stdout and stderr into one stream, losing the split.
+   - Stopping a service kills its whole process tree on both modes and both platforms — a Job Object plus `taskkill /T` on Windows, a process-group signal escalating from SIGTERM to SIGKILL on macOS/Linux. A command that deliberately detaches its children into a *new* process group or session is the exception: those survive, which is another reason to leave such commands on `usePty: false` and manage them explicitly.
 
 6. Check the existing Muxly config before writing.
    - Windows: `%APPDATA%/com.diethos.muxly/services.json`
@@ -86,8 +91,9 @@ Use a bundled helper for the final write unless the user explicitly asks for man
 Example:
 
 ```bash
-# Run from this skill's directory.
-printf '%s\n' '{"id":"web","name":"Web App","icon":{"type":"builtin","value":"globe"},"program":"npm","args":["run","dev"],"cwd":"C:/code/my-app","port":3000,"group":"my-app","autoRestart":false,"usePty":true}' \
+# Run from this skill's directory. `cwd` is an absolute path in the local OS
+# format — POSIX here, `C:/code/my-app` on Windows.
+printf '%s\n' '{"id":"web","name":"Web App","icon":{"type":"builtin","value":"globe"},"program":"npm","args":["run","dev"],"cwd":"/Users/me/code/my-app","port":3000,"group":"my-app","autoRestart":false,"usePty":true}' \
   | ./scripts/register-service.sh --stdin
 ```
 

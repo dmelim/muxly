@@ -8,9 +8,18 @@
 //! wrap the spawn in one shell invocation and chain with `&&`:
 //!
 //! ```text
-//! bash -lc "<pre_run> && <program> <args…>"   # Unix
-//! cmd  /c  "<pre_run> && <program> <args…>"    # Windows
+//! $SHELL -lc "<pre_run> && <program> <args…>"  # Unix
+//! cmd    /c  "<pre_run> && <program> <args…>"  # Windows
 //! ```
+//!
+//! The Unix side runs the *user's* login shell rather than a hardcoded `bash`.
+//! macOS has defaulted to zsh since Catalina, so shell syntax and login-profile
+//! setup must be interpreted by that shell. This invocation is deliberately
+//! non-interactive: it reads login profiles such as `~/.zprofile`, but not
+//! interactive files such as `~/.zshrc`. A prelude that needs nvm or another
+//! interactive-only hook must source it explicitly; making unattended services
+//! execute arbitrary interactive startup files can add prompts, aliases, or
+//! terminal output that destabilises launching.
 //!
 //! Quoting is intentionally minimal: the prelude, program, and args are joined
 //! with spaces into one line handed to the shell as a single argument. The
@@ -27,7 +36,11 @@
 /// is set. Returns a shell invocation that runs the prelude and the real
 /// command in one shell. Callers only reach this when `pre_run` is non-empty;
 /// an empty prelude keeps the direct-spawn path.
-pub fn shell_prelude_command(pre_run: &str, program: &str, args: &[String]) -> (String, Vec<String>) {
+pub fn shell_prelude_command(
+    pre_run: &str,
+    program: &str,
+    args: &[String],
+) -> (String, Vec<String>) {
     let mut line = String::from(pre_run.trim());
     line.push_str(" && ");
     line.push_str(program);
@@ -39,8 +52,43 @@ pub fn shell_prelude_command(pre_run: &str, program: &str, args: &[String]) -> (
     if cfg!(windows) {
         ("cmd".to_string(), vec!["/c".to_string(), line])
     } else {
-        ("bash".to_string(), vec!["-lc".to_string(), line])
+        (login_shell(), vec!["-lc".to_string(), line])
     }
+}
+
+/// The shell to run a prelude in on Unix: `$SHELL` when the environment tells
+/// us what the user actually uses, else a per-platform default.
+///
+/// The fallback differs by platform because the *installed* shell differs:
+/// macOS ships zsh as the login shell and its bash is a 2007 build kept for
+/// licensing reasons, while Linux distributions overwhelmingly default to bash.
+/// `$SHELL` is missing in practice mainly when the app is launched by a GUI
+/// session rather than from a terminal, which is the common case for a bundled
+/// `.app` — so the fallback is load-bearing, not just defensive.
+#[cfg(not(windows))]
+fn login_shell() -> String {
+    let configured = std::env::var("SHELL")
+        .ok()
+        .map(|shell| shell.trim().to_string())
+        .filter(|shell| !shell.is_empty());
+
+    configured.unwrap_or_else(login_shell_fallback)
+}
+
+#[cfg(not(windows))]
+fn login_shell_fallback() -> String {
+    if cfg!(target_os = "macos") {
+        "/bin/zsh".to_string()
+    } else {
+        "/bin/bash".to_string()
+    }
+}
+
+#[cfg(windows)]
+fn login_shell() -> String {
+    // Unreachable — `shell_prelude_command` takes the `cmd /c` branch on
+    // Windows — but defined so the call site type-checks on every platform.
+    "cmd".to_string()
 }
 
 /// The trimmed prelude if it is non-empty, else `None`. Centralises the
@@ -69,17 +117,47 @@ mod tests {
 
     #[test]
     fn shell_prelude_chains_prelude_and_command() {
-        let (program, args) = shell_prelude_command(
-            "nvm use 20",
-            "npm",
-            &["run".to_string(), "dev".to_string()],
-        );
+        let (program, args) =
+            shell_prelude_command("nvm use 20", "npm", &["run".to_string(), "dev".to_string()]);
 
-        let expected_program = if cfg!(windows) { "cmd" } else { "bash" };
+        let expected_program = if cfg!(windows) {
+            "cmd".to_string()
+        } else {
+            super::login_shell()
+        };
         let expected_flag = if cfg!(windows) { "/c" } else { "-lc" };
 
         assert_eq!(program, expected_program);
         assert_eq!(args[0], expected_flag);
         assert_eq!(args[1], "nvm use 20 && npm run dev");
+    }
+
+    /// The prelude must land in the shell the user configured, not a hardcoded
+    /// bash — that is the whole point of running it as a login shell.
+    #[test]
+    #[cfg(not(windows))]
+    fn shell_prelude_uses_the_configured_login_shell() {
+        let Ok(configured) = std::env::var("SHELL") else {
+            return;
+        };
+        if configured.trim().is_empty() {
+            return;
+        }
+
+        let (program, _) = shell_prelude_command("nvm use 20", "npm", &[]);
+
+        assert_eq!(program, configured.trim());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn login_shell_falls_back_to_zsh_on_macos() {
+        // A bundled .app launched from Finder can come up without SHELL set;
+        // macOS's bash is ancient and unconfigured, so zsh is the right guess.
+        assert_eq!(
+            super::login_shell_fallback(),
+            "/bin/zsh",
+            "macOS default login shell"
+        );
     }
 }

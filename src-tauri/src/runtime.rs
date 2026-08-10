@@ -57,12 +57,35 @@ struct PendingIssue {
     service_names: Vec<String>,
 }
 
+/// Every directory a service's program may be found in, in priority order:
+/// runtime fallbacks the user explicitly activated, then the login shell's
+/// `PATH` (see `shell_env` — a GUI-launched app does not inherit it).
+///
+/// Both spawn paths merge this into the child's `PATH` and use it to resolve
+/// the program itself, so what the requirements check reports as "available"
+/// matches what a spawn will actually find.
+pub fn search_paths(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    use tauri::Manager;
+
+    let mut paths = app
+        .try_state::<RuntimeFallbacks>()
+        .map(|fallbacks| fallbacks.paths())
+        .unwrap_or_default();
+    paths.extend(crate::shell_env::login_paths(app));
+    paths
+}
+
 pub fn check_requirements(
     services: &[ServiceConfig],
     config_base: Option<&Path>,
     fallbacks: &RuntimeFallbacks,
+    login_paths: &[PathBuf],
 ) -> RuntimeRequirementReport {
-    let fallback_paths = fallbacks.paths();
+    // The activated fallbacks are what the UI echoes back as "active"; the
+    // login-shell paths are search scope only, not something the user chose.
+    let mut fallback_paths = fallbacks.paths();
+    let reported_fallbacks = fallback_paths.clone();
+    fallback_paths.extend_from_slice(login_paths);
     let mut missing: BTreeMap<String, PendingIssue> = BTreeMap::new();
 
     for service in services {
@@ -120,7 +143,7 @@ pub fn check_requirements(
 
     RuntimeRequirementReport {
         issues,
-        active_fallback_paths: fallback_paths
+        active_fallback_paths: reported_fallbacks
             .iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect(),
@@ -283,17 +306,212 @@ fn discover_candidates(executable: &str) -> Vec<RuntimeCandidate> {
         return Vec::new();
     }
     let key = program_key(executable);
-    let mut candidates = match key.as_str() {
-        "node" | "npm" | "npx" => discover_nvm_candidates(&key),
-        "bun" | "bunx" => discover_bun_candidates(&key),
-        "python" | "python3" => discover_python_candidates(),
-        "pnpm" | "yarn" => discover_roaming_npm_candidate(&key),
-        _ => Vec::new(),
-    };
-    candidates.dedup_by(|left, right| paths_equal(Path::new(&left.path), Path::new(&right.path)));
-    candidates
+    dedup_candidates(platform_candidates(executable, &key))
 }
 
+/// Drop repeated directories, keeping the first (highest-priority) mention.
+///
+/// Ordering carries meaning here — a version manager is listed before a system
+/// package manager because it is the more likely intent — so this preserves
+/// order rather than sorting. Several sources legitimately point at the same
+/// directory (Homebrew's prefix on an Intel Mac is also a conventional system
+/// prefix), and those collisions are not adjacent, so a pairwise `dedup_by`
+/// would let them through.
+fn dedup_candidates(candidates: Vec<RuntimeCandidate>) -> Vec<RuntimeCandidate> {
+    let mut seen: Vec<PathBuf> = Vec::new();
+    let mut unique = Vec::with_capacity(candidates.len());
+
+    for candidate in candidates {
+        let path = PathBuf::from(&candidate.path);
+        if seen.iter().any(|existing| paths_equal(existing, &path)) {
+            continue;
+        }
+        seen.push(path);
+        unique.push(candidate);
+    }
+
+    unique
+}
+
+#[cfg(windows)]
+fn platform_candidates(_executable: &str, key: &str) -> Vec<RuntimeCandidate> {
+    match key {
+        "node" | "npm" | "npx" => discover_nvm_candidates(key),
+        "bun" | "bunx" => discover_bun_candidates(key),
+        "python" | "python3" => discover_python_candidates(),
+        "pnpm" | "yarn" => discover_roaming_npm_candidate(key),
+        _ => Vec::new(),
+    }
+}
+
+/// Where a missing runtime plausibly lives on macOS and Linux.
+///
+/// The Windows equivalents key off `NVM_HOME`, `APPDATA` and `LOCALAPPDATA`,
+/// none of which exist here — so without this the "runtime not found" report
+/// offered Unix users no candidates at all, which is exactly when the suggestion
+/// matters most: a `.app` launched from Finder inherits launchd's minimal PATH
+/// and cannot see any of these directories on its own.
+///
+/// Order is priority order: a version manager the user deliberately installed
+/// beats a system package manager, and both beat the OS's own copy.
+#[cfg(not(windows))]
+fn platform_candidates(executable: &str, key: &str) -> Vec<RuntimeCandidate> {
+    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
+
+    match key {
+        // The JavaScript tools all ship together, so every Node version
+        // manager is a candidate source for any of them.
+        "node" | "npm" | "npx" | "pnpm" | "yarn" => node_manager_dirs(&mut dirs),
+        "bun" | "bunx" => bun_dirs(&mut dirs),
+        "python" | "python3" => python_dirs(&mut dirs),
+        _ => {}
+    }
+    system_prefix_dirs(&mut dirs);
+
+    // A directory only helps if the executable we're missing is actually in it.
+    dirs.into_iter()
+        .filter(|(_, dir)| dir.join(executable).is_file() || dir.join(key).is_file())
+        .map(|(label, dir)| RuntimeCandidate {
+            label,
+            path: dir.to_string_lossy().into_owned(),
+        })
+        .collect()
+}
+
+/// `bin` directories belonging to Node version managers, newest version first.
+#[cfg(not(windows))]
+fn node_manager_dirs(dirs: &mut Vec<(String, PathBuf)>) {
+    let Some(home) = home_dir() else {
+        return;
+    };
+
+    // nvm keeps each version under `versions/node/vX.Y.Z/bin`.
+    let nvm_root = env::var_os("NVM_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".nvm"));
+    for (version, dir) in versioned_dirs(&nvm_root.join("versions").join("node"), "bin") {
+        dirs.push((format!("Node {version} (nvm)"), dir));
+    }
+
+    // fnm's data directory is platform-specific and overridable.
+    let fnm_roots = [
+        env::var_os("FNM_DIR").map(PathBuf::from),
+        Some(home.join("Library").join("Application Support").join("fnm")),
+        Some(
+            env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".local").join("share"))
+                .join("fnm"),
+        ),
+    ];
+    for root in fnm_roots.into_iter().flatten() {
+        for (version, dir) in versioned_dirs(&root.join("node-versions"), "installation/bin") {
+            dirs.push((format!("Node {version} (fnm)"), dir));
+        }
+    }
+
+    // Volta, asdf and mise expose shims rather than per-version directories,
+    // so there is a single entry each and the tool picks the version.
+    dirs.push(("Volta".to_string(), home.join(".volta").join("bin")));
+    dirs.push(("asdf shims".to_string(), home.join(".asdf").join("shims")));
+    dirs.push((
+        "mise shims".to_string(),
+        home.join(".local").join("share").join("mise").join("shims"),
+    ));
+}
+
+#[cfg(not(windows))]
+fn bun_dirs(dirs: &mut Vec<(String, PathBuf)>) {
+    if let Some(root) = env::var_os("BUN_INSTALL") {
+        dirs.push((
+            "Bun installation".to_string(),
+            PathBuf::from(root).join("bin"),
+        ));
+    }
+    if let Some(home) = home_dir() {
+        dirs.push((
+            "Bun installation".to_string(),
+            home.join(".bun").join("bin"),
+        ));
+    }
+}
+
+#[cfg(not(windows))]
+fn python_dirs(dirs: &mut Vec<(String, PathBuf)>) {
+    let Some(home) = home_dir() else {
+        return;
+    };
+
+    let pyenv_root = env::var_os("PYENV_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".pyenv"));
+    for (version, dir) in versioned_dirs(&pyenv_root.join("versions"), "bin") {
+        dirs.push((format!("Python {version} (pyenv)"), dir));
+    }
+    dirs.push(("pyenv shims".to_string(), pyenv_root.join("shims")));
+}
+
+/// Conventional install prefixes: Homebrew on Apple Silicon, then the shared
+/// `/usr/local` prefix (Homebrew on Intel and most manual installs), then the
+/// system's own binaries.
+#[cfg(not(windows))]
+fn system_prefix_dirs(dirs: &mut Vec<(String, PathBuf)>) {
+    dirs.push(("Homebrew".to_string(), PathBuf::from("/opt/homebrew/bin")));
+    dirs.push((
+        "/usr/local/bin".to_string(),
+        PathBuf::from("/usr/local/bin"),
+    ));
+    if let Some(home) = home_dir() {
+        dirs.push(("User binaries".to_string(), home.join(".local").join("bin")));
+    }
+    dirs.push(("System".to_string(), PathBuf::from("/usr/bin")));
+}
+
+/// Read a version-manager root whose children are version directories, and
+/// return `(display_version, child/suffix)` newest first.
+///
+/// Names are compared by parsed numeric components rather than as strings so
+/// `v20` sorts above `v9`, matching the Windows nvm discovery.
+#[cfg(not(windows))]
+fn versioned_dirs(root: &Path, suffix: &str) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<(Vec<u64>, String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let dir = suffix
+                .split('/')
+                .fold(entry.path(), |path, segment| path.join(segment));
+            if !dir.is_dir() {
+                return None;
+            }
+            let display = name.strip_prefix('v').unwrap_or(&name).to_string();
+            let version: Vec<u64> = display
+                .split('.')
+                .map(|part| part.parse().unwrap_or(0))
+                .collect();
+            Some((version, display, dir))
+        })
+        .collect();
+
+    found.sort_by(|left, right| right.0.cmp(&left.0));
+    found
+        .into_iter()
+        .map(|(_, display, dir)| (display, dir))
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_dir())
+}
+
+#[cfg(windows)]
 fn discover_nvm_candidates(executable: &str) -> Vec<RuntimeCandidate> {
     let Some(root) = env::var_os("NVM_HOME").map(PathBuf::from) else {
         return Vec::new();
@@ -331,6 +549,7 @@ fn discover_nvm_candidates(executable: &str) -> Vec<RuntimeCandidate> {
     found.into_iter().map(|(_, candidate)| candidate).collect()
 }
 
+#[cfg(windows)]
 fn discover_bun_candidates(executable: &str) -> Vec<RuntimeCandidate> {
     let mut dirs = Vec::new();
     if let Some(root) = env::var_os("BUN_INSTALL") {
@@ -348,6 +567,7 @@ fn discover_bun_candidates(executable: &str) -> Vec<RuntimeCandidate> {
         .collect()
 }
 
+#[cfg(windows)]
 fn discover_python_candidates() -> Vec<RuntimeCandidate> {
     let Some(local) = env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
         return Vec::new();
@@ -371,6 +591,7 @@ fn discover_python_candidates() -> Vec<RuntimeCandidate> {
         .collect()
 }
 
+#[cfg(windows)]
 fn discover_roaming_npm_candidate(executable: &str) -> Vec<RuntimeCandidate> {
     let Some(app_data) = env::var_os("APPDATA").map(PathBuf::from) else {
         return Vec::new();
@@ -392,5 +613,70 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
             .eq_ignore_ascii_case(&right.to_string_lossy())
     } else {
         left == right
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(windows))]
+mod tests {
+    use super::*;
+
+    /// The Unix discovery paths existed only as Windows equivalents before, so
+    /// a missing runtime on macOS or Linux offered the user no candidates at
+    /// all. Asserts against a real installation rather than a fixture, and
+    /// skips where there is none, so it stays honest about what it proves.
+    #[test]
+    fn discovers_a_real_node_installation() {
+        let installed = ["/opt/homebrew/bin", "/usr/local/bin"]
+            .iter()
+            .map(PathBuf::from)
+            .chain(
+                home_dir()
+                    .into_iter()
+                    .flat_map(|home| [home.join(".nvm"), home.join(".volta")]),
+            )
+            .any(|dir| dir.join("node").is_file() || dir.is_dir() && dir.ends_with(".nvm"));
+        if !installed {
+            return;
+        }
+
+        let candidates = discover_candidates("node");
+
+        assert!(
+            !candidates.is_empty(),
+            "node is installed on this machine but discovery offered no candidates"
+        );
+        for candidate in &candidates {
+            assert!(
+                Path::new(&candidate.path).join("node").is_file(),
+                "candidate {} does not actually contain node",
+                candidate.path
+            );
+        }
+    }
+
+    /// Directories reached by more than one route (Homebrew's Intel prefix is
+    /// also a conventional system prefix) must be offered once, and the
+    /// higher-priority label must be the one that survives.
+    #[test]
+    fn candidate_directories_are_deduplicated() {
+        let candidates = dedup_candidates(vec![
+            RuntimeCandidate {
+                label: "Homebrew".to_string(),
+                path: "/usr/local/bin".to_string(),
+            },
+            RuntimeCandidate {
+                label: "Something else".to_string(),
+                path: "/usr/bin".to_string(),
+            },
+            RuntimeCandidate {
+                label: "/usr/local/bin".to_string(),
+                path: "/usr/local/bin".to_string(),
+            },
+        ]);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].label, "Homebrew");
+        assert_eq!(candidates[1].label, "Something else");
     }
 }

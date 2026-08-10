@@ -10,6 +10,7 @@ mod pty;
 mod runtime;
 mod services;
 mod settings;
+mod shell_env;
 
 use commands::{
     activate_runtime_fallback, app_version, check_port, check_runtime_requirements,
@@ -25,15 +26,16 @@ use pty::PtyRegistry;
 use runtime::RuntimeFallbacks;
 use services::config::ServicesConfigDir;
 use settings::{load_settings, save_settings};
+use shell_env::LoginPath;
 use std::{
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(ProcessRegistry::default())
@@ -41,6 +43,7 @@ pub fn run() {
         .manage(ServicePtyRegistry::default())
         .manage(ServicesConfigDir::default())
         .manage(RuntimeFallbacks::default())
+        .manage(LoginPath::default())
         .setup(|app| {
             // The history DB lives in the app data directory, which needs the
             // resolved app handle — hence setup() rather than an eager manage().
@@ -48,6 +51,10 @@ pub fn run() {
             app.manage(db);
             // Live-reload services.json when it changes on disk.
             services::config::watch_service_config(app.handle().clone());
+            // Recover the user's real PATH when we were launched from the GUI
+            // and inherited launchd's minimal one. Runs off-thread — nothing
+            // needs the answer until a service is started.
+            shell_env::resolve_in_background(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -91,8 +98,27 @@ pub fn run() {
             service_pty_write,
             service_pty_resize
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        // Closing the window is not the only way out. On macOS ⌘Q (and the
+        // Quit menu item) terminate the app through the run loop, which does
+        // not necessarily deliver a per-window CloseRequested first — so
+        // without this every running service would be orphaned on quit,
+        // holding its port with no window left to stop it from.
+        //
+        // This is the blocking backstop: the CloseRequested handler above only
+        // kicks termination off on a detached thread, which is fine while the
+        // window is tearing down but useless once the process is about to go
+        // away. Here we wait for the children to actually die.
+        if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+            app_handle.state::<PtyRegistry>().close_all();
+
+            let terminators = app_handle.state::<ProcessRegistry>().running_terminators();
+            terminate_with_timeout(terminators, Duration::from_secs(3));
+        }
+    });
 }
 
 fn terminate_with_timeout(terminators: Vec<ProcessTerminator>, timeout: Duration) {
