@@ -30,6 +30,24 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.5.1-mac-alpha.1] - 2026-08-20
+
+### Added
+
+- **Experimental Apple Silicon support.** Muxly now builds and runs as a native
+  ARM64 macOS application, with ad-hoc signing for public alpha distribution.
+- **Shell environment recovery for GUI launches.** Finder and Dock launches
+  recover the user's login-shell `PATH`, including common Homebrew, Node,
+  Python, Bun, and version-manager locations.
+- **Native macOS process and PTY handling.** Service commands use the user's
+  Unix shell where required, process groups are cleaned up on stop or quit,
+  and Unix termination signals are reported with readable diagnostics.
+
+### Changed
+
+- Platform-specific shortcuts and interface text now use macOS conventions
+  when running on a Mac while preserving the existing Windows behavior.
+
 ## [0.5.0] - 2026-07-24
 
 ### Added
@@ -571,7 +589,9 @@ in the center, service details and actions on the right.
 
 - No production build (`tauri build`) has been verified yet.
 
-[Unreleased]: https://github.com/dmelim/muxly/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/dmelim/muxly/compare/v0.5.1-mac-alpha.1...HEAD
+[0.5.1-mac-alpha.1]: https://github.com/dmelim/muxly/compare/v0.5.0...v0.5.1-mac-alpha.1
+[0.5.0]: https://github.com/dmelim/muxly/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dmelim/muxly/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dmelim/muxly/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dmelim/muxly/compare/v0.1.0...v0.2.0

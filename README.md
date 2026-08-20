@@ -14,6 +14,7 @@ your dev servers, watchers, and scripts once — then start, stop, and watch the
 all from a single window.
 
 Built with Tauri 2, React, TypeScript, and xterm.js.
+Developed by [Diethos](https://diethos.com).
 
 ## Features
 
@@ -128,6 +129,7 @@ react-resizable-panels · SQLite
 ## Documentation
 
 - [docs/services-config.md](docs/services-config.md) — `services.json` schema and agent guide
+- [docs/macos-alpha-launch.md](docs/macos-alpha-launch.md) — macOS alpha landing copy and release strategy
 - [skills/](skills/) — agent-agnostic Agent Skills (e.g. registering a project as a service)
 - [docs/design.md](docs/design.md) — design system (colour, typography, components)
 - [CHANGELOG.md](CHANGELOG.md) — release history

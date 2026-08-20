@@ -1895,7 +1895,7 @@ dependencies = [
 
 [[package]]
 name = "muxly"
-version = "0.5.0"
+version = "0.5.1-mac-alpha.1"
 dependencies = [
  "libc",
  "notify",

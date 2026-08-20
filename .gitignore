@@ -22,6 +22,7 @@ polish.md
 # Local docs: only public repo docs are allowlisted.
 docs/*
 !docs/design.md
+!docs/macos-alpha-launch.md
 !docs/services-config.md
 
 # Environment and local overrides
