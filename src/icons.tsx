@@ -87,6 +87,17 @@ export function SearchIcon({ className }: IconProps) {
   );
 }
 
+/** Floppy disk - save settings. */
+export function SaveIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M5 3h12l3 3v15H4V4a1 1 0 0 1 1-1Z" />
+      <path d="M8 3v6h8V3" />
+      <path d="M8 21v-7h8v7" />
+    </svg>
+  );
+}
+
 /** Push pin - keep a service at the top of its group. */
 export function PinIcon({ className }: IconProps) {
   return (
@@ -221,6 +232,19 @@ export function CloseIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
+    </svg>
+  );
+}
+
+/** Trash can — destructive delete action. */
+export function DeleteIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="m19 6-1 14H6L5 6" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
     </svg>
   );
 }

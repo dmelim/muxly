@@ -2721,7 +2721,6 @@ export function App() {
                 <SettingsIcon className="size-4" />
               </Button>
             </Tooltip>
-            <span className="mx-1 h-5 w-px bg-white/10" />
             <Tooltip
               label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+→)`}
               side="bottom"

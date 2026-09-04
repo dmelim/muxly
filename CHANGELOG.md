@@ -46,6 +46,8 @@ section, and tag the commit `vX.Y.Z`.
 - **Service editing uses compact themed actions.** Header close and destructive delete actions now use accessible icons and tooltips, and deletion uses the in-app confirmation dialog.
 - **Tab workspaces are now the default.** New and older settings without an explicit preference open services as persistent tabs, and profile management uses flat rows with compact trash actions instead of nested cards.
 - **Panel tabs now carry service identity once.** Tabbed panels no longer repeat the active service name and status in the pane toolbar. Tabs remain outside the frame, while the service workspace below uses the same full outline in neutral and focused cyan states.
+- **Settings navigation and actions use less vertical space.** Section tabs now sit in a left rail, sensitive-service groups collapse to compact project rows, and Save is a floating icon action instead of a full-width bottom bar.
+- **Additive actions have clearer hover feedback.** Dashed New and Import buttons now strengthen their border and gain a subtle cyan surface instead of relying on text colour alone.
 
 ### Fixed
 
@@ -62,6 +64,7 @@ section, and tag the commit `vX.Y.Z`.
 - **Sensitive project and service toggles now respond immediately.** Privacy curation checkboxes and counts update while their changes are persisted, then reconcile with the saved state when the operation finishes.
 - **Stream mode now updates already-open panes and redacts external absolute paths.** Sensitive commands, cards, terminal scrollback, live output, Details, and global search use the same fail-closed display transform without remounting running PTYs. Pane contents stay covered until every privacy snapshot finishes.
 - **Ctrl+C now interrupts the focused PTY service.** Terminal selection no longer prevents the interrupt from reaching the child, while explicit platform copy shortcuts remain available.
+- **Service-card split actions no longer overlap command or port-conflict text.** Cards reserve action space at compact sidebar widths.
 - **Git status checks no longer flash console windows on Windows.** Repository discovery, refresh, and branch operations now launch Git without creating visible child terminals.
 - **Git discovery now works with Finder-launched macOS builds.** Git and branch-switch hooks inherit the recovered login-shell `PATH`, including Homebrew and version-manager locations, and an unavailable Git executable produces an explanatory error instead of being mistaken for a non-repository.
 - **Repository refresh no longer appears unresponsive or causes periodic lag.** Valid refreshes coalesce while one is running without reusing stale React Strict Mode requests, inspect each repository once, show a spinning refresh icon while loading, and avoid unnecessary background polling.

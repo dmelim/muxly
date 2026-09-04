@@ -37,7 +37,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
   warning: "bg-amber-500 text-amber-950 hover:bg-amber-400",
   link: "text-zinc-400 hover:text-zinc-200 underline-offset-2 hover:underline",
   dashed:
-    "border border-dashed border-white/15 text-zinc-300 hover:border-white/30 hover:text-white"
+    "border border-dashed border-white/15 text-zinc-300 hover:border-cyan-400/60 hover:bg-cyan-400/10 hover:text-cyan-300 focus-visible:border-cyan-400/60"
 };
 
 const SIZES: Record<ButtonSize, string> = {

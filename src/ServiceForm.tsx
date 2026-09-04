@@ -7,6 +7,9 @@ import { ServiceIconInput } from "./ServiceIconInput";
 import { looksLikeDevServer } from "./devServerHeuristics";
 import { fromDraft, toDraft, validate } from "./serviceFormModel";
 import type { ServiceFormDraft } from "./serviceFormModel";
+import { Tooltip } from "./Tooltip";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { CloseIcon, DeleteIcon } from "./icons";
 
 // Matches the shortcut label used elsewhere — `⌘` on macOS, `Ctrl` otherwise.
 const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
@@ -42,6 +45,7 @@ export function ServiceForm({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletePromptOpen, setDeletePromptOpen] = useState(false);
 
   const validationError = useMemo(() => validate(draft, existingIds), [draft, existingIds]);
 
@@ -76,8 +80,7 @@ export function ServiceForm({
 
   async function handleDelete() {
     if (!onDelete) return;
-    if (!confirm(`Delete service "${draft.name || draft.id}"?`)) return;
-
+    setDeletePromptOpen(false);
     setSaving(true);
     setError(null);
     try {
@@ -93,9 +96,11 @@ export function ServiceForm({
     <form onSubmit={handleSubmit} className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
         <h2 className="text-sm font-semibold">{initial ? "Edit service" : "New service"}</h2>
-        <Button variant="link" onClick={onCancel}>
-          Cancel
-        </Button>
+        <Tooltip label="Close">
+          <Button variant="ghost" size="icon" onClick={onCancel} aria-label="Close service form">
+            <CloseIcon className="size-4" />
+          </Button>
+        </Tooltip>
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 text-sm">
@@ -344,9 +349,11 @@ export function ServiceForm({
 
       <div className="flex items-center justify-between gap-2 border-t border-white/10 px-5 py-4">
         {onDelete ? (
-          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={saving}>
-            Delete
-          </Button>
+          <Tooltip label="Delete service">
+            <Button variant="destructive" size="icon" onClick={() => setDeletePromptOpen(true)} disabled={saving} aria-label="Delete service">
+              <DeleteIcon className="size-4" />
+            </Button>
+          </Tooltip>
         ) : (
           <span />
         )}
@@ -370,8 +377,18 @@ export function ServiceForm({
           </Button>
         </div>
       </div>
+      {deletePromptOpen ? (
+        <ConfirmDialog
+          title="Delete service?"
+          message={`Delete service "${draft.name || draft.id}"? This removes its configuration but does not delete project files.`}
+          confirmLabel="Delete"
+          destructive
+          busy={saving}
+          onConfirm={() => void handleDelete()}
+          onClose={() => setDeletePromptOpen(false)}
+        />
+      ) : null}
     </form>
   );
 }
-
 

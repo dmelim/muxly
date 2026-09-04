@@ -5,9 +5,18 @@ import { groupServices } from "./appUtils";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { CloseIcon, EyeIcon, EyeOffIcon } from "./icons";
+import {
+  ChevronRightIcon,
+  CloseIcon,
+  DeleteIcon,
+  EyeIcon,
+  EyeOffIcon,
+  SaveIcon,
+  SearchIcon
+} from "./icons";
 import type { MuxlyTheme } from "./theme";
 import { ThemeSettings } from "./ThemeSettings";
+import { fuzzySearchMatches } from "./search";
 
 // Bounds — must match the clamps in `src-tauri/src/settings.rs` so the form
 // can show the same limits the backend will enforce on save.
@@ -18,6 +27,29 @@ const MAX_LOG_CHUNKS_MIN = 100;
 const MAX_LOG_CHUNKS_MAX = 100_000;
 const PANE_GRID_COLUMNS_MIN = 1;
 const PANE_GRID_COLUMNS_MAX = 10;
+type SettingsTab = "general" | "workspace" | "appearance" | "privacy";
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: "general", label: "General" },
+  { id: "workspace", label: "Workspace" },
+  { id: "appearance", label: "Appearance" },
+  { id: "privacy", label: "Privacy" }
+];
+const SETTINGS_TAB_SECTIONS: Record<SettingsTab, string[]> = {
+  general: ["Editor", "Auto-restart", "Logs"],
+  workspace: ["Layout", "Profiles"],
+  appearance: ["Appearance"],
+  privacy: ["Privacy", "Sensitive services"]
+};
+const SETTINGS_SEARCH_METADATA = {
+  Editor: "editor command open in editor code code.cmd nvim subl",
+  "Auto-restart": "auto restart crash max attempts re-spawn window seconds budget",
+  Logs: "logs output buffer max log chunks prepend timestamps hh:mm:ss",
+  Layout: "layout panels panes grid columns tabs open new services split",
+  Appearance: "appearance theme themes colors colours presets custom contrast terminal surfaces text accent process status feedback reset",
+  Privacy: "privacy hide hidden project group names aliases stream",
+  Profiles: "profiles workspace groups filter create rename delete assign unassigned",
+  "Sensitive services": "sensitive services projects privacy stream hidden reveal names"
+} as const;
 const UNTOUCHED_FIELDS = {
   editorCommand: false,
   maxAttempts: false,
@@ -73,12 +105,21 @@ export function SettingsView({
   const [maxLogChunks, setMaxLogChunks] = useState(String(settings.maxLogChunks));
   const [paneGridColumns, setPaneGridColumns] = useState(String(settings.paneGridColumns));
   const [touchedFields, setTouchedFields] = useState<TouchedFields>(UNTOUCHED_FIELDS);
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [expandedSensitiveGroups, setExpandedSensitiveGroups] = useState<
+    Record<string, boolean>
+  >({});
   const [pendingSensitiveServices, setPendingSensitiveServices] = useState<
     Record<string, boolean>
   >({});
   const [pendingSensitiveProjects, setPendingSensitiveProjects] = useState<
     Record<string, boolean>
   >({});
+  const sectionVisible = (title: keyof typeof SETTINGS_SEARCH_METADATA) =>
+    settingsQuery.trim()
+      ? sectionMatches(settingsQuery, title, SETTINGS_SEARCH_METADATA[title])
+      : SETTINGS_TAB_SECTIONS[activeTab].includes(title);
 
   // Keep untouched form fields aligned with async settings loads, while still
   // preserving in-progress edits when other settings (like privacy) are saved.
@@ -292,25 +333,84 @@ export function SettingsView({
     (touchedFields.paneGridColumns &&
       paneGridColumns !== String(settings.paneGridColumns));
 
+  const settingsHasResults = Object.entries(SETTINGS_SEARCH_METADATA).some(
+    ([title, metadata]) => sectionMatches(settingsQuery, title, metadata)
+  );
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101215]">
-      <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101215]">
+      <div className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-4">
         <div>
           <h2 className="text-base font-semibold text-zinc-100">Settings</h2>
           <p className="mt-0.5 text-xs text-zinc-500">App-wide preferences. Saved on the local machine.</p>
         </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="relative w-56 max-w-[40vw]">
+            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={settingsQuery}
+              onChange={(event) => setSettingsQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && settingsQuery) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setSettingsQuery("");
+                }
+              }}
+              aria-label="Search settings"
+              placeholder="Search settings…"
+              className="form-input search-input py-1.5 text-xs"
+            />
+            {settingsQuery ? <button type="button" onClick={() => setSettingsQuery("")} aria-label="Clear settings search" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><CloseIcon className="size-3" /></button> : null}
+          </div>
         <Tooltip label="Close (Esc)">
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close settings">
             <CloseIcon className="size-4" />
           </Button>
         </Tooltip>
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 py-6">
+      <div className="flex min-h-0 flex-1">
+        <div
+          className="flex w-40 shrink-0 flex-col gap-1 border-r border-white/10 bg-[#15181d] p-3"
+          role="tablist"
+          aria-label="Settings sections"
+        >
+          {SETTINGS_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id && !settingsQuery}
+              onClick={() => {
+                setActiveTab(tab.id);
+                setSettingsQuery("");
+              }}
+              className={`w-full rounded-md px-3 py-2 text-left text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${activeTab === tab.id && !settingsQuery ? "bg-cyan-400/15 text-cyan-300" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+          {settingsQuery ? (
+            <span className="px-3 pt-2 text-[11px] text-zinc-500">Searching all tabs</span>
+          ) : null}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 pb-24 pt-6">
+          {!settingsHasResults ? (
+            <div className="py-10 text-center">
+              <p className="text-sm text-zinc-400">No settings match “{settingsQuery.trim()}”</p>
+              <button type="button" onClick={() => setSettingsQuery("")} className="mt-2 text-xs text-cyan-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40">Clear search</button>
+            </div>
+          ) : null}
           <Section
             title="Editor"
+            visible={sectionVisible("Editor")}
             description="Command used by the 'Open in editor' button on each service."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA.Editor}
           >
             <FormRow label="Editor command" hint='e.g. "code" or "code.cmd" on Windows, "nvim", "subl"'>
               <input
@@ -329,7 +429,10 @@ export function SettingsView({
 
           <Section
             title="Auto-restart"
+            visible={sectionVisible("Auto-restart")}
             description="When a service crashes, Muxly can re-spawn it. A quiet period longer than the window resets the budget."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA["Auto-restart"]}
           >
             <FormRow
               label="Max attempts"
@@ -371,7 +474,10 @@ export function SettingsView({
 
           <Section
             title="Logs"
+            visible={sectionVisible("Logs")}
             description="In-memory output buffer per service. Older chunks are dropped first."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA.Logs}
           >
             <FormRow
               label="Max log chunks"
@@ -422,7 +528,10 @@ export function SettingsView({
 
           <Section
             title="Layout"
+            visible={sectionVisible("Layout")}
             description="How open service panes are arranged on screen."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA.Layout}
           >
             <FormRow
               label="Pane grid columns"
@@ -464,11 +573,22 @@ export function SettingsView({
             </label>
           </Section>
 
-          <ThemeSettings settings={settings} onSave={onSave} onPreview={onThemePreview} />
+          <div
+            className={
+              sectionVisible("Appearance")
+                ? ""
+                : "hidden"
+            }
+          >
+            <ThemeSettings settings={settings} onSave={onSave} onPreview={onThemePreview} />
+          </div>
 
           <Section
             title="Privacy"
+            visible={sectionVisible("Privacy")}
             description="Replace real project group names with persisted random aliases. Per-group toggles still live in the sidebar."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA.Privacy}
           >
             <label className="flex cursor-pointer items-start gap-3">
               <input
@@ -494,7 +614,10 @@ export function SettingsView({
 
           <Section
             title="Profiles"
+            visible={sectionVisible("Profiles")}
             description="Group services into profiles (e.g. Day job, Personal) and switch the sidebar to show one at a time. A service belongs to one profile or none; unassigned services show in every profile. Assign a service to a profile when editing it."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA.Profiles}
           >
             <ProfilesSection
               settings={settings}
@@ -506,7 +629,10 @@ export function SettingsView({
 
           <Section
             title="Sensitive services"
+            visible={sectionVisible("Sensitive services")}
             description="Mark projects and services as sensitive. While Stream mode is on (command palette — Ctrl/Cmd+P), every sensitive project and service name is hidden; This list masks those names too while Stream mode is on — use the eye button to reveal them temporarily so you can keep editing."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA["Sensitive services"]}
           >
             {services.length === 0 ? (
               <p className="text-xs text-zinc-500">No services yet.</p>
@@ -556,12 +682,13 @@ export function SettingsView({
                         ? settings.projectNameAliases[groupName] ??
                           maskSensitiveName(groupName)
                         : groupName;
+                    const expanded = expandedSensitiveGroups[groupName] ?? false;
                     return (
                       <div
                         key={groupName}
                         className="overflow-hidden rounded-md border border-white/10"
                       >
-                        <label className="flex cursor-pointer items-center gap-3 bg-white/5 px-3 py-2 transition hover:bg-white/10">
+                        <div className="flex items-center gap-2 bg-white/5 px-3 py-2">
                           <input
                             type="checkbox"
                             checked={projectSensitive}
@@ -572,39 +699,55 @@ export function SettingsView({
                             className="size-4 cursor-pointer accent-cyan-500"
                             aria-label={`Mark the ${projectLabel} project and its services sensitive`}
                           />
-                          <span className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedSensitiveGroups((current) => ({
+                                ...current,
+                                [groupName]: !expanded
+                              }))
+                            }
+                            aria-expanded={expanded}
+                            aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel} services`}
+                            className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                          >
+                            <ChevronRightIcon
+                              className={`size-3.5 shrink-0 text-zinc-500 transition-transform ${expanded ? "rotate-90" : ""}`}
+                            />
                             <span className="block truncate text-xs font-semibold uppercase tracking-[0.14em] text-zinc-300">
                               {projectLabel}
                             </span>
-                          </span>
+                          </button>
                           <span className="shrink-0 text-[11px] text-zinc-500">
                             {sensitiveInGroup} / {groupList.length}
                           </span>
-                        </label>
-                        <ul className="divide-y divide-white/5">
-                          {groupList.map((service) => (
-                            <li key={service.id}>
-                              <label className="flex cursor-pointer items-center gap-3 py-2 pl-9 pr-3 transition hover:bg-white/5">
-                                <input
-                                  type="checkbox"
-                                  checked={isServiceSensitive(service)}
-                                  disabled={saving}
-                                  onChange={(event) =>
-                                    void handleSensitiveToggle(
-                                      service.id,
-                                      event.target.checked
-                                    )
-                                  }
-                                  className="size-4 cursor-pointer accent-cyan-500"
-                                  aria-label={`Mark ${displayServiceName(service, maskNames)} sensitive`}
-                                />
-                                <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">
-                                  {displayServiceName(service, maskNames)}
-                                </span>
-                              </label>
-                            </li>
-                          ))}
-                        </ul>
+                        </div>
+                        {expanded ? (
+                          <ul className="divide-y divide-white/5">
+                            {groupList.map((service) => (
+                              <li key={service.id}>
+                                <label className="flex cursor-pointer items-center gap-3 py-2 pl-9 pr-3 transition hover:bg-white/5">
+                                  <input
+                                    type="checkbox"
+                                    checked={isServiceSensitive(service)}
+                                    disabled={saving}
+                                    onChange={(event) =>
+                                      void handleSensitiveToggle(
+                                        service.id,
+                                        event.target.checked
+                                      )
+                                    }
+                                    className="size-4 cursor-pointer accent-cyan-500"
+                                    aria-label={`Mark ${displayServiceName(service, maskNames)} sensitive`}
+                                  />
+                                  <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">
+                                    {displayServiceName(service, maskNames)}
+                                  </span>
+                                </label>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -613,27 +756,34 @@ export function SettingsView({
             )}
           </Section>
 
+          </div>
         </div>
       </div>
 
-      {/*
-        Footer is a sibling of the scroll area (not inside it) so it sits at
-        the actual bottom of the Settings panel regardless of how tall the
-        form is. The header's X already handles "close", so the footer only
-        carries Save + save status.
-      */}
-      <div className="flex items-center justify-end gap-3 border-t border-white/10 bg-[#15181d] px-6 py-3">
+      <div className="absolute bottom-5 right-6 z-20 flex items-center gap-3">
         {saveMessage ? (
-          <span className="mr-auto text-xs text-zinc-400">{saveMessage}</span>
+          <span
+            role="status"
+            className="rounded-md border border-white/10 bg-[#18181b] px-3 py-2 text-xs text-zinc-300 shadow-lg"
+          >
+            {saveMessage}
+          </span>
         ) : null}
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={handleSave}
-          disabled={!formDirty || saving}
+        <Tooltip
+          label={saving ? "Saving settings" : formDirty ? "Save settings" : "Settings saved"}
         >
-          {saving ? "Saving…" : "Save"}
-        </Button>
+          <Button
+            variant="primary"
+            size="icon"
+            onClick={handleSave}
+            disabled={!formDirty || saving}
+            aria-label={saving ? "Saving settings" : "Save settings"}
+            className="size-11 rounded-full shadow-lg"
+            style={{ borderRadius: "9999px" }}
+          >
+            <SaveIcon className={`size-4 ${saving ? "animate-pulse" : ""}`} />
+          </Button>
+        </Tooltip>
       </div>
     </div>
   );
@@ -641,13 +791,22 @@ export function SettingsView({
 
 function Section({
   title,
+  visible = true,
   description,
+  searchQuery,
+  keywords,
   children
 }: {
   title: string;
+  visible?: boolean;
   description?: string;
+  searchQuery?: string;
+  keywords?: string;
   children: React.ReactNode;
 }) {
+  if (!visible || !sectionMatches(searchQuery ?? "", title, `${description ?? ""} ${keywords ?? ""}`)) {
+    return null;
+  }
   return (
     <section className="rounded-lg border border-white/10 bg-[#15181d] p-5">
       <header className="mb-4">
@@ -657,6 +816,10 @@ function Section({
       <div className="space-y-4">{children}</div>
     </section>
   );
+}
+
+function sectionMatches(query: string, title: string, metadata: string) {
+  return fuzzySearchMatches(query, [title, metadata]);
 }
 
 function FormRow({
@@ -851,14 +1014,14 @@ function ProfilesSection({
           No profiles yet. Add one above to start separating services.
         </p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="divide-y divide-white/10">
           {profiles.map((profile) => {
             const draft = renameDrafts[profile.id] ?? profile.name;
             const count = counts[profile.id] ?? 0;
             return (
               <li
                 key={profile.id}
-                className="flex items-center gap-2 rounded-md border border-white/10 px-3 py-2"
+                className="flex items-center gap-2 py-2"
               >
                 <input
                   value={draft}
@@ -885,14 +1048,17 @@ function ProfilesSection({
                 <span className="shrink-0 text-[11px] text-zinc-500">
                   {count} service{count === 1 ? "" : "s"}
                 </span>
-                <Button
-                  variant="destructive"
-                  size="xs"
-                  onClick={() => requestDelete(profile.id, profile.name)}
-                  disabled={busy}
-                >
-                  Delete
-                </Button>
+                <Tooltip label={`Delete ${profile.name}`}>
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    onClick={() => requestDelete(profile.id, profile.name)}
+                    disabled={busy}
+                    aria-label={`Delete profile ${profile.name}`}
+                  >
+                    <DeleteIcon className="size-4" />
+                  </Button>
+                </Tooltip>
               </li>
             );
           })}

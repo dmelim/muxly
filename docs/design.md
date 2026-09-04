@@ -150,7 +150,7 @@ One shared `Button` component. Variants:
 | `ghost`       | transparent, `white/10` on hover        | Low-emphasis / toggles    |
 | `warning`     | amber-500 fill, amber-950 text          | Restart                   |
 | `destructive` | rose tint                               | Delete                    |
-| `dashed`      | dashed `white/15` outline               | Additive (New, Import)    |
+| `dashed`      | dashed `white/15` outline, cyan border and soft fill on hover | Additive (New, Import) |
 | `link`        | text-only, underline on hover           | Cancel / dismiss          |
 
 Sizes: `xs`, `sm`, `md`, `icon` (square `size-7`, pair with a sized icon).

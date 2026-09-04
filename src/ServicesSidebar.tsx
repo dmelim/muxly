@@ -516,7 +516,7 @@ export function ServicesSidebar({
                             : "text-zinc-300 hover:bg-white/5 hover:text-white"
                         }`}
                       >
-                        <span className="flex items-center justify-between gap-3">
+                        <span className="flex items-center justify-between gap-3 pr-8">
                           <span className="flex min-w-0 items-center gap-3">
                             <ServiceIconBadge
                               service={service}
@@ -531,7 +531,7 @@ export function ServicesSidebar({
                             </span>
                           ) : null}
                         </span>
-                        <span className="mt-1 block truncate pl-10 font-mono text-xs text-zinc-500">
+                        <span className="mt-1 block truncate pl-10 pr-8 font-mono text-xs text-zinc-500">
                           {redactSensitive(
                             formatCommand(service),
                             service,
@@ -540,12 +540,13 @@ export function ServicesSidebar({
                           )}
                         </span>
                         {showConflict ? (
-                          <span className="mt-1 block pl-10 text-[11px] text-amber-300">
+                          <span className="mt-1 block pl-10 pr-8 text-[11px] text-amber-300">
                             port {service.port} in use
                           </span>
                         ) : null}
-                        {isOpen ? (
-                          <Tooltip label="Open in a pane" className="absolute top-2 right-2 text-cyan-400">
+                        <span className="absolute right-2 top-2 flex items-center gap-0.5">
+                          {isOpen ? (
+                          <Tooltip label="Open in a pane" className="text-cyan-400">
                             <svg
                               viewBox="0 0 24 24"
                               fill="none"
@@ -561,15 +562,16 @@ export function ServicesSidebar({
                               <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
                             </svg>
                           </Tooltip>
-                        ) : null}
-                        <Tooltip label="Open in split view" className="absolute bottom-2 right-2">
+                          ) : null}
+                        </span>
+                        <Tooltip label="Open in new panel" className="absolute bottom-2 right-2">
                           <button
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
                               openInSplit(service.id);
                             }}
-                            aria-label={`Open ${maskName(service)} in split view`}
+                            aria-label={`Open ${maskName(service)} in a new panel`}
                             className="rounded p-1 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 focus-visible:opacity-100 group-hover/card:opacity-100"
                           >
                             <SplitIcon className="size-3.5" />
