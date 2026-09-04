@@ -6,6 +6,7 @@ import { Field } from "./FormField";
 import type { ServiceFormDraft } from "./serviceFormModel";
 import { BUILTIN_SERVICE_ICONS, BuiltinServiceIcon } from "./serviceIcons";
 import { Tooltip } from "./Tooltip";
+import { fuzzySearchMatches } from "./search";
 
 type Props = {
   iconType: ServiceFormDraft["iconType"];
@@ -296,10 +297,9 @@ function BuiltinIconGrid({ value, onChange }: { value: string; onChange: (value:
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const selected = BUILTIN_SERVICE_ICONS.find((icon) => icon.value === value);
-  const normalizedQuery = query.trim().toLowerCase();
-  const options = normalizedQuery
-    ? BUILTIN_SERVICE_ICONS.filter(
-        (icon) => icon.label.toLowerCase().includes(normalizedQuery) || icon.value.includes(normalizedQuery)
+  const options = query.trim()
+    ? BUILTIN_SERVICE_ICONS.filter((icon) =>
+        fuzzySearchMatches(query, [icon.label, icon.value])
       )
     : BUILTIN_SERVICE_ICONS;
 

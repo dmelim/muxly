@@ -22,6 +22,7 @@ async function moduleUrl(url) {
 }
 const load = async (file) => import(await moduleUrl(new URL(`../src/${file}.ts`, import.meta.url)));
 const { redactSensitive } = await load("types");
+const { LogSearchCache } = await load("logSearchCache");
 const { DEFAULT_THEME, applyTheme, xtermTheme } = await load("theme");
 const service = { id: "web", name: "SecretApp", group: "SecretGroup", cwd: "/work/project",
   program: "node", args: [], sensitive: true };
@@ -45,6 +46,35 @@ test("quoted and already-redacted paths retain complete filenames", () => {
   assert.equal(redactSensitive('C:\\Users\\private\\node.exe', service, "masked", true),
     'C:\\masked\\node.exe');
   assert.equal(redactSensitive('/opt/tools/node', service, "masked", false), '/opt/tools/node');
+});
+
+test("search reuses results and prepared text until a bounded buffer changes", () => {
+  const cache = new LogSearchCache();
+  const chunks = ["ready\n", "error one\n"];
+  let joins = 0;
+  chunks.join = function (...args) { joins += 1; return Array.prototype.join.apply(this, args); };
+  const first = cache.search(service, chunks, 1, "error", "masked", false);
+  assert.equal(first.total, 1);
+  assert.equal(cache.search(service, chunks, 1, "error", "masked", false), first);
+  assert.equal(cache.search(service, chunks, 1, "ready", "masked", false).total, 1);
+  assert.equal(joins, 1);
+  chunks.splice(0, 2, "error two\n", "error three\n");
+  assert.equal(cache.search(service, chunks, 2, "error", "masked", false).total, 2);
+  assert.equal(joins, 2);
+  assert.equal(cache.search(service, [], 3, "error", "masked", false).total, 0);
+});
+
+test("search invalidates cached sensitive text when privacy or aliases change", () => {
+  const cache = new LogSearchCache();
+  const chunks = ["SecretApp /opt/tools/node\n"];
+  assert.equal(cache.search(service, chunks, 1, "SecretApp", "masked", false).total, 1);
+  assert.equal(cache.search(service, chunks, 1, "SecretApp", "masked", true).total, 0);
+  const privateResult = cache.search(service, chunks, 1, "node", "masked", true);
+  assert.equal(privateResult.hits[0].line, "masked /masked/node");
+  assert.equal(cache.search(service, chunks, 1, "node", "other", true).hits[0].line,
+    "other /other/node");
+  cache.retain(new Set());
+  assert.notEqual(cache.search(service, chunks, 1, "node", "masked", true), privateResult);
 });
 
 test("running status is independent of accent and terminals share the palette", () => {

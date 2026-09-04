@@ -17,6 +17,8 @@ import {
   PlusIcon,
   SplitIcon,
   StopIcon
+  ,CloseIcon
+  ,SearchIcon
 } from "./icons";
 
 type DropIndicator =
@@ -45,6 +47,8 @@ type Props = {
   // user is reminded something is alive outside the current view.
   runningElsewhere: number;
   profileActivity: { global: number; byProfile: Record<string, number> };
+  serviceQuery: string;
+  setServiceQuery: (query: string) => void;
   dropIndicator: DropIndicator;
   dragId: string | null;
   dragIdRef: MutableRefObject<string | null>;
@@ -97,6 +101,8 @@ export function ServicesSidebar({
   setActiveProfile,
   runningElsewhere,
   profileActivity,
+  serviceQuery,
+  setServiceQuery,
   dropIndicator,
   dragId,
   dragIdRef,
@@ -174,6 +180,28 @@ export function ServicesSidebar({
           </Tooltip>
         </div>
 
+        <div className="relative mt-3">
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+          <input
+            value={serviceQuery}
+            onChange={(event) => setServiceQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && serviceQuery) {
+                event.preventDefault();
+                setServiceQuery("");
+              }
+            }}
+            aria-label="Search services"
+            placeholder="Search services…"
+            className="form-input search-input py-1.5 text-xs"
+          />
+          {serviceQuery ? (
+            <button type="button" onClick={() => setServiceQuery("")} aria-label="Clear service search" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40">
+              <CloseIcon className="size-3" />
+            </button>
+          ) : null}
+        </div>
+
         {profiles.length > 0 ? (
           <div className="mt-3">
             <ProfileSwitcher
@@ -202,7 +230,12 @@ export function ServicesSidebar({
         }}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
       >
-        {groupedServices.length === 0 && activeProfile ? (
+        {groupedServices.length === 0 && serviceQuery.trim() ? (
+          <div className="px-3 py-8 text-center">
+            <p className="text-sm text-zinc-400">No services match “{serviceQuery.trim()}”</p>
+            <button type="button" onClick={() => setServiceQuery("")} className="mt-2 text-xs text-cyan-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40">Clear search</button>
+          </div>
+        ) : groupedServices.length === 0 && activeProfile ? (
           <div className="px-3 py-8 text-center">
             <p className="text-sm text-zinc-400">No services in this profile</p>
             <p className="mt-1 text-xs text-zinc-500">
@@ -318,7 +351,7 @@ export function ServicesSidebar({
                 <div className="flex min-w-0 items-center gap-1">
                   <button
                     type="button"
-                    draggable
+                    draggable={!serviceQuery}
                     onDragStart={(event) => {
                       beginGroupDrag(groupName);
                       event.dataTransfer.effectAllowed = "move";
@@ -429,7 +462,7 @@ export function ServicesSidebar({
                         }`}
                       />
                       <div
-                        draggable
+                        draggable={!serviceQuery}
                         onDragStart={(event) => {
                           beginDrag(service.id);
                           event.dataTransfer.effectAllowed = "move";

@@ -36,9 +36,12 @@ section, and tag the commit `vX.Y.Z`.
 - **Faster profile and privacy workflows.** New shortcuts mark the focused project sensitive and cycle profiles, profile switching retains the focused pane, and the profile selector shows running-service counts only beside the profile that owns each service.
 - **User-customizable semantic colour themes.** Muxly now provides Default, Midnight, and High Contrast presets plus validated custom hex overrides, themed keyboard-accessible colour pickers, live preview, grouped resets, WCAG contrast warnings, semantic surface and feedback tokens, and live updates for mounted xterm terminals and generated terminal messages.
 - **Local Git awareness and safe branch switching.** The Details inspector shows repository root, branch, dirty state, and local ahead/behind counts, with non-blocking refresh and clean-worktree-only switching between existing local branches. Stream mode hides branch identities and disables ambiguous switching.
+- **Service and Settings search.** The Services sidebar filters configuration fields without affecting running processes, while Settings search finds sections through labels and documented keywords.
+- **Pinned projects and tabbed Settings.** Entire project groups can stay at the top of the Services sidebar, while Settings is split into General, Workspace, Appearance, and Privacy tabs with cross-tab search.
 
 ### Changed
 
+- **Search bars now share one fuzzy-matching implementation.** Service filtering, Settings, the command palette, global logs, terminal find, and built-in icon search use the same case-insensitive ordered-character matching, with stronger command matches ranked first.
 - **Profile filters no longer close the focused service pane.** The active service remains visible while the sidebar switches profiles, and automatic restart backoff now has a distinct amber `Restarting` state.
 - **Service editing uses compact themed actions.** Header close and destructive delete actions now use accessible icons and tooltips, and deletion uses the in-app confirmation dialog.
 - **Tab workspaces are now the default.** New and older settings without an explicit preference open services as persistent tabs, and profile management uses flat rows with compact trash actions instead of nested cards.
@@ -48,17 +51,21 @@ section, and tag the commit `vX.Y.Z`.
 
 - **Git errors respect Stream mode.** Repository and branch details in failure messages stay hidden while privacy masking is active.
 - **POSIX path masking preserves filenames.** Absolute paths no longer turn into numeric offsets, and already-masked paths are not processed again.
+- **Dragging tabs preserves the terminal instance.** Moving a tab between panels retains its mounted terminal, scrollback, selection, and search state.
 - **Theme previews update terminals and independent running-status colours.** Unsaved palettes reach existing service and drawer terminals, closing the preview restores saved colours, and accent changes no longer clear and replay terminal output.
+- **Global log search skips unchanged buffers.** Per-service revisions invalidate cached text and matches only when output or privacy settings change, reducing idle search work and repeated text preparation.
 - **Loading project aliases can no longer erase saved profiles and preferences.** Alias synchronization waits for persisted settings to load instead of writing empty startup defaults when services load first.
 - **Panel tab labels now use their full visual height as a click target.** The spacing below a service name is part of the tab button instead of an inert wrapper area.
 - **Stream mode keeps web addresses usable without exposing sensitive identifiers.** Generic path masking skips HTTP and WebSocket URL spans, while sensitive project and service names are still redacted inside URL paths, queries, and fragments.
 - **Stream mode path redaction remains compatible with older macOS WebViews.** Absolute-path masking no longer depends on `Array.prototype.at`, which older WKWebView versions may not provide.
 - **Newly sensitive services now redact open terminal panes immediately.** Changing a service's sensitivity invalidates its rendered privacy snapshot so the banner, working directory, command, and existing scrollback cannot remain visible in Stream mode.
 - **Sensitive project and service toggles now respond immediately.** Privacy curation checkboxes and counts update while their changes are persisted, then reconcile with the saved state when the operation finishes.
+- **Stream mode now updates already-open panes and redacts external absolute paths.** Sensitive commands, cards, terminal scrollback, live output, Details, and global search use the same fail-closed display transform without remounting running PTYs. Pane contents stay covered until every privacy snapshot finishes.
 - **Ctrl+C now interrupts the focused PTY service.** Terminal selection no longer prevents the interrupt from reaching the child, while explicit platform copy shortcuts remain available.
 - **Git status checks no longer flash console windows on Windows.** Repository discovery, refresh, and branch operations now launch Git without creating visible child terminals.
 - **Git discovery now works with Finder-launched macOS builds.** Git and branch-switch hooks inherit the recovered login-shell `PATH`, including Homebrew and version-manager locations, and an unavailable Git executable produces an explanatory error instead of being mistaken for a non-repository.
 - **Repository refresh no longer appears unresponsive or causes periodic lag.** Valid refreshes coalesce while one is running without reusing stale React Strict Mode requests, inspect each repository once, show a spinning refresh icon while loading, and avoid unnecessary background polling.
+- **Search fields reserve space for their icons.** Service and Settings text no longer renders underneath the magnifying glass.
 - **Git branches stay bound to the selected repository.** Stale asynchronous checks can no longer replace another service's branch list, post-switch refreshes cannot reuse a pre-switch snapshot, branch switches verify the repository they were opened for, and ignored nested project folders no longer inherit an unrelated parent repository.
 - **Removed services no longer leave broken workspace panels.** In-app deletion and live `services.json` edits remove stale tabs, repair active-tab and focus state, and prevent invalid panel layouts from being persisted again.
 - **Rapid settings actions no longer overwrite one another.** Complete settings snapshots are serialized and optimistic state advances immediately, so consecutive project pin and privacy actions build on the latest pending change.

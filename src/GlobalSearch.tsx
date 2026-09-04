@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ServiceConfig } from "./types";
-import { displayServiceName, redactSensitive } from "./types";
-
 import { groupKey } from "./appUtils";
+import { LogSearchCache, type ServiceHits } from "./logSearchCache";
+import { fuzzySearchPattern } from "./search";
 
 type Props = {
   services: ServiceConfig[];
   /** Snapshot of per-service log chunks (logsRef.current). */
   logs: Record<string, string[]>;
+  logRevisions: Record<string, number>;
   /** When true, sensitive services show a masked name (stream mode). */
   streamMode: boolean;
   projectNameAliases: Record<string, string>;
@@ -16,33 +17,26 @@ type Props = {
   onClose: () => void;
 };
 
-type Hit = { lineNumber: number; line: string };
-type ServiceHits = {
-  serviceId: string;
-  serviceName: string;
-  hits: Hit[];
-  total: number;
-};
-
-// Strip CSI escape sequences (colors, cursor moves) so searches and the
-// rendered results work on plain text.
-const ANSI = /\[[0-9;]*[A-Za-z]/g;
 const MIN_QUERY = 2;
-const MAX_HITS_PER_SERVICE = 25;
-
-// How often to re-scan the live log buffers while the modal is open.
-// The `logs` prop is the same Record reference every render (it's
-// `logsRef.current`), so React can't tell us when new chunks arrive — we
-// poll instead. 250ms feels responsive without burning CPU on idle apps.
+// Poll inexpensive revision counters; only changed buffers are searched again.
 const LIVE_REFRESH_MS = 250;
 
-export function GlobalSearch({ services, logs, streamMode, projectNameAliases, onJump, onClose }: Props) {
+export function GlobalSearch({
+  services,
+  logs,
+  logRevisions,
+  streamMode,
+  projectNameAliases,
+  onJump,
+  onClose
+}: Props) {
   const [query, setQuery] = useState("");
   // Tick bumps on a timer while a query is active. It's a useMemo dep below,
   // which is what gives global search its "live" feel — new chunks streamed
   // into logsRef during a long-running service become searchable without
   // the user having to retype.
   const [tick, setTick] = useState(0);
+  const cacheRef = useRef(new LogSearchCache());
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -51,50 +45,37 @@ export function GlobalSearch({ services, logs, streamMode, projectNameAliases, o
 
   useEffect(() => {
     if (query.trim().length < MIN_QUERY) return;
-    const id = window.setInterval(() => setTick((t) => t + 1), LIVE_REFRESH_MS);
+    let revisions = services.map((service) => logRevisions[service.id] ?? 0);
+    const id = window.setInterval(() => {
+      const next = services.map((service) => logRevisions[service.id] ?? 0);
+      if (next.some((revision, index) => revision !== revisions[index])) {
+        revisions = next;
+        setTick((value) => value + 1);
+      }
+    }, LIVE_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [query]);
+  }, [query, services, logRevisions]);
 
   const results = useMemo<ServiceHits[]>(() => {
     // `tick` is intentionally read here so the memo invalidates on each
     // poll — even though we don't use its value, listing it as a dep is
     // what couples the search to the polling timer.
     void tick;
-    const needle = query.trim().toLowerCase();
+    const needle = query.trim();
     if (needle.length < MIN_QUERY) {
       return [];
     }
 
     const out: ServiceHits[] = [];
+    cacheRef.current.retain(new Set(services.map((service) => service.id)));
     for (const service of services) {
-      const chunks = logs[service.id];
-      if (!chunks || chunks.length === 0) {
-        continue;
-      }
-
-      const lines = redactSensitive(chunks.join(""), service, projectNameAliases[groupKey(service)] ?? "", streamMode).replace(ANSI, "").split(/\r?\n/);
-      const hits: Hit[] = [];
-      let total = 0;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].toLowerCase().includes(needle)) {
-          total += 1;
-          if (hits.length < MAX_HITS_PER_SERVICE) {
-            hits.push({ lineNumber: i + 1, line: lines[i] });
-          }
-        }
-      }
-
-      if (total > 0) {
-        out.push({
-          serviceId: service.id,
-          serviceName: displayServiceName(service, streamMode),
-          hits,
-          total
-        });
-      }
+      const result = cacheRef.current.search(service, logs[service.id] ?? [],
+        logRevisions[service.id] ?? 0, needle,
+        projectNameAliases[groupKey(service)] ?? "", streamMode);
+      if (result.total > 0) out.push(result);
     }
     return out;
-  }, [query, services, logs, tick, streamMode, projectNameAliases]);
+  }, [query, services, logs, logRevisions, tick, streamMode, projectNameAliases]);
 
   const totalMatches = results.reduce((sum, result) => sum + result.total, 0);
   const trimmed = query.trim();
@@ -167,34 +148,30 @@ export function GlobalSearch({ services, logs, streamMode, projectNameAliases, o
   );
 }
 
-// Wrap case-insensitive matches of `query` in <mark> for display.
+// Highlight the same ordered-character span used by the shared fuzzy matcher.
 function highlight(line: string, query: string): ReactNode {
-  if (!query) {
-    return line;
-  }
+  const pattern = fuzzySearchPattern(query);
+  if (!pattern) return line;
 
-  const haystack = line.toLowerCase();
-  const needle = query.toLowerCase();
+  const matcher = new RegExp(pattern, "gi");
   const parts: ReactNode[] = [];
   let cursor = 0;
   let key = 0;
 
-  while (cursor < line.length) {
-    const index = haystack.indexOf(needle, cursor);
-    if (index === -1) {
-      parts.push(line.slice(cursor));
-      break;
-    }
+  for (const match of line.matchAll(matcher)) {
+    const index = match.index ?? cursor;
     if (index > cursor) {
       parts.push(line.slice(cursor, index));
     }
     parts.push(
       <mark key={key++} className="rounded-sm bg-amber-400/30 text-amber-100">
-        {line.slice(index, index + needle.length)}
+        {match[0]}
       </mark>
     );
-    cursor = index + needle.length;
+    cursor = index + match[0].length;
   }
 
-  return parts;
+  if (cursor < line.length) parts.push(line.slice(cursor));
+
+  return parts.length > 0 ? parts : line;
 }

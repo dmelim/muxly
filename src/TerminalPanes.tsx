@@ -14,6 +14,7 @@ import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } fro
 import { Tooltip } from "./Tooltip";
 import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
+import { fuzzySearchPattern } from "./search";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -1041,6 +1042,7 @@ function PaneSearchBar({
   // "search hit" rather than blending into the rest of the UI chrome.
   const searchOptions = {
     caseSensitive: false,
+    regex: true,
     decorations: {
       matchBackground: "#fbbf2433",
       matchBorder: "#fbbf2499",
@@ -1096,7 +1098,7 @@ function PaneSearchBar({
     // boundary below the root. Contain + log it instead, so a bad search
     // degrades to "no results" rather than taking down the UI.
     try {
-      searchAddon.findNext(query, { ...searchOptions, incremental: true });
+      searchAddon.findNext(fuzzySearchPattern(query), { ...searchOptions, incremental: true });
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error("[search] findNext (incremental) threw for query", JSON.stringify(query), error);
@@ -1108,7 +1110,7 @@ function PaneSearchBar({
   const findNext = useCallback(() => {
     if (!query) return;
     try {
-      searchAddon.findNext(query, searchOptions);
+      searchAddon.findNext(fuzzySearchPattern(query), searchOptions);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error("[search] findNext threw for query", JSON.stringify(query), error);
@@ -1118,7 +1120,7 @@ function PaneSearchBar({
   const findPrev = useCallback(() => {
     if (!query) return;
     try {
-      searchAddon.findPrevious(query, searchOptions);
+      searchAddon.findPrevious(fuzzySearchPattern(query), searchOptions);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error("[search] findPrevious threw for query", JSON.stringify(query), error);

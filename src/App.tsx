@@ -32,6 +32,7 @@ import { DetailsSidebar } from "./DetailsSidebar";
 import { ServicesSidebar } from "./ServicesSidebar";
 import { describeExitCode, shortExitCode } from "./exitCodes";
 import { applyTheme, resolveTheme, type MuxlyTheme } from "./theme";
+import { fuzzySearchMatches } from "./search";
 import type { EditTarget, StartHealth } from "./appTypes";
 import {
   AUTO_RESTART_DELAY_MS,
@@ -135,6 +136,7 @@ export function App() {
   const [runtimeWarningOpen, setRuntimeWarningOpen] = useState(false);
   // One xterm terminal per open pane, keyed by service id.
   const terminalsRef = useRef<Map<string, Terminal>>(new Map());
+  const logRevisionsRef = useRef<Record<string, number>>({});
   const logsRef = useRef<Record<string, string[]>>({});
   // Live terminal writes are coalesced to one flush per animation frame. A
   // single PTY read can arrive split across frames — a readline backspace
@@ -214,6 +216,7 @@ export function App() {
   >({});
   const [history, setHistory] = useState<Record<string, ServiceHistory>>({});
   const [searchOpen, setSearchOpen] = useState(false);
+  const [serviceQuery, setServiceQuery] = useState("");
   // Service id whose in-pane find bar is currently shown — null when closed.
   // Only one pane shows the bar at a time; switching focus or closing the
   // pane clears it.
@@ -362,13 +365,25 @@ export function App() {
     () => ensureProjectAliases(groupNames, settings),
     [groupNames, settings]
   );
+  const searchedServices = useMemo(() => {
+    const query = serviceQuery.trim();
+    if (!query) return visibleServices;
+    return visibleServices.filter((service) => {
+      const alias = projectNameAliases[groupKey(service)] ?? "";
+      const values = streamMode && service.sensitive
+        ? [displayServiceName(service, true), alias, redactSensitive(formatCommand(service), service, alias, true)]
+        : [service.name, service.id, service.group ?? "", service.program, ...service.args];
+      return fuzzySearchMatches(query, values);
+    });
+  }, [projectNameAliases, serviceQuery, streamMode, visibleServices]);
   const groupedServices = useMemo(
-    () => groupServices(visibleServices).sort(
-      ([leftGroup], [rightGroup]) =>
-        Number(Boolean(settings.pinnedProjectNames?.[rightGroup])) -
-        Number(Boolean(settings.pinnedProjectNames?.[leftGroup]))
-    ),
-    [visibleServices, settings.pinnedProjectNames]
+    () =>
+      groupServices(searchedServices).sort(
+        ([leftGroup], [rightGroup]) =>
+          Number(Boolean(settings.pinnedProjectNames?.[rightGroup])) -
+          Number(Boolean(settings.pinnedProjectNames?.[leftGroup]))
+      ),
+    [searchedServices, settings.pinnedProjectNames]
   );
   // Mirror into refs so the once-mounted output closure can redact paths with
   // the current values without re-subscribing on every toggle (same pattern as
@@ -1495,6 +1510,7 @@ export function App() {
     }
 
     logsRef.current[serviceId] = chunks;
+    logRevisionsRef.current[serviceId] = (logRevisionsRef.current[serviceId] ?? 0) + 1;
     // The buffer above keeps raw output (the source of truth); redaction is a
     // display-only transform applied to the live write, so toggling stream mode
     // off and reopening the pane shows real paths again. Mirrors how name
@@ -2157,6 +2173,7 @@ export function App() {
   // Drop one service's buffered log and wipe its terminal (if a pane is open).
   const clearLog = useCallback((serviceId: string) => {
     logsRef.current[serviceId] = [];
+    logRevisionsRef.current[serviceId] = (logRevisionsRef.current[serviceId] ?? 0) + 1;
     // Force the next appended chunk to be treated as the start of a fresh
     // line so it picks up a timestamp even mid-stream.
     lineStateRef.current[serviceId] = true;
@@ -2593,6 +2610,8 @@ export function App() {
         setActiveProfile={setActiveProfile}
         runningElsewhere={runningElsewhere}
         profileActivity={profileActivity}
+        serviceQuery={serviceQuery}
+        setServiceQuery={setServiceQuery}
         dropIndicator={dropIndicator}
         dragId={dragId}
         dragIdRef={dragIdRef}
@@ -2856,6 +2875,7 @@ export function App() {
       <GlobalSearch
         services={services}
         logs={logsRef.current}
+        logRevisions={logRevisionsRef.current}
         streamMode={streamMode}
         projectNameAliases={projectNameAliases}
         onJump={jumpToSearchResult}

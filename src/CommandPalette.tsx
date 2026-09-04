@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fuzzySearchScore } from "./search";
 
 /** A single palette action. `run` is invoked on selection; the palette closes
  * itself afterwards. `keywords` widen what the fuzzy filter matches. */
@@ -33,13 +34,18 @@ export function CommandPalette({ commands, onClose }: Props) {
   }, []);
 
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return commands;
-    return commands.filter((command) =>
-      `${command.title} ${command.subtitle ?? ""} ${command.keywords ?? ""}`
-        .toLowerCase()
-        .includes(needle)
-    );
+    if (!query.trim()) return commands;
+    return commands
+      .flatMap((command, index) => {
+        const score = fuzzySearchScore(query, [
+          command.title,
+          command.subtitle,
+          command.keywords
+        ]);
+        return score === null ? [] : [{ command, index, score }];
+      })
+      .sort((left, right) => right.score - left.score || left.index - right.index)
+      .map(({ command }) => command);
   }, [commands, query]);
 
   // Keep the selection in range as the filtered list shrinks/grows.
