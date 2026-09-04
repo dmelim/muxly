@@ -1,7 +1,7 @@
 ﻿import type { MutableRefObject } from "react";
 import type { AppSettings, Profile, ServiceConfig, ServiceStatus } from "./types";
 import type { EditTarget } from "./appTypes";
-import { formatCommand } from "./types";
+import { formatCommand, redactSensitive } from "./types";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { ServiceIconBadge } from "./ServiceIconBadge";
@@ -34,6 +34,8 @@ type Props = {
   statuses: Record<string, ServiceStatus>;
   collapsedGroups: Record<string, boolean>;
   settings: AppSettings;
+  streamMode: boolean;
+  projectNameAliases: Record<string, string>;
   // Managed profiles + the active selection. The switcher filters the list to
   // the active profile (plus unassigned services); null = "All profiles".
   profiles: Profile[];
@@ -88,6 +90,8 @@ export function ServicesSidebar({
   statuses,
   collapsedGroups,
   settings,
+  streamMode,
+  projectNameAliases,
   profiles,
   activeProfile,
   setActiveProfile,
@@ -495,7 +499,12 @@ export function ServicesSidebar({
                           ) : null}
                         </span>
                         <span className="mt-1 block truncate pl-10 font-mono text-xs text-zinc-500">
-                          {formatCommand(service)}
+                          {redactSensitive(
+                            formatCommand(service),
+                            service,
+                            projectNameAliases[service.group?.trim() || "Ungrouped"] ?? "",
+                            streamMode
+                          )}
                         </span>
                         {showConflict ? (
                           <span className="mt-1 block pl-10 text-[11px] text-amber-300">

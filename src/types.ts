@@ -226,6 +226,28 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Web URLs are operational output and must stay usable in Stream mode. Generic
+// absolute-path detection runs only outside URL spans so it cannot corrupt an
+// address. Explicit sensitive-name replacement still runs across the complete
+// string, including URL paths, queries, and fragments.
+function transformOutsideWebUrls(
+  text: string,
+  transform: (plainText: string) => string
+): string {
+  const webUrl = /\b(?:https?|wss?):\/\/[^\s\x1b]+/gi;
+  let result = "";
+  let cursor = 0;
+
+  for (const match of text.matchAll(webUrl)) {
+    const index = match.index ?? cursor;
+    result += transform(text.slice(cursor, index));
+    result += match[0];
+    cursor = index + match[0].length;
+  }
+
+  return result + transform(text.slice(cursor));
+}
+
 // Names short enough that aliasing them risks matching unrelated substrings in
 // log output (e.g. a 2-letter project name inside ordinary words) are left
 // alone — the path redaction still covers their directory.
@@ -251,7 +273,12 @@ export function redactSensitive(
   alias: string,
   streamMode: boolean
 ): string {
-  if (!streamMode || !service.sensitive || !alias) return text;
+  if (!streamMode || !service.sensitive) return text;
+
+  // Privacy must not depend on alias generation having completed. A missing
+  // alias can happen briefly while settings/services are loading, and showing
+  // the raw value during that gap would make Stream mode fail open.
+  const safeAlias = alias.trim() || "private-project";
 
   const pairs: Array<{ needle: string; replacement: string }> = [];
 
@@ -267,7 +294,7 @@ export function redactSensitive(
       for (let depth = parsed.segments.length; depth >= 1; depth -= 1) {
         pairs.push({
           needle: parsed.base + sep + parsed.segments.slice(0, depth).join(sep),
-          replacement: root + alias
+          replacement: root + safeAlias
         });
       }
     }
@@ -281,7 +308,7 @@ export function redactSensitive(
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    pairs.push({ needle: name, replacement: alias });
+    pairs.push({ needle: name, replacement: safeAlias });
   }
 
   // Longest needles first so a child path keeps its tail, a replaced prefix is
@@ -293,5 +320,33 @@ export function redactSensitive(
   for (const { needle, replacement } of pairs) {
     out = out.replace(new RegExp(escapeRegExp(needle), "gi"), () => replacement);
   }
+
+  // Commands can live outside the service cwd (NVM, Homebrew, Python venvs,
+  // user-local package managers). Collapse every remaining absolute path to a
+  // stable private root while keeping the basename useful. Quoted paths are
+  // handled first so spaces stay inside the match; unquoted forms cover normal
+  // command output in both Windows separator styles and POSIX syntax.
+  const maskPath = (path: string) => {
+    const parsedPath = parseAbsolutePath(path);
+    if (!parsedPath || parsedPath.segments.length === 0) return path;
+    const separator = path.includes("\\") ? "\\" : "/";
+    // Indexed access keeps Stream mode working on older WKWebView versions
+    // that predate Array.prototype.at.
+    const basename = parsedPath.segments[parsedPath.segments.length - 1] ?? "";
+    const root = parsedPath.base ? `${parsedPath.base}${separator}` : separator;
+    return `${root}${safeAlias}${basename && basename !== safeAlias ? `${separator}${basename}` : ""}`;
+  };
+
+  // Match quoted and unquoted paths in one pass: a quoted filename may contain
+  // spaces, so processing the masked result again would split that filename.
+  out = transformOutsideWebUrls(out, (plainText) => plainText.replace(
+    /(["'])([A-Za-z]:[\\/][^"'\r\n]+|\/[^"'\r\n]+)\1|([A-Za-z]:[\\/][^\s"'<>|\x1b]+)|(^|[\s=(])(\/(?!\/)[^\s"'<>|\x1b]+)/gm,
+    (_match, quote, quotedPath, windowsPath, prefix, posixPath) => {
+      if (quotedPath) return `${quote}${maskPath(quotedPath)}${quote}`;
+      if (windowsPath) return maskPath(windowsPath);
+      return `${prefix}${maskPath(posixPath)}`;
+    }
+  ));
+
   return out;
 }

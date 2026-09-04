@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ServiceConfig } from "./types";
-import { displayServiceName } from "./types";
+import { displayServiceName, redactSensitive } from "./types";
+
+import { groupKey } from "./appUtils";
 
 type Props = {
   services: ServiceConfig[];
@@ -9,6 +11,7 @@ type Props = {
   logs: Record<string, string[]>;
   /** When true, sensitive services show a masked name (stream mode). */
   streamMode: boolean;
+  projectNameAliases: Record<string, string>;
   onJump: (serviceId: string, query: string) => void;
   onClose: () => void;
 };
@@ -33,7 +36,7 @@ const MAX_HITS_PER_SERVICE = 25;
 // poll instead. 250ms feels responsive without burning CPU on idle apps.
 const LIVE_REFRESH_MS = 250;
 
-export function GlobalSearch({ services, logs, streamMode, onJump, onClose }: Props) {
+export function GlobalSearch({ services, logs, streamMode, projectNameAliases, onJump, onClose }: Props) {
   const [query, setQuery] = useState("");
   // Tick bumps on a timer while a query is active. It's a useMemo dep below,
   // which is what gives global search its "live" feel — new chunks streamed
@@ -69,7 +72,7 @@ export function GlobalSearch({ services, logs, streamMode, onJump, onClose }: Pr
         continue;
       }
 
-      const lines = chunks.join("").replace(ANSI, "").split(/\r?\n/);
+      const lines = redactSensitive(chunks.join(""), service, projectNameAliases[groupKey(service)] ?? "", streamMode).replace(ANSI, "").split(/\r?\n/);
       const hits: Hit[] = [];
       let total = 0;
       for (let i = 0; i < lines.length; i++) {
@@ -91,7 +94,7 @@ export function GlobalSearch({ services, logs, streamMode, onJump, onClose }: Pr
       }
     }
     return out;
-  }, [query, services, logs, tick, streamMode]);
+  }, [query, services, logs, tick, streamMode, projectNameAliases]);
 
   const totalMatches = results.reduce((sum, result) => sum + result.total, 0);
   const trimmed = query.trim();

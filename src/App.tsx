@@ -1921,6 +1921,30 @@ export function App() {
     [services, reloadServices]
   );
 
+  const markFocusedProjectSensitive = useCallback(
+    async (service: ServiceConfig) => {
+      const groupName = groupKey(service);
+      const grouped = groupName !== "Ungrouped";
+      const serviceIds = grouped
+        ? servicesRef.current
+            .filter((candidate) => groupKey(candidate) === groupName)
+            .map((candidate) => candidate.id)
+        : [service.id];
+      await setServicesSensitive(serviceIds, true);
+      if (grouped) {
+        const current = settingsRef.current;
+        await persistSettings({
+          ...current,
+          sensitiveProjectNames: { ...current.sensitiveProjectNames, [groupName]: true }
+        });
+        setManagerMessage(`Marked ${groupName} sensitive`);
+      } else {
+        setManagerMessage(`Marked ${service.name} sensitive`);
+      }
+    },
+    [persistSettings, setServicesSensitive]
+  );
+
   // Delete a profile from Settings: reassign its services to unassigned (never
   // delete them), then drop it from the registry and clear the active filter if
   // it pointed here. Done in two persists — services first, settings second —
@@ -2152,6 +2176,37 @@ export function App() {
     if (selected) clearLog(selected.id);
   }, [selected, clearLog]);
 
+  const preparePrivacySnapshot = useCallback((serviceId: string) => {
+    pendingWritesRef.current.delete(serviceId);
+    const pending = pendingPtyCarriageReturnsRef.current.get(serviceId);
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      pendingPtyCarriageReturnsRef.current.delete(serviceId);
+    }
+  }, []);
+
+  const toggleStreamMode = useCallback(() => {
+    const next = !streamModeRef.current;
+
+    // Anything waiting for the next animation frame was transformed for the
+    // previous privacy state. The raw copy already lives in logsRef, so discard
+    // those display writes and let each pane rebuild from the raw snapshot.
+    if (flushRafRef.current !== 0) {
+      cancelAnimationFrame(flushRafRef.current);
+      flushRafRef.current = 0;
+    }
+    pendingWritesRef.current.clear();
+    for (const pending of pendingPtyCarriageReturnsRef.current.values()) {
+      window.clearTimeout(pending.timer);
+    }
+    pendingPtyCarriageReturnsRef.current.clear();
+
+    // Update the long-lived output listener before scheduling React so output
+    // arriving during the transition is transformed for the new mode.
+    streamModeRef.current = next;
+    setStreamMode(next);
+  }, []);
+
   const toggleProjectNamePrivacy = useCallback((groupName: string) => {
     const current = settingsRef.current;
     const hidden = !current.hiddenProjectNames[groupName];
@@ -2213,7 +2268,7 @@ export function App() {
               } so the window is safe to screen-share`,
         badge: streamMode ? "On" : "Off",
         keywords: "stream privacy mask hide sensitive screen share present demo record",
-        run: () => setStreamMode((on) => !on)
+        run: toggleStreamMode
       },
       {
         id: "new-service",
@@ -2260,7 +2315,7 @@ export function App() {
         run: () => setRightSidebarOpen((open) => !open)
       }
     ],
-    [streamMode, sensitiveCount, terminalOpen, settingsOpen, leftSidebarOpen, rightSidebarOpen]
+    [streamMode, sensitiveCount, terminalOpen, settingsOpen, leftSidebarOpen, rightSidebarOpen, toggleStreamMode]
   );
 
   // Global keyboard shortcuts. Registered in the capture phase so they fire
@@ -2324,6 +2379,19 @@ export function App() {
           shortcutTarget.tagName === "TEXTAREA" ||
           shortcutTarget.isContentEditable) &&
         !shortcutTarget.classList.contains("xterm-helper-textarea");
+
+      // Ctrl/Cmd + Shift + S marks the focused project sensitive. It is
+      // intentionally one-way so an accidental repeat cannot expose it.
+      if (event.shiftKey && event.key.toLowerCase() === "s") {
+        if (!shortcutInForm && selected && paneIds.includes(selected.id)) {
+          event.preventDefault();
+          event.stopPropagation();
+          void markFocusedProjectSensitive(selected).catch((error) => {
+            setManagerMessage(`Could not mark project sensitive: ${errorMessage(error)}`);
+          });
+        }
+        return;
+      }
 
       // Ctrl/Cmd + Shift + Down cycles profiles in visible order, including
       // All profiles, and wraps at the end.
@@ -2466,6 +2534,7 @@ export function App() {
     commandOpen,
     profilePromptOpen
     ,cycleProfile
+    ,markFocusedProjectSensitive
   ]);
 
   // Suppress the WebView's native context menu on non-editable app chrome.
@@ -2517,6 +2586,8 @@ export function App() {
         statuses={statuses}
         collapsedGroups={collapsedGroups}
         settings={settings}
+        streamMode={streamMode}
+        projectNameAliases={projectNameAliases}
         profiles={settings.profiles}
         activeProfile={activeProfile}
         setActiveProfile={setActiveProfile}
@@ -2669,6 +2740,7 @@ export function App() {
             tabMode={settings.openServicesInTabs ?? true}
             panels={workspacePanels}
             theme={resolvedTheme}
+            onPrivacySnapshotStart={preparePrivacySnapshot}
             awaitingOutput={awaitingOutput}
             startHealth={startHealth}
             terminalsRef={terminalsRef}
@@ -2785,6 +2857,7 @@ export function App() {
         services={services}
         logs={logsRef.current}
         streamMode={streamMode}
+        projectNameAliases={projectNameAliases}
         onJump={jumpToSearchResult}
         onClose={() => setSearchOpen(false)}
       />

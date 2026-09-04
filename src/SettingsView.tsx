@@ -73,6 +73,12 @@ export function SettingsView({
   const [maxLogChunks, setMaxLogChunks] = useState(String(settings.maxLogChunks));
   const [paneGridColumns, setPaneGridColumns] = useState(String(settings.paneGridColumns));
   const [touchedFields, setTouchedFields] = useState<TouchedFields>(UNTOUCHED_FIELDS);
+  const [pendingSensitiveServices, setPendingSensitiveServices] = useState<
+    Record<string, boolean>
+  >({});
+  const [pendingSensitiveProjects, setPendingSensitiveProjects] = useState<
+    Record<string, boolean>
+  >({});
 
   // Keep untouched form fields aligned with async settings loads, while still
   // preserving in-progress edits when other settings (like privacy) are saved.
@@ -184,10 +190,10 @@ export function SettingsView({
   };
 
   // Number of services currently flagged sensitive — drives the summary line.
-  const sensitiveCount = useMemo(
-    () => services.filter((service) => service.sensitive).length,
-    [services]
-  );
+  const isServiceSensitive = (service: ServiceConfig) =>
+    pendingSensitiveServices[service.id] ?? service.sensitive ?? false;
+
+  const sensitiveCount = services.filter(isServiceSensitive).length;
 
   // Services grouped by project, in the same order the sidebar renders them,
   // so the curation tree mirrors the sidebar's layout.
@@ -210,11 +216,20 @@ export function SettingsView({
   const handleSensitiveToggle = async (serviceId: string, nextSensitive: boolean) => {
     setSaveMessage(null);
     setSaving(true);
+    setPendingSensitiveServices((current) => ({
+      ...current,
+      [serviceId]: nextSensitive
+    }));
     try {
       await onSetServicesSensitive([serviceId], nextSensitive);
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : String(error));
     } finally {
+      setPendingSensitiveServices((current) => {
+        const next = { ...current };
+        delete next[serviceId];
+        return next;
+      });
       setSaving(false);
     }
   };
@@ -231,6 +246,15 @@ export function SettingsView({
   ) => {
     setSaveMessage(null);
     setSaving(true);
+    setPendingSensitiveProjects((current) => ({
+      ...current,
+      [groupName]: nextSensitive
+    }));
+    setPendingSensitiveServices((current) => {
+      const next = { ...current };
+      for (const serviceId of serviceIds) next[serviceId] = nextSensitive;
+      return next;
+    });
     try {
       await onSetServicesSensitive(serviceIds, nextSensitive);
       await onSave({
@@ -243,6 +267,16 @@ export function SettingsView({
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : String(error));
     } finally {
+      setPendingSensitiveProjects((current) => {
+        const next = { ...current };
+        delete next[groupName];
+        return next;
+      });
+      setPendingSensitiveServices((current) => {
+        const next = { ...current };
+        for (const serviceId of serviceIds) delete next[serviceId];
+        return next;
+      });
       setSaving(false);
     }
   };
@@ -508,10 +542,12 @@ export function SettingsView({
                   {groupedServices.map(([groupName, groupList]) => {
                     const ids = groupList.map((service) => service.id);
                     const sensitiveInGroup = groupList.filter(
-                      (service) => service.sensitive
+                      isServiceSensitive
                     ).length;
                     const projectSensitive =
-                      settings.sensitiveProjectNames[groupName] ?? false;
+                      pendingSensitiveProjects[groupName] ??
+                      settings.sensitiveProjectNames[groupName] ??
+                      false;
                     // Mirror the live display: a sensitive project shows its
                     // alias while masked; a sensitive service shows its masked
                     // form. The reveal toggle flips `maskNames` off to edit.
@@ -551,7 +587,7 @@ export function SettingsView({
                               <label className="flex cursor-pointer items-center gap-3 py-2 pl-9 pr-3 transition hover:bg-white/5">
                                 <input
                                   type="checkbox"
-                                  checked={service.sensitive ?? false}
+                                  checked={isServiceSensitive(service)}
                                   disabled={saving}
                                   onChange={(event) =>
                                     void handleSensitiveToggle(

@@ -21,9 +21,31 @@ async function moduleUrl(url) {
   return result;
 }
 const load = async (file) => import(await moduleUrl(new URL(`../src/${file}.ts`, import.meta.url)));
+const { redactSensitive } = await load("types");
 const { DEFAULT_THEME, applyTheme, xtermTheme } = await load("theme");
 const service = { id: "web", name: "SecretApp", group: "SecretGroup", cwd: "/work/project",
   program: "node", args: [], sensitive: true };
+
+test("POSIX redaction keeps basenames at different offsets and URL spans", () => {
+  for (const prefix of ["", "command: ", "path=", "("]) {
+    assert.equal(redactSensitive(`${prefix}/opt/tools/node`, service, "masked", true),
+      `${prefix}/masked/node`);
+  }
+  const url = "http://localhost:3000/assets/icon.svg";
+  assert.equal(redactSensitive(url, service, "masked", true), url);
+  assert.equal(redactSensitive('/opt/tools/node', service, "", true), "/private-project/node");
+});
+
+test("quoted and already-redacted paths retain complete filenames", () => {
+  assert.equal(redactSensitive('"/opt/private/my tool"', service, "masked", true),
+    '"/masked/my tool"');
+  assert.equal(redactSensitive('/masked/node', service, "masked", true), '/masked/node');
+  assert.equal(redactSensitive('/work/private/deep/node', service, "masked", true), '/masked/node');
+  assert.equal(redactSensitive('/work/project', service, "masked", true), '/masked');
+  assert.equal(redactSensitive('C:\\Users\\private\\node.exe', service, "masked", true),
+    'C:\\masked\\node.exe');
+  assert.equal(redactSensitive('/opt/tools/node', service, "masked", false), '/opt/tools/node');
+});
 
 test("running status is independent of accent and terminals share the palette", () => {
   const properties = new Map();

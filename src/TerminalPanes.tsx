@@ -29,6 +29,14 @@ const statusDots: Record<ServiceStatus, string> = {
 // macOS — so the close-pane tooltip reads naturally on whichever platform.
 const MOD_KEY = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
 
+function privacySnapshotKey(
+  service: ServiceConfig,
+  streamMode: boolean,
+  alias: string
+) {
+  return `${streamMode}:${service.sensitive ?? false}:${alias}:${service.group ?? ""}:${service.name}:${service.cwd}:${formatCommand(service)}`;
+}
+
 const TERMINAL_OPTIONS = {
   // The in-pane SearchAddon draws match highlights with registerDecoration /
   // registerMarker, which xterm classifies as proposed API and refuses to run
@@ -62,6 +70,7 @@ type TerminalPanesProps = {
   onTabFocus: (panelId: string, serviceId: string) => void;
   onTabMove: (serviceId: string, targetPanelId: string, targetIndex: number) => void;
   theme: MuxlyTheme;
+  onPrivacySnapshotStart: (serviceId: string) => void;
   /** Per-service flag: a PTY run has started but not yet produced real output.
    * Drives the in-pane "waiting for output…" affordance. */
   awaitingOutput: Record<string, boolean>;
@@ -125,6 +134,7 @@ export function TerminalPanes({
   onTabFocus,
   onTabMove,
   theme,
+  onPrivacySnapshotStart,
   onClose,
   onStart,
   onStop,
@@ -136,10 +146,21 @@ export function TerminalPanes({
   onReleaseAdopted
 }: TerminalPanesProps) {
   const panelHostsRef = useRef(new Map<string, HTMLDivElement>());
+  const [renderedPrivacy, setRenderedPrivacy] = useState<Record<string, string>>({});
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
   const [draggedTabSourcePanelId, setDraggedTabSourcePanelId] = useState<string | null>(null);
   const draggedTabIdRef = useRef<string | null>(null);
   const [tabDropTarget, setTabDropTarget] = useState<{ panelId: string; index: number } | null>(null);
+  const privacyReady = paneServices.every((service) => {
+    const alias = projectNameAliases[groupKey(service)] ?? "";
+    return renderedPrivacy[service.id] === privacySnapshotKey(service, streamMode, alias);
+  });
+  const markPrivacyRendered = useCallback((serviceId: string, key: string) => {
+    setRenderedPrivacy((current) =>
+      current[serviceId] === key ? current : { ...current, [serviceId]: key }
+    );
+  }, []);
+
   const showTabDropTarget = useCallback((panelId: string, index: number) => {
     if (!draggedTabIdRef.current) return;
     setTabDropTarget((current) =>
@@ -221,7 +242,7 @@ export function TerminalPanes({
   return (
     <div className="relative min-h-0 flex-1">
       <div
-        className={`grid h-full min-h-0 gap-1.5 p-1.5 `}
+        className={`grid h-full min-h-0 gap-1.5 p-1.5 ${privacyReady ? "" : "invisible"}`}
         style={{
           gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
           gridAutoRows: "minmax(0, 1fr)"
@@ -357,6 +378,8 @@ export function TerminalPanes({
                 terminalsRef={terminalsRef}
                 logsRef={logsRef}
                 theme={theme}
+                onPrivacySnapshotStart={onPrivacySnapshotStart}
+                onPrivacyRendered={markPrivacyRendered}
                 onFocus={() => onFocus(panel.id, service.id)}
                 onClose={() => onClose(panel.id, service.id)}
                 onStart={() => onStart(service)}
@@ -372,6 +395,11 @@ export function TerminalPanes({
           </StablePane>
         );
       })}
+      {!privacyReady ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#101215] text-xs text-zinc-500" role="status">
+          Updating private terminal display…
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -580,6 +608,8 @@ type PaneViewProps = {
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   logsRef: MutableRefObject<Record<string, string[]>>;
   theme: MuxlyTheme;
+  onPrivacySnapshotStart: (serviceId: string) => void;
+  onPrivacyRendered: (serviceId: string, key: string) => void;
   onFocus: () => void;
   onClose: () => void;
   onStart: () => void;
@@ -610,6 +640,8 @@ function PaneView({
   terminalsRef,
   logsRef,
   theme,
+  onPrivacySnapshotStart,
+  onPrivacyRendered,
   onFocus,
   onClose,
   onStart,
@@ -641,6 +673,49 @@ function PaneView({
   // in the banner and replayed scrollback.
   const aliasRef = useRef(alias);
   aliasRef.current = alias;
+  const renderedPrivacyRef = useRef<string | null>(null);
+
+  const renderSnapshot = useCallback(
+    (terminal: Terminal, nextStreamMode: boolean, nextAlias: string, preserveView = false) => {
+      // Pending display writes were transformed for an older snapshot. Their
+      // raw chunks are already in logsRef, so discard them immediately before
+      // taking this atomic copy. New output cannot interleave until this
+      // synchronous snapshot construction returns and will queue after it.
+      onPrivacySnapshotStart(service.id);
+      const buffer = terminal.buffer.active;
+      const distanceFromBottom = preserveView ? buffer.baseY - buffer.viewportY : 0;
+      const selection = preserveView ? terminal.getSelectionPosition() : undefined;
+      const redact = (text: string) =>
+        redactSensitive(text, service, nextAlias, nextStreamMode);
+
+      const key = privacySnapshotKey(service, nextStreamMode, nextAlias);
+      const snapshot = [
+        `\x1b[1;36m${displayServiceName(service, nextStreamMode)}\x1b[0m\r\n`,
+        `${redact(`cwd: ${service.cwd}`)}\r\n`,
+        `${redact(`cmd: ${formatCommand(service)}`)}\r\n`,
+        "\r\n",
+        ...(logsRef.current[service.id] ?? []).map(redact)
+      ].join("");
+
+      if (preserveView) terminal.clear();
+      terminal.write(`${preserveView ? "\x1b[2J\x1b[H" : ""}${snapshot}`, () => {
+        if (preserveView) requestAnimationFrame(() => {
+          terminal.scrollToLine(Math.max(0, terminal.buffer.active.baseY - distanceFromBottom));
+          if (selection) {
+            const length =
+              Math.max(0, selection.end.y - selection.start.y) * terminal.cols +
+              Math.max(0, selection.end.x - selection.start.x);
+            if (length > 0) {
+              terminal.select(selection.start.x, selection.start.y, length);
+            }
+          }
+        });
+        renderedPrivacyRef.current = key;
+        onPrivacyRendered(service.id, key);
+      });
+    },
+    [logsRef, onPrivacyRendered, onPrivacySnapshotStart, service]
+  );
 
   // One terminal per pane, created once. The pane is keyed by service id in the
   // parent, so this component instance maps 1:1 to a service for its lifetime.
@@ -688,6 +763,22 @@ function PaneView({
     // back through the normal output stream, so we don't echo locally.
     let dataDisposable: { dispose: () => void } | null = null;
     if (isPty) {
+      terminal.attachCustomKeyEventHandler((event) => {
+        if (event.type !== "keydown" || event.key.toLowerCase() !== "c") {
+          return true;
+        }
+        if (event.ctrlKey && !event.metaKey && !event.shiftKey) {
+          void invoke("service_pty_write", { serviceId: service.id, data: "\x03" }).catch(() => {
+            /* stopped or session gone */
+          });
+          return false;
+        }
+        if (event.ctrlKey && event.shiftKey && terminal.hasSelection()) {
+          void navigator.clipboard.writeText(terminal.getSelection());
+          return false;
+        }
+        return true;
+      });
       dataDisposable = terminal.onData((data) => {
         void invoke("service_pty_write", { serviceId: service.id, data }).catch(() => {
           /* not running / session gone — nothing useful to surface */
@@ -736,21 +827,7 @@ function PaneView({
       // default 120x30 until we know the pane's real dimensions).
       pushSize();
 
-      // Redact sensitive paths in the banner and replayed scrollback the same
-      // way the live stream does (App.appendLog). Reads the refs so a pane
-      // opened while stream mode is on starts masked.
-      const redact = (text: string) =>
-        redactSensitive(text, service, aliasRef.current, streamModeRef.current);
-
-      terminal.writeln(
-        `\x1b[1;36m${displayServiceName(service, streamModeRef.current)}\x1b[0m`
-      );
-      terminal.writeln(redact(`cwd: ${service.cwd}`));
-      terminal.writeln(redact(`cmd: ${formatCommand(service)}`));
-      terminal.writeln("");
-      for (const chunk of logsRef.current[service.id] ?? []) {
-        terminal.write(redact(chunk));
-      }
+      renderSnapshot(terminal, streamModeRef.current, aliasRef.current);
 
       // Register only after the replay, so live output appends in order.
       terminalsRef.current.set(service.id, terminal);
@@ -780,6 +857,18 @@ function PaneView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Stream mode is a live privacy boundary. Rebuild the display from the raw
+  // ring buffer in the existing xterm instance so running PTYs, pane identity,
+  // search state, focus, and input wiring stay intact while already-rendered
+  // banners and scrollback change immediately in either direction.
+  useLayoutEffect(() => {
+    const terminal = terminalsRef.current.get(service.id);
+    if (!terminal) return;
+    const key = privacySnapshotKey(service, streamMode, alias);
+    if (renderedPrivacyRef.current === key) return;
+    renderSnapshot(terminal, streamMode, alias, true);
+  }, [alias, renderSnapshot, service, streamMode, terminalsRef]);
 
   return (
     <div

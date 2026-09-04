@@ -110,7 +110,10 @@ Claude Code, Codex, and other Agent-Skills-compatible tools.
 | `Ctrl/Cmd + W` | Close the focused pane |
 | `Ctrl/Cmd + F` | Search within the focused pane |
 | `Ctrl/Cmd + Shift + F` | Search all logs |
+| `Ctrl/Cmd + Shift + S` | Mark the focused project sensitive |
 | `Ctrl/Cmd + Shift + ↓` | Cycle profiles |
+| `Ctrl + C` | Interrupt the focused PTY service |
+| `Ctrl + Shift + C` | Copy selected terminal text (Windows/Linux) |
 | `Ctrl/Cmd + 1…9` | Open the Nth service |
 | `Esc` | Close search / forms |
 
