@@ -53,6 +53,18 @@ export function RestartIcon({ className }: IconProps) {
   );
 }
 
+/** Paired clockwise arrows - refresh current data. */
+export function RefreshIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M21 12a9 9 0 0 1-15.2 6.2L3 15" />
+      <path d="M3 21v-6h6" />
+      <path d="M3 12A9 9 0 0 1 18.2 5.8L21 9" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  );
+}
+
 /** Brush sweeping away — Clear log. */
 export function ClearIcon({ className }: IconProps) {
   return (

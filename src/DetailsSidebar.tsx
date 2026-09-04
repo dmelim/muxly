@@ -7,6 +7,7 @@ import { ImportPanel } from "./ImportPanel";
 import { ServiceForm } from "./ServiceForm";
 import { ServiceIconBadge } from "./ServiceIconBadge";
 import { groupKey, statusLabels, timeAgo } from "./appUtils";
+import { GitSection } from "./GitSection";
 import { openInEditor, openInFileManager, openServiceUrl } from "./appActions";
 
 type Props = {
@@ -195,6 +196,13 @@ export function DetailsSidebar({
               </Detail>
               <Detail label="Options">
                 <EnabledOptions service={selected} />
+              </Detail>
+              <Detail label="Repository">
+                <GitSection
+                  key={selected.id}
+                  service={selected}
+                  privateMode={streamMode && Boolean(selected.sensitive)}
+                />
               </Detail>
             </dl>
 

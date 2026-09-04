@@ -34,6 +34,7 @@ section, and tag the commit `vX.Y.Z`.
 
 - **Persistent panel workspaces with panel-owned tabs.** Panels now restore with independent ordered tab strips and active tabs. Normal clicks open tabs in the focused panel, Ctrl/Cmd-click creates a separate panel, and tabs can be reordered or dragged between panels with a muted tab-shaped placement preview and without stopping running services.
 - **User-customizable semantic colour themes.** Muxly now provides Default, Midnight, and High Contrast presets plus validated custom hex overrides, themed keyboard-accessible colour pickers, live preview, grouped resets, WCAG contrast warnings, semantic surface and feedback tokens, and live updates for mounted xterm terminals and generated terminal messages.
+- **Local Git awareness and safe branch switching.** The Details inspector shows repository root, branch, dirty state, and local ahead/behind counts, with non-blocking refresh and clean-worktree-only switching between existing local branches. Stream mode hides branch identities and disables ambiguous switching.
 
 ### Changed
 
@@ -44,10 +45,15 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- **Git errors respect Stream mode.** Repository and branch details in failure messages stay hidden while privacy masking is active.
 - **POSIX path masking preserves filenames.** Absolute paths no longer turn into numeric offsets, and already-masked paths are not processed again.
 - **Theme previews update terminals and independent running-status colours.** Unsaved palettes reach existing service and drawer terminals, closing the preview restores saved colours, and accent changes no longer clear and replay terminal output.
 - **Loading project aliases can no longer erase saved profiles and preferences.** Alias synchronization waits for persisted settings to load instead of writing empty startup defaults when services load first.
 - **Panel tab labels now use their full visual height as a click target.** The spacing below a service name is part of the tab button instead of an inert wrapper area.
+- **Git status checks no longer flash console windows on Windows.** Repository discovery, refresh, and branch operations now launch Git without creating visible child terminals.
+- **Git discovery now works with Finder-launched macOS builds.** Git and branch-switch hooks inherit the recovered login-shell `PATH`, including Homebrew and version-manager locations, and an unavailable Git executable produces an explanatory error instead of being mistaken for a non-repository.
+- **Repository refresh no longer appears unresponsive or causes periodic lag.** Valid refreshes coalesce while one is running without reusing stale React Strict Mode requests, inspect each repository once, show a spinning refresh icon while loading, and avoid unnecessary background polling.
+- **Git branches stay bound to the selected repository.** Stale asynchronous checks can no longer replace another service's branch list, post-switch refreshes cannot reuse a pre-switch snapshot, branch switches verify the repository they were opened for, and ignored nested project folders no longer inherit an unrelated parent repository.
 - **Removed services no longer leave broken workspace panels.** In-app deletion and live `services.json` edits remove stale tabs, repair active-tab and focus state, and prevent invalid panel layouts from being persisted again.
 - **Rapid settings actions no longer overwrite one another.** Complete settings snapshots are serialized and optimistic state advances immediately, so consecutive project pin and privacy actions build on the latest pending change.
 - **Orphaned service profile assignments restore the profile picker.** If the managed profile registry is missing but configured services still reference profile ids, Muxly rebuilds the registry instead of hiding the profile workflow.

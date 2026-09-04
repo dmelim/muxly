@@ -1,6 +1,7 @@
 mod commands;
 mod error;
 mod events;
+mod git;
 mod history;
 mod import;
 mod net;
@@ -18,6 +19,7 @@ use commands::{
     resolve_icon_image, save_services, service_pty_resize, service_pty_write, start_service,
     stop_service,
 };
+use git::GitOperations;
 use history::{get_service_history, HistoryDb};
 use import::scan_importable;
 use open::{open_in_editor, open_in_file_manager, open_url};
@@ -40,6 +42,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(ProcessRegistry::default())
         .manage(PtyRegistry::default())
+        .manage(GitOperations::default())
         .manage(ServicePtyRegistry::default())
         .manage(ServicesConfigDir::default())
         .manage(RuntimeFallbacks::default())
@@ -96,6 +99,8 @@ pub fn run() {
             pty_resize,
             pty_close,
             service_pty_write,
+            git::git_overview,
+            git::git_switch_branch,
             service_pty_resize
         ])
         .build(tauri::generate_context!())
