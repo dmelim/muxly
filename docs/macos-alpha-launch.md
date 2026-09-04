@@ -185,6 +185,10 @@ reproducible.
 - [ ] Build a fresh release DMG with
   `npm run tauri build -- --bundles dmg --ci`; do not reuse the existing
   `0.5.0` artifact. CI mode avoids Finder automation during DMG layout.
+- [ ] Select and test the oldest supported macOS version on Apple Silicon.
+  Once verified, configure the same minimum in Tauri and state it in the
+  landing-page compatibility copy. Do not infer a minimum from a successful
+  build on a newer Mac.
 - [ ] Install from the DMG into Applications and launch it from Finder.
 - [ ] Test a Homebrew-installed command and the version manager used locally.
 - [ ] Test one pipe-mode and one PTY-mode service.

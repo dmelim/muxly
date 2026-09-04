@@ -30,6 +30,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+Target release: `0.5.6`. This section is the release inventory until manual
+verification is complete. The coordinated side-panel design update is deferred
+to `0.5.7` and is not part of this inventory.
+
 ### Added
 
 - **Persistent panel workspaces with panel-owned tabs.** Panels now restore with independent ordered tab strips and active tabs. Normal clicks open tabs in the focused panel, Ctrl/Cmd-click creates a separate panel, and tabs can be reordered or dragged between panels with a muted tab-shaped placement preview and without stopping running services.
