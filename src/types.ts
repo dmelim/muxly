@@ -90,6 +90,7 @@ export type WorkspacePanel = {
   activeTabId: string;
 };
 
+import type { MuxlyTheme, ThemePresetId } from "./theme";
 
 export type AppSettings = {
   editorCommand: string;
@@ -118,6 +119,8 @@ export type AppSettings = {
   workspacePanels?: WorkspacePanel[];
   focusedPanelId?: string | null;
   openServicesInTabs?: boolean;
+  themePreset?: ThemePresetId;
+  theme?: Partial<MuxlyTheme>;
   // Auto-restart guardrails — when a service crashes (status: failed), we
   // re-spawn up to `autoRestartMaxAttempts` times within `autoRestartWindowMs`.
   // A quiet period exceeding the window resets the budget.

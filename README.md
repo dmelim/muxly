@@ -90,8 +90,10 @@ per-OS file location, and a guide for adding services programmatically
 (including from an AI agent).
 
 To let an AI coding agent register projects for you, install the
-**[muxly-register-service](skills/muxly-register-service/)** Agent Skill — it
-works with Claude Code, Codex, and other Agent-Skills-compatible tools.
+**[muxly-register-service](skills/muxly-register-service/)** Agent Skill. To
+create, inspect, apply, or repair semantic themes, use
+**[muxly-manage-themes](skills/muxly-manage-themes/)**. Both skills work with
+Claude Code, Codex, and other Agent-Skills-compatible tools.
 
 ## Keyboard shortcuts
 

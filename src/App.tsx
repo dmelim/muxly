@@ -31,6 +31,7 @@ import { SettingsView } from "./SettingsView";
 import { DetailsSidebar } from "./DetailsSidebar";
 import { ServicesSidebar } from "./ServicesSidebar";
 import { describeExitCode, shortExitCode } from "./exitCodes";
+import { applyTheme, resolveTheme, type MuxlyTheme } from "./theme";
 import type { EditTarget, StartHealth } from "./appTypes";
 import {
   AUTO_RESTART_DELAY_MS,
@@ -324,6 +325,17 @@ export function App() {
   );
 
   const activeProfile = settings.activeProfile ?? null;
+  const [previewTheme, setPreviewTheme] = useState<MuxlyTheme | null>(null);
+  const savedTheme = useMemo(
+    () => resolveTheme(settings.themePreset, settings.theme),
+    [settings.theme, settings.themePreset]
+  );
+
+  const resolvedTheme = previewTheme ?? savedTheme;
+
+  useEffect(() => {
+    applyTheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   // Services visible under the active profile (the active one plus all
   // unassigned). "All profiles" returns the full list untouched.
@@ -1054,7 +1066,7 @@ export function App() {
         delete next[serviceId];
         return next;
       });
-      appendLog(serviceId, `\r\n\x1b[38;2;34;211;238m[manager] started pid ${pid}\x1b[0m\r\n`);
+      appendLog(serviceId, `\r\n\x1b[36m[manager] started pid ${pid}\x1b[0m\r\n`);
       refreshHistory(serviceId);
 
       // Consume the user-start flag on every start (PTY or not) so it can't
@@ -1163,7 +1175,7 @@ export function App() {
       // A signal death is an error too — it has no exit code, so the numeric
       // check alone would colour a SIGSEGV the same calm cyan as a clean stop.
       const isError = !requested && (signal !== null || (code !== 0 && code !== null));
-      const colour = isError ? "\x1b[31m" : "\x1b[38;2;34;211;238m";
+      const colour = isError ? "\x1b[31m" : "\x1b[36m";
       appendLog(
         serviceId,
         `\r\n${colour}[manager] process exited (${description})\x1b[0m\r\n`
@@ -1537,7 +1549,7 @@ export function App() {
       setStatuses((current) => ({ ...current, [service.id]: "starting" }));
       appendLog(
         service.id,
-        `\r\n\x1b[38;2;34;211;238m[manager] starting ${formatCommand(service)}\x1b[0m\r\n`
+        `\r\n\x1b[36m[manager] starting ${formatCommand(service)}\x1b[0m\r\n`
       );
 
       const onOutput = new Channel<ProcessOutputEvent>();
@@ -1628,7 +1640,7 @@ export function App() {
         await invoke("kill_pid", { pid: blocker.pid });
         appendLog(
           service.id,
-          `\r\n\x1b[38;2;34;211;238m[manager] stopped blocking process pid ${blocker.pid} on port ${blocker.port}\x1b[0m\r\n`
+          `\r\n\x1b[36m[manager] stopped blocking process pid ${blocker.pid} on port ${blocker.port}\x1b[0m\r\n`
         );
         setPortBlockers((current) => {
           if (!current[service.id]) return current;
@@ -1673,7 +1685,7 @@ export function App() {
       });
       appendLog(
         service.id,
-        `\r\n\x1b[38;2;34;211;238m[manager] adopted external pid ${blocker.pid} on port ${blocker.port} (stdout/stderr not captured)\x1b[0m\r\n`
+        `\r\n\x1b[36m[manager] adopted external pid ${blocker.pid} on port ${blocker.port} (stdout/stderr not captured)\x1b[0m\r\n`
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1762,7 +1774,7 @@ export function App() {
             clearStartHealth(service.id);
             appendLog(
               service.id,
-              `\r\n\x1b[38;2;34;211;238m[manager] port ${port} is listening — service is up\x1b[0m\r\n`
+              `\r\n\x1b[36m[manager] port ${port} is listening — service is up\x1b[0m\r\n`
             );
           })
           .catch(() => {
@@ -1786,7 +1798,7 @@ export function App() {
           await invoke("kill_pid", { pid: adopted.pid });
           appendLog(
             service.id,
-            `\r\n\x1b[38;2;34;211;238m[manager] killed adopted pid ${adopted.pid}\x1b[0m\r\n`
+            `\r\n\x1b[36m[manager] killed adopted pid ${adopted.pid}\x1b[0m\r\n`
           );
           setAdoptedPids((current) => {
             if (!current[service.id]) return current;
@@ -1811,7 +1823,7 @@ export function App() {
       }
 
       setStatuses((current) => ({ ...current, [service.id]: "stopping" }));
-      appendLog(service.id, `\r\n\x1b[38;2;34;211;238m[manager] stop requested\x1b[0m\r\n`);
+      appendLog(service.id, `\r\n\x1b[36m[manager] stop requested\x1b[0m\r\n`);
 
       try {
         await invoke("stop_service", { serviceId: service.id });
@@ -2656,6 +2668,7 @@ export function App() {
             gridColumns={settings.paneGridColumns}
             tabMode={settings.openServicesInTabs ?? true}
             panels={workspacePanels}
+            theme={resolvedTheme}
             awaitingOutput={awaitingOutput}
             startHealth={startHealth}
             terminalsRef={terminalsRef}
@@ -2694,6 +2707,7 @@ export function App() {
           <BottomTerminal
             open={terminalOpen}
             height={terminalHeight}
+            theme={resolvedTheme}
             onClose={() => setTerminalOpen(false)}
             onResizeStart={startTerminalDrag}
           />
@@ -2703,7 +2717,8 @@ export function App() {
             settings={settings}
             services={services}
             onClose={() => setSettingsOpen(false)}
-            onSave={(next) => persistSettings(next)}
+            onSave={persistSettings}
+            onThemePreview={setPreviewTheme}
             onSetServicesSensitive={setServicesSensitive}
             onDeleteProfile={deleteProfile}
             streamMode={streamMode}

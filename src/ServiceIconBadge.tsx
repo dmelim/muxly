@@ -5,7 +5,7 @@ const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
   starting: "bg-amber-400",
   restarting: "bg-amber-400 animate-pulse",
-  running: "bg-cyan-400",
+  running: "bg-[var(--muxly-status-running)]",
   stopping: "bg-orange-400",
   exited: "bg-sky-400",
   failed: "bg-rose-400"

@@ -48,6 +48,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   workspacePanels: [],
   focusedPanelId: null,
   openServicesInTabs: true,
+  themePreset: "default",
+  theme: {},
   autoRestartMaxAttempts: 3,
   autoRestartWindowMs: 60_000,
   maxLogChunks: 5_000,

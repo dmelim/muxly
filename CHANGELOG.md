@@ -33,16 +33,19 @@ section, and tag the commit `vX.Y.Z`.
 ### Added
 
 - **Persistent panel workspaces with panel-owned tabs.** Panels now restore with independent ordered tab strips and active tabs. Normal clicks open tabs in the focused panel, Ctrl/Cmd-click creates a separate panel, and tabs can be reordered or dragged between panels with a muted tab-shaped placement preview and without stopping running services.
+- **User-customizable semantic colour themes.** Muxly now provides Default, Midnight, and High Contrast presets plus validated custom hex overrides, themed keyboard-accessible colour pickers, live preview, grouped resets, WCAG contrast warnings, semantic surface and feedback tokens, and live updates for mounted xterm terminals and generated terminal messages.
 
 ### Changed
 
 - **Profile filters no longer close the focused service pane.** The active service remains visible while the sidebar switches profiles, and automatic restart backoff now has a distinct amber `Restarting` state.
+- **Service editing uses compact themed actions.** Header close and destructive delete actions now use accessible icons and tooltips, and deletion uses the in-app confirmation dialog.
 - **Tab workspaces are now the default.** New and older settings without an explicit preference open services as persistent tabs, and profile management uses flat rows with compact trash actions instead of nested cards.
 - **Panel tabs now carry service identity once.** Tabbed panels no longer repeat the active service name and status in the pane toolbar. Tabs remain outside the frame, while the service workspace below uses the same full outline in neutral and focused cyan states.
 
 ### Fixed
 
 - **POSIX path masking preserves filenames.** Absolute paths no longer turn into numeric offsets, and already-masked paths are not processed again.
+- **Theme previews update terminals and independent running-status colours.** Unsaved palettes reach existing service and drawer terminals, closing the preview restores saved colours, and accent changes no longer clear and replay terminal output.
 - **Loading project aliases can no longer erase saved profiles and preferences.** Alias synchronization waits for persisted settings to load instead of writing empty startup defaults when services load first.
 - **Panel tab labels now use their full visual height as a click target.** The spacing below a service name is part of the tab button instead of an inert wrapper area.
 - **Removed services no longer leave broken workspace panels.** In-app deletion and live `services.json` edits remove stale tabs, repair active-tab and focus state, and prevent invalid panel layouts from being persisted again.

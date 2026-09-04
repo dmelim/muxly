@@ -12,12 +12,14 @@ import { displayServiceName, formatCommand, redactSensitive } from "./types";
 import { groupKey, statusLabels } from "./appUtils";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
+import type { MuxlyTheme } from "./theme";
+import { xtermTheme } from "./theme";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
   starting: "bg-amber-400",
   restarting: "bg-amber-400 animate-pulse",
-  running: "bg-cyan-400",
+  running: "bg-[var(--muxly-status-running)]",
   stopping: "bg-orange-400",
   exited: "bg-sky-400",
   failed: "bg-rose-400"
@@ -37,13 +39,7 @@ const TERMINAL_OPTIONS = {
   fontFamily: "JetBrains Mono, Cascadia Mono, Consolas, monospace",
   fontSize: 13,
   lineHeight: 1.45,
-  scrollback: 5000,
-  theme: {
-    background: "#101215",
-    foreground: "#d4d4d8",
-    cursor: "#22d3ee",
-    selectionBackground: "#3f3f46"
-  }
+  scrollback: 5000
 } as const;
 
 type TerminalPanesProps = {
@@ -65,6 +61,7 @@ type TerminalPanesProps = {
   panels: WorkspacePanel[];
   onTabFocus: (panelId: string, serviceId: string) => void;
   onTabMove: (serviceId: string, targetPanelId: string, targetIndex: number) => void;
+  theme: MuxlyTheme;
   /** Per-service flag: a PTY run has started but not yet produced real output.
    * Drives the in-pane "waiting for output…" affordance. */
   awaitingOutput: Record<string, boolean>;
@@ -127,6 +124,7 @@ export function TerminalPanes({
   onFocus,
   onTabFocus,
   onTabMove,
+  theme,
   onClose,
   onStart,
   onStop,
@@ -161,6 +159,13 @@ export function TerminalPanes({
     if (serviceId) onTabMove(serviceId, panelId, index);
     finishTabDrag();
   }, [finishTabDrag, onTabMove]);
+
+  useEffect(() => {
+    const nextTheme = xtermTheme(theme);
+    for (const terminal of terminalsRef.current.values()) {
+      terminal.options.theme = nextTheme;
+    }
+  }, [terminalsRef, theme]);
 
   if (paneServices.length === 0) {
     return (
@@ -351,6 +356,7 @@ export function TerminalPanes({
                 adopted={adoptedPids[service.id] ?? null}
                 terminalsRef={terminalsRef}
                 logsRef={logsRef}
+                theme={theme}
                 onFocus={() => onFocus(panel.id, service.id)}
                 onClose={() => onClose(panel.id, service.id)}
                 onStart={() => onStart(service)}
@@ -573,6 +579,7 @@ type PaneViewProps = {
   adopted: { pid: number; port: number } | null;
   terminalsRef: MutableRefObject<Map<string, Terminal>>;
   logsRef: MutableRefObject<Record<string, string[]>>;
+  theme: MuxlyTheme;
   onFocus: () => void;
   onClose: () => void;
   onStart: () => void;
@@ -602,6 +609,7 @@ function PaneView({
   adopted,
   terminalsRef,
   logsRef,
+  theme,
   onFocus,
   onClose,
   onStart,
@@ -648,7 +656,11 @@ function PaneView({
     // output. Disable it for PTY panes; xterm renders their ANSI colours,
     // spinners, and clear-screen sequences natively.
     const isPty = service.usePty;
-    const terminal = new Terminal({ ...TERMINAL_OPTIONS, convertEol: !isPty });
+    const terminal = new Terminal({
+      ...TERMINAL_OPTIONS,
+      convertEol: !isPty,
+      theme: xtermTheme(theme)
+    });
     const fitAddon = new FitAddon();
     const search = new SearchAddon();
     terminal.loadAddon(fitAddon);
@@ -731,7 +743,7 @@ function PaneView({
         redactSensitive(text, service, aliasRef.current, streamModeRef.current);
 
       terminal.writeln(
-        `\x1b[1;38;2;34;211;238m${displayServiceName(service, streamModeRef.current)}\x1b[0m`
+        `\x1b[1;36m${displayServiceName(service, streamModeRef.current)}\x1b[0m`
       );
       terminal.writeln(redact(`cwd: ${service.cwd}`));
       terminal.writeln(redact(`cmd: ${formatCommand(service)}`));
@@ -783,7 +795,7 @@ function PaneView({
               listening on the port right now. */}
           <span
             className={`size-2 rounded-full ${
-              adopted ? "bg-cyan-400" : statusDots[status]
+              adopted ? statusDots.running : statusDots[status]
             } ${status === "stopping" ? "animate-pulse" : ""}`}
           />
           <span

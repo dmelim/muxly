@@ -2,10 +2,32 @@
 
 :root {
   color-scheme: dark;
+  --muxly-bg-app: #101215;
+  --muxly-bg-surface: #15181d;
+  --muxly-bg-elevated: #18181b;
+  --muxly-border: #2a2d31;
+  --muxly-hover-subtle: #1b1e23;
+  --muxly-hover-strong: #25282d;
+  --muxly-terminal-bg: #101215;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #101215;
+  background: var(--muxly-bg-app);
 }
+
+/* Compatibility bridge for the existing arbitrary Tailwind background
+   utilities. Theme tokens override them centrally, so every current surface
+   participates without duplicating a second component stylesheet. */
+.bg-\[\#101215\] { background-color: var(--muxly-bg-app) !important; }
+.bg-\[\#15181d\] { background-color: var(--muxly-bg-surface) !important; }
+.bg-\[\#18181b\] { background-color: var(--muxly-bg-elevated) !important; }
+.ring-\[\#15181d\] { --tw-ring-color: var(--muxly-bg-surface) !important; }
+.border-white\/10 { border-color: var(--muxly-border) !important; }
+.border-white\/15,
+.border-white\/20 { border-color: var(--muxly-border) !important; }
+.bg-white\/5 { background-color: var(--muxly-hover-subtle) !important; }
+.bg-white\/10 { background-color: var(--muxly-hover-strong) !important; }
+.hover\:bg-white\/5:hover { background-color: var(--muxly-hover-subtle) !important; }
+.hover\:bg-white\/10:hover { background-color: var(--muxly-hover-strong) !important; }
 
 * {
   box-sizing: border-box;
@@ -28,7 +50,7 @@
    The standard scrollbar-* properties are kept as a fallback. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: var(--muxly-border) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -41,7 +63,7 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--muxly-border);
   border-radius: 9999px;
   /* Inset the thumb so it does not touch the panel edges. */
   border: 2px solid transparent;
@@ -49,7 +71,7 @@
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: var(--muxly-hover-strong);
   background-clip: padding-box;
 }
 
@@ -87,7 +109,7 @@ button {
    terminal theme so the partial row below the last line isn't a pure-black
    strip. */
 .xterm .xterm-viewport {
-  background-color: #101215;
+  background-color: var(--muxly-terminal-bg);
   overflow-x: hidden;
   border-radius: 6px;
 }
@@ -112,7 +134,7 @@ button {
 .form-input {
   width: 100%;
   border-radius: 0.375rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--muxly-border);
   background: rgba(0, 0, 0, 0.25);
   padding: 0.5rem 0.625rem;
   color: rgb(228, 228, 231);
@@ -136,3 +158,25 @@ textarea.form-input {
   min-height: 4.5rem;
 }
 
+.muxly-color-picker .react-colorful {
+  width: 100%;
+  height: 180px;
+}
+
+.muxly-color-picker .react-colorful__saturation {
+  border-radius: 0.375rem;
+  border-bottom: 1px solid var(--muxly-border);
+}
+
+.muxly-color-picker .react-colorful__hue {
+  height: 1rem;
+  margin-top: 0.75rem;
+  border-radius: 9999px;
+}
+
+.muxly-color-picker .react-colorful__pointer {
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 2px solid white;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}

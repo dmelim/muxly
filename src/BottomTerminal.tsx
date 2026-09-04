@@ -7,6 +7,8 @@ import { Terminal } from "@xterm/xterm";
 import { Tooltip } from "./Tooltip";
 import { CloseIcon, TerminalIcon } from "./icons";
 import { PTY_CLOSED } from "./events";
+import type { MuxlyTheme } from "./theme";
+import { xtermTheme } from "./theme";
 
 type PtyOutputEvent = { ptyId: string; chunk: string };
 type PtyClosedEvent = { ptyId: string };
@@ -18,13 +20,7 @@ const TERMINAL_OPTIONS = {
   fontFamily: "JetBrains Mono, Cascadia Mono, Consolas, monospace",
   fontSize: 13,
   lineHeight: 1.45,
-  scrollback: 5000,
-  theme: {
-    background: "#101215",
-    foreground: "#d4d4d8",
-    cursor: "#22d3ee",
-    selectionBackground: "#3f3f46"
-  }
+  scrollback: 5000
 } as const;
 
 type BottomTerminalProps = {
@@ -34,6 +30,7 @@ type BottomTerminalProps = {
   open: boolean;
   /** Drawer height in pixels — owned by the parent so it survives toggle. */
   height: number;
+  theme: MuxlyTheme;
   onClose: () => void;
   /** Begin a vertical drag on the drawer's top edge. The parent runs the
    * window-level mousemove/up handlers so the drag survives the cursor
@@ -47,9 +44,16 @@ type BottomTerminalProps = {
  * close/reopen we can buffer output later — for now "close" really means
  * "end this session", matching VS Code's terminal panel behaviour.
  */
-export function BottomTerminal({ open, height, onClose, onResizeStart }: BottomTerminalProps) {
+export function BottomTerminal({ open, height, theme, onClose, onResizeStart }: BottomTerminalProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
+  useEffect(() => {
+    if (terminalRef.current) terminalRef.current.options.theme = xtermTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     if (!open) {
@@ -65,7 +69,8 @@ export function BottomTerminal({ open, height, onClose, onResizeStart }: BottomT
     // user-facing identifier. Multiple shells could share this code later.
     const ptyId = `shell-${Math.random().toString(36).slice(2, 10)}`;
 
-    const terminal = new Terminal(TERMINAL_OPTIONS);
+    const terminal = new Terminal({ ...TERMINAL_OPTIONS, theme: xtermTheme(themeRef.current) });
+    terminalRef.current = terminal;
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(
@@ -146,7 +151,7 @@ export function BottomTerminal({ open, height, onClose, onResizeStart }: BottomT
       // The backend emits this when the child exits or the master EOFs.
       void listen<PtyClosedEvent>(PTY_CLOSED, (event) => {
         if (event.payload.ptyId !== ptyId) return;
-        terminal.write("\r\n\x1b[38;2;34;211;238m[shell] session ended\x1b[0m\r\n");
+        terminal.write("\r\n\x1b[36m[shell] session ended\x1b[0m\r\n");
       }).then((unlisten) => {
         if (disposed) {
           unlisten();
@@ -180,6 +185,7 @@ export function BottomTerminal({ open, height, onClose, onResizeStart }: BottomT
       // outlives the UI.
       void openPromise.finally(() => invoke("pty_close", { ptyId }).catch(() => {}));
       terminal.dispose();
+      terminalRef.current = null;
     };
   }, [open]);
 

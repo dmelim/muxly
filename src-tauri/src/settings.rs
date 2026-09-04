@@ -75,6 +75,10 @@ pub struct AppSettings {
     pub focused_panel_id: Option<String>,
     #[serde(default = "default_open_services_in_tabs")]
     pub open_services_in_tabs: bool,
+    #[serde(default = "default_theme_preset")]
+    pub theme_preset: String,
+    #[serde(default)]
+    pub theme: BTreeMap<String, String>,
     #[serde(default = "default_auto_restart_max_attempts")]
     pub auto_restart_max_attempts: u32,
     #[serde(default = "default_auto_restart_window_ms")]
@@ -105,6 +109,8 @@ impl Default for AppSettings {
             workspace_panels: Vec::new(),
             focused_panel_id: None,
             open_services_in_tabs: true,
+            theme_preset: default_theme_preset(),
+            theme: BTreeMap::new(),
             auto_restart_max_attempts: DEFAULT_AUTO_RESTART_MAX_ATTEMPTS,
             auto_restart_window_ms: DEFAULT_AUTO_RESTART_WINDOW_MS,
             max_log_chunks: DEFAULT_MAX_LOG_CHUNKS,
@@ -138,6 +144,10 @@ fn default_show_timestamps() -> bool {
     DEFAULT_SHOW_TIMESTAMPS
 }
 
+fn default_theme_preset() -> String {
+    "default".to_string()
+}
+
 #[tauri::command]
 pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     let path = settings_path(&app)?;
@@ -166,6 +176,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     settings.pane_grid_columns = settings.pane_grid_columns.clamp(1, 10);
     migrate_global_project_privacy(&mut settings);
     normalize_active_profile(&mut settings);
+    normalize_theme(&mut settings);
 
     Ok(settings)
 }
@@ -186,6 +197,7 @@ pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSet
     settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
     settings.pane_grid_columns = settings.pane_grid_columns.clamp(1, 10);
     normalize_active_profile(&mut settings);
+    normalize_theme(&mut settings);
 
     let path = settings_path(&app)?;
     let parent = path.parent().ok_or_else(|| {
@@ -250,6 +262,51 @@ fn normalize_active_profile(settings: &mut AppSettings) {
     }
 }
 
+fn normalize_theme(settings: &mut AppSettings) {
+    if !matches!(
+        settings.theme_preset.as_str(),
+        "default" | "midnight" | "high-contrast" | "custom"
+    ) {
+        settings.theme_preset = default_theme_preset();
+    }
+    const KEYS: &[&str] = &[
+        "appBackground",
+        "surfaceBackground",
+        "elevatedBackground",
+        "border",
+        "hoverSubtle",
+        "hoverStrong",
+        "textPrimary",
+        "textSecondary",
+        "textMuted",
+        "accent",
+        "accentStrong",
+        "accentSoft",
+        "accentContrast",
+        "stopped",
+        "starting",
+        "running",
+        "stopping",
+        "exited",
+        "failed",
+        "warning",
+        "danger",
+        "info",
+        "terminalBackground",
+        "terminalForeground",
+        "terminalCursor",
+        "terminalSelection",
+    ];
+    settings.theme.retain(|key, value| {
+        KEYS.contains(&key.as_str())
+            && value.len() == 7
+            && value.starts_with('#')
+            && value[1..]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+    });
+}
+
 fn settings_path(app: &AppHandle) -> Result<PathBuf, AppError> {
     let app_config_dir = app
         .path()
@@ -263,7 +320,7 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::AppSettings;
+    use super::{normalize_theme, AppSettings};
 
     #[test]
     fn older_settings_default_to_tabs_with_no_panel_state() {
@@ -275,4 +332,33 @@ mod tests {
         assert!(settings.pinned_project_names.is_empty());
     }
 
+    #[test]
+    fn theme_normalization_keeps_supported_semantic_tokens() {
+        let mut settings = AppSettings::default();
+        settings.theme_preset = "custom".into();
+        settings.theme.insert("border".into(), "#2A2D31".into());
+        settings
+            .theme
+            .insert("hoverStrong".into(), "#25282d".into());
+        settings.theme.insert("info".into(), "#38bdf8".into());
+
+        normalize_theme(&mut settings);
+
+        assert_eq!(settings.theme.len(), 3);
+    }
+
+    #[test]
+    fn theme_normalization_drops_invalid_values_and_unknown_keys() {
+        let mut settings = AppSettings::default();
+        settings.theme_preset = "unknown".into();
+        settings.theme.insert("accent".into(), "cyan".into());
+        settings
+            .theme
+            .insert("componentButton".into(), "#ffffff".into());
+
+        normalize_theme(&mut settings);
+
+        assert_eq!(settings.theme_preset, "default");
+        assert!(settings.theme.is_empty());
+    }
 }

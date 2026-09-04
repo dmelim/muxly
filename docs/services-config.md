@@ -107,6 +107,8 @@ or hand-written file keeps loading:
   ],
   "focusedPanelId": "panel-b",
   "openServicesInTabs": true,
+  "themePreset": "custom",
+  "theme": { "accent": "#22d3ee", "border": "#2a2d31" },
   "autoRestartMaxAttempts": 3,
   "autoRestartWindowMs": 60000,
   "maxLogChunks": 5000,
@@ -130,6 +132,8 @@ or hand-written file keeps loading:
 | `workspacePanels`        | array of panel objects | Ordered panels. Each has `id`, ordered `tabIds`, and one `activeTabId`. Stale service IDs are ignored. |
 | `focusedPanelId`         | string \| null         | Panel that receives normal service clicks and keyboard focus. |
 | `openServicesInTabs`     | boolean                | Normal clicks open tabs inside the focused panel. Ctrl/Cmd-click creates a panel. Defaults to `true`. |
+| `themePreset`            | string                 | `default`, `midnight`, `high-contrast`, or `custom`. |
+| `theme`                  | object<string,string>  | Optional semantic six-digit hex overrides. Keys and defaults are documented in `docs/design.md`. |
 | `autoRestartMaxAttempts` | number                 | Max auto-restart attempts within the window. |
 | `autoRestartWindowMs`    | number                 | Rolling window (ms) for the auto-restart cap. |
 | `maxLogChunks`           | number                 | Per-service log-retention cap (ring-buffer size). |

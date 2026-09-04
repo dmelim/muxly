@@ -6,6 +6,8 @@ import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CloseIcon, EyeIcon, EyeOffIcon } from "./icons";
+import type { MuxlyTheme } from "./theme";
+import { ThemeSettings } from "./ThemeSettings";
 
 // Bounds — must match the clamps in `src-tauri/src/settings.rs` so the form
 // can show the same limits the backend will enforce on save.
@@ -35,6 +37,7 @@ type Props = {
   // Returns the persisted settings (possibly clamped by the backend) so the
   // form can re-sync to authoritative values after save.
   onSave: (next: AppSettings) => Promise<AppSettings>;
+  onThemePreview: (theme: MuxlyTheme | null) => void;
   // Persist the `sensitive` flag on one or more services in a single save (the
   // flag lives on the service config, not AppSettings). The Stream-mode
   // curation list below toggles a single service, or every service in a
@@ -57,6 +60,7 @@ export function SettingsView({
   services,
   onClose,
   onSave,
+  onThemePreview,
   onSetServicesSensitive,
   onDeleteProfile,
   streamMode
@@ -425,6 +429,8 @@ export function SettingsView({
               </span>
             </label>
           </Section>
+
+          <ThemeSettings settings={settings} onSave={onSave} onPreview={onThemePreview} />
 
           <Section
             title="Privacy"

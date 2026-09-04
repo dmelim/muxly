@@ -86,10 +86,12 @@ Process state is shown as a 2–2.5px filled dot. Each state has a distinct hue.
 | Cursor       | `#22d3ee` (accent) |
 | Selection    | `#3f3f46` |
 
-Muxly's own terminal chrome — the pane header (service name) and `[manager]`
-lifecycle notes — is printed in the brand cyan via a 24-bit colour escape
-(`\x1b[38;2;34;211;238m`). `stderr` is tinted ANSI red; failures use ANSI red
-and auto-restart notices ANSI yellow.
+Muxly's own terminal chrome, including the pane header and `[manager]`
+lifecycle notes, uses the terminal's semantic ANSI cyan slot. The complete
+xterm ANSI palette is derived from the resolved status, feedback, text, and
+accent tokens, so existing indexed terminal cells update when the theme
+changes. Failures remain red and auto-restart notices remain yellow through
+those resolved tokens.
 
 ## Typography
 
@@ -209,3 +211,39 @@ fade after a 300ms intent delay. No large or decorative animation.
 - Status is encoded by both colour **and** a text label — never colour alone.
 - Interactive non-button elements (service cards) are keyboard-operable
   (`role="button"`, `tabIndex`, Enter/Space).
+
+## User themes
+
+Muxly themes follow a semantic-token model. Presets provide complete palettes,
+while `settings.json` stores only the selected preset and optional custom
+overrides. Missing or invalid values fall back to the built-in design tokens,
+so older and partially authored settings remain safe.
+
+```json
+{
+  "themePreset": "custom",
+  "theme": {
+    "appBackground": "#101215",
+    "surfaceBackground": "#15181d",
+    "border": "#2a2d31",
+    "hoverSubtle": "#1b1e23",
+    "textPrimary": "#f4f4f5",
+    "accent": "#22d3ee",
+    "info": "#38bdf8",
+    "terminalBackground": "#101215",
+    "terminalForeground": "#d4d4d8"
+  }
+}
+```
+
+Accepted values are six-digit hexadecimal colours. `settings.json` lives beside
+`services.json` in the OS app-config directory documented in
+`docs/services-config.md`. Available semantic keys are defined by `MuxlyTheme`
+in `src/theme.ts`; unknown keys are discarded by the backend. Presets are
+`default`, `midnight`, and `high-contrast`. Settings applies
+theme previews live to mounted React controls and xterm terminals, warns when
+primary text pairs fall below the WCAG 4.5:1 target, and restores the saved
+palette when an unsaved preview is closed.
+
+Each semantic colour row provides both direct six-digit hex entry and a themed,
+keyboard-accessible saturation and hue picker opened from its colour swatch.
