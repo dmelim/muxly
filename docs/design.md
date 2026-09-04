@@ -169,12 +169,26 @@ A card per service. Plain click opens it as the sole pane; `Ctrl/Cmd`-click
 (or the hover split icon) opens it in an additional pane. State: a 2px left
 border — accent when selected, `accent/40` when open elsewhere, transparent
 otherwise. The status dot and name lead; the command shows in muted monospace.
+Project group headers carry the pin action. Pinned projects form a stable group
+at the top of the sidebar while service order inside each project is unchanged.
 
 ### Panels & dividers
 
 Terminal panes are clipping boxes (`overflow: hidden`) — xterm owns its own
 scrolling. Drag dividers are a 1.5px hairline (`white/10`) that lights to
 `accent/50`–`/60` on hover.
+
+Workspace panels and tabs are separate levels. A panel is one grid cell in the
+terminal layout and owns an ordered tab strip. Only its active tab is visible,
+but inactive terminals remain mounted. A normal service click opens a tab in
+the focused panel; `Ctrl/Cmd`-click creates another panel with its own tabs.
+Tabs can be reordered within a panel or dragged to another panel; an insertion
+preview shaped like a muted copy of the dragged tab shows the exact drop
+position in destination panels without duplicating the tab in its source panel,
+and an emptied source panel is removed.
+The service workspace below each tab strip has a one-pixel inset outline using
+the neutral border token when unfocused and the soft cyan accent when focused.
+The outline does not wrap or extend beside the tabs.
 
 ### Scrollbars
 

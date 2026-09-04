@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon } from "./icons";
 export type DropdownOption = {
   value: string;
   label: string;
+  detail?: string;
   // Optional leading glyph shown in both the trigger and the option row.
   icon?: ReactNode;
 };
@@ -140,9 +141,14 @@ export function Dropdown({
                     ) : null}
                     <span className="truncate">{option.label}</span>
                   </span>
-                  {isSelected ? (
-                    <CheckIcon className="size-4 shrink-0 text-cyan-400" />
-                  ) : null}
+                  <span className="flex shrink-0 items-center gap-2">
+                    {option.detail ? (
+                      <span className="text-[10px] text-cyan-300">{option.detail}</span>
+                    ) : null}
+                    {isSelected ? (
+                      <CheckIcon className="size-4 text-cyan-400" />
+                    ) : null}
+                  </span>
                 </button>
               </li>
             );

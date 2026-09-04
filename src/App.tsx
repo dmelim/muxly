@@ -13,7 +13,8 @@ import type {
   ServiceConfig,
   ServiceHistory,
   ServiceIcon,
-  ServiceStatus
+  ServiceStatus,
+  WorkspacePanel
 } from "./types";
 import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } from "./events";
 import { formatCommand, displayServiceName, redactSensitive } from "./types";
@@ -95,8 +96,19 @@ function ptyDebug(serviceId: string, message: string, detail?: unknown) {
 export function App() {
   const [services, setServices] = useState<ServiceConfig[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Services currently open as terminal panes, left-to-right.
-  const [paneIds, setPaneIds] = useState<string[]>([]);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
+  // Panels are layout columns/tiles. Each panel owns tabs and one active tab.
+  const [workspacePanels, setWorkspacePanels] = useState<WorkspacePanel[]>([]);
+  const workspacePanelsRef = useRef<WorkspacePanel[]>([]);
+  workspacePanelsRef.current = workspacePanels;
+  const [focusedPanelId, setFocusedPanelId] = useState<string | null>(null);
+  const focusedPanelIdRef = useRef<string | null>(null);
+  focusedPanelIdRef.current = focusedPanelId;
+  const paneIds = useMemo(
+    () => Array.from(new Set(workspacePanels.flatMap((panel) => panel.tabIds))),
+    [workspacePanels]
+  );
   const [statuses, setStatuses] = useState<Record<string, ServiceStatus>>({});
   const [pids, setPids] = useState<Record<string, number>>({});
   // The port a running service actually bound to (from PROCESS_STARTED). For an
@@ -226,10 +238,18 @@ export function App() {
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(340);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [servicesLoaded, setServicesLoaded] = useState(false);
+  const workspaceRestoredRef = useRef(false);
   // Mirrors `settings` so listeners with empty-deps useEffect closures
   // (process-exit auto-restart, output chunk buffering) read the latest
   // user-tunable values without having to re-mount on every settings change.
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
+  // Settings commands write complete snapshots. Serialize them so a slower
+  // earlier request can never land after a newer one and restore stale fields.
+  // The ref advances optimistically, allowing rapid actions to build on every
+  // change even before React has rendered the first saved snapshot.
+  const settingsWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   // Project collapse state is persisted in settings (see `collapsedProjectNames`)
@@ -318,18 +338,25 @@ export function App() {
   // inspector never shows something outside the current view.
   const selected = useMemo(() => {
     const byId = services.find((service) => service.id === selectedId);
-    const focused = byId && isServiceInProfile(byId, activeProfile) ? byId : null;
+    const focused = byId && paneIds.includes(byId.id) ? byId : null;
     return focused ?? paneServices[0] ?? visibleServices[0] ?? null;
-  }, [selectedId, services, paneServices, visibleServices, activeProfile]);
+  }, [selectedId, services, paneIds, paneServices, visibleServices]);
 
-  const groupedServices = useMemo(() => groupServices(visibleServices), [visibleServices]);
   const groupNames = useMemo(
-    () => groupedServices.map(([groupName]) => groupName),
-    [groupedServices]
+    () => groupServices(services).map(([groupName]) => groupName),
+    [services]
   );
   const projectNameAliases = useMemo(
     () => ensureProjectAliases(groupNames, settings),
     [groupNames, settings]
+  );
+  const groupedServices = useMemo(
+    () => groupServices(visibleServices).sort(
+      ([leftGroup], [rightGroup]) =>
+        Number(Boolean(settings.pinnedProjectNames?.[rightGroup])) -
+        Number(Boolean(settings.pinnedProjectNames?.[leftGroup]))
+    ),
+    [visibleServices, settings.pinnedProjectNames]
   );
   // Mirror into refs so the once-mounted output closure can redact paths with
   // the current values without re-subscribing on every toggle (same pattern as
@@ -363,42 +390,110 @@ export function App() {
   // Below this sidebar width, switch space-hungry controls to compact icons.
   const compactSidebar = leftWidth < 264;
 
-  // Open a service as the sole pane (replaces the current layout).
-  // Used for explicit "jump" actions like Ctrl+1..9.
-  const openSingle = useCallback((serviceId: string) => {
-    setPaneIds([serviceId]);
-    setSelectedId(serviceId);
-  }, []);
-
-  // Open a service in an additional pane, or focus it if already open.
-  const openInSplit = useCallback((serviceId: string) => {
-    setPaneIds((current) =>
-      current.includes(serviceId) ? current : [...current, serviceId]
+  const focusPanelTab = useCallback((panelId: string, serviceId: string) => {
+    setWorkspacePanels((current) =>
+      current.map((panel) =>
+        panel.id === panelId ? { ...panel, activeTabId: serviceId } : panel
+      )
     );
+    setFocusedPanelId(panelId);
     setSelectedId(serviceId);
   }, []);
 
-  // Plain sidebar click: replace the *focused* pane with the clicked
-  // service, preserving the layout's other panes. If the clicked service is
-  // already open, just focus it. If nothing is open yet, open it as the
-  // sole pane.
-  const openService = useCallback(
-    (serviceId: string) => {
-      setPaneIds((current) => {
-        if (current.length === 0) return [serviceId];
-        if (current.includes(serviceId)) return current;
-        const focusIndex = selectedId
-          ? current.indexOf(selectedId)
-          : -1;
-        const replaceAt = focusIndex >= 0 ? focusIndex : 0;
-        const next = current.slice();
-        next[replaceAt] = serviceId;
-        return next;
-      });
+  const movePanelTab = useCallback(
+    (serviceId: string, targetPanelId: string, requestedTargetIndex: number) => {
+      const current = workspacePanelsRef.current;
+      const sourcePanel = current.find((panel) => panel.tabIds.includes(serviceId));
+      const targetPanel = current.find((panel) => panel.id === targetPanelId);
+      if (!sourcePanel || !targetPanel) return;
+
+      const sourceIndex = sourcePanel.tabIds.indexOf(serviceId);
+      let next: WorkspacePanel[];
+
+      if (sourcePanel.id === targetPanel.id) {
+        const tabIds = sourcePanel.tabIds.filter((id) => id !== serviceId);
+        let targetIndex = Math.max(0, Math.min(requestedTargetIndex, sourcePanel.tabIds.length));
+        if (sourceIndex < targetIndex) targetIndex -= 1;
+        targetIndex = Math.max(0, Math.min(targetIndex, tabIds.length));
+        tabIds.splice(targetIndex, 0, serviceId);
+        next = current.map((panel) =>
+          panel.id === sourcePanel.id ? { ...panel, tabIds, activeTabId: serviceId } : panel
+        );
+      } else {
+        const sourceTabs = sourcePanel.tabIds.filter((id) => id !== serviceId);
+        const targetTabs = targetPanel.tabIds.filter((id) => id !== serviceId);
+        const targetIndex = Math.max(0, Math.min(requestedTargetIndex, targetTabs.length));
+        targetTabs.splice(targetIndex, 0, serviceId);
+        const sourceActiveTabId =
+          sourcePanel.activeTabId === serviceId && sourceTabs.length > 0
+            ? sourceTabs[Math.min(sourceIndex, sourceTabs.length - 1)]
+            : sourcePanel.activeTabId;
+
+        next = current.flatMap((panel) => {
+          if (panel.id === sourcePanel.id) {
+            return sourceTabs.length > 0
+              ? [{ ...panel, tabIds: sourceTabs, activeTabId: sourceActiveTabId }]
+              : [];
+          }
+          if (panel.id === targetPanel.id) {
+            return [{ ...panel, tabIds: targetTabs, activeTabId: serviceId }];
+          }
+          return [panel];
+        });
+      }
+
+      workspacePanelsRef.current = next;
+      setWorkspacePanels(next);
+      setFocusedPanelId(targetPanelId);
       setSelectedId(serviceId);
     },
-    [selectedId]
+    []
   );
+
+  const focusExistingTab = useCallback((serviceId: string) => {
+    const panel = workspacePanels.find((candidate) => candidate.tabIds.includes(serviceId));
+    if (!panel) return false;
+    focusPanelTab(panel.id, serviceId);
+    return true;
+  }, [focusPanelTab, workspacePanels]);
+
+  // Explicit jump actions use the same focused-panel tab behavior as a normal
+  // service click rather than destroying the rest of the workspace.
+  const openService = useCallback((serviceId: string) => {
+    if (focusExistingTab(serviceId)) return;
+    const panelId = focusedPanelId ?? workspacePanels[0]?.id ?? crypto.randomUUID();
+    setWorkspacePanels((current) => {
+      if (current.length === 0) {
+        return [{ id: panelId, tabIds: [serviceId], activeTabId: serviceId }];
+      }
+      return current.map((panel) =>
+        panel.id === panelId
+          ? {
+              ...panel,
+              tabIds: settingsRef.current.openServicesInTabs
+                ? [...panel.tabIds, serviceId]
+                : [serviceId],
+              activeTabId: serviceId
+            }
+          : panel
+      );
+    });
+    setFocusedPanelId(panelId);
+    setSelectedId(serviceId);
+  }, [focusExistingTab, focusedPanelId, workspacePanels]);
+
+  // Ctrl/Cmd-click creates a panel. Existing tabs are focused rather than
+  // duplicated because one live xterm instance belongs to each service.
+  const openInSplit = useCallback((serviceId: string) => {
+    if (focusExistingTab(serviceId)) return;
+    const panelId = crypto.randomUUID();
+    setWorkspacePanels((current) => [
+      ...current,
+      { id: panelId, tabIds: [serviceId], activeTabId: serviceId }
+    ]);
+    setFocusedPanelId(panelId);
+    setSelectedId(serviceId);
+  }, [focusExistingTab]);
 
   // Auto-clear the flash so the CSS animation can re-fire on the next jump
   // (re-adding the same class to an element doesn't restart its animation).
@@ -414,22 +509,49 @@ export function App() {
   // the pane to confirm the jump.
   const jumpToSearchResult = useCallback(
     (serviceId: string, query: string) => {
-      setPaneIds((current) =>
-        current.includes(serviceId) ? current : [...current, serviceId]
-      );
-      setSelectedId(serviceId);
+      openService(serviceId);
       setSearchPaneId(serviceId);
       setPaneSearchSeed({ serviceId, query, nonce: Date.now() });
       setFlashServiceId(serviceId);
       setFlashNonce((n) => n + 1);
     },
-    []
+    [openService]
   );
 
-  const closePane = useCallback((serviceId: string) => {
-    setPaneIds((current) => current.filter((id) => id !== serviceId));
-    // Clearing focus lets `selected` fall back to the first remaining pane.
-    setSelectedId((current) => (current === serviceId ? null : current));
+  const closePane = useCallback((serviceId: string, requestedPanelId?: string) => {
+    const current = workspacePanelsRef.current;
+    const panelIndex = requestedPanelId
+      ? current.findIndex((panel) => panel.id === requestedPanelId)
+      : current.findIndex((panel) => panel.tabIds.includes(serviceId));
+    if (panelIndex < 0) return;
+    const panel = current[panelIndex];
+    const tabIndex = panel.tabIds.indexOf(serviceId);
+    const remainingTabs = panel.tabIds.filter((id) => id !== serviceId);
+    let next: WorkspacePanel[];
+    let nextFocus: { panelId: string; serviceId: string } | null = null;
+    const closingFocusedTab =
+      focusedPanelIdRef.current === panel.id && selectedIdRef.current === serviceId;
+    if (remainingTabs.length === 0) {
+      next = current.filter((candidate) => candidate.id !== panel.id);
+      const adjacent = next[Math.min(panelIndex, next.length - 1)];
+      if (closingFocusedTab && adjacent) {
+        nextFocus = { panelId: adjacent.id, serviceId: adjacent.activeTabId };
+      }
+    } else {
+      const activeTabId = panel.activeTabId === serviceId
+        ? remainingTabs[Math.min(tabIndex, remainingTabs.length - 1)]
+        : panel.activeTabId;
+      next = current.map((candidate) =>
+        candidate.id === panel.id ? { ...candidate, tabIds: remainingTabs, activeTabId } : candidate
+      );
+      if (closingFocusedTab) nextFocus = { panelId: panel.id, serviceId: activeTabId };
+    }
+    workspacePanelsRef.current = next;
+    setWorkspacePanels(next);
+    if (closingFocusedTab) {
+      setFocusedPanelId(nextFocus?.panelId ?? null);
+      setSelectedId(nextFocus?.serviceId ?? null);
+    }
   }, []);
 
   useEffect(() => {
@@ -444,9 +566,11 @@ export function App() {
     invoke<AppSettings>("load_settings")
       .then((loaded) => {
         setSettings(loaded);
+        setSettingsLoaded(true);
       })
       .catch(() => {
         /* default settings stay in place */
+        setSettingsLoaded(true);
       });
   }, []);
 
@@ -458,15 +582,49 @@ export function App() {
 
   const persistSettings = useCallback(
     async (nextSettings: AppSettings) => {
-      const saved = await invoke<AppSettings>("save_settings", { settings: nextSettings });
-      setSettings(saved);
-      return saved;
+      const previousSettings = settingsRef.current;
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
+
+      const save = settingsWriteQueueRef.current
+        .catch(() => {
+          /* a failed write must not prevent the next queued save */
+        })
+        .then(() => invoke<AppSettings>("save_settings", { settings: nextSettings }));
+
+      const tracked = save.then(
+        (saved) => {
+          // A later queued update already contains this change. Do not replace
+          // that optimistic state with an older backend response.
+          if (settingsRef.current === nextSettings) {
+            settingsRef.current = saved;
+            setSettings(saved);
+          }
+          return saved;
+        },
+        (error) => {
+          if (settingsRef.current === nextSettings) {
+            settingsRef.current = previousSettings;
+            setSettings(previousSettings);
+          }
+          throw error;
+        }
+      );
+
+      settingsWriteQueueRef.current = tracked.then(
+        () => undefined,
+        () => undefined
+      );
+      return tracked;
     },
     []
   );
 
   useEffect(() => {
-    if (sameAliases(settings.projectNameAliases, projectNameAliases)) {
+    // Services can finish loading before settings. Never persist aliases from
+    // DEFAULT_SETTINGS during that gap, since doing so would overwrite saved
+    // profiles and every other preference with their empty defaults.
+    if (!settingsLoaded || sameAliases(settings.projectNameAliases, projectNameAliases)) {
       return;
     }
 
@@ -475,7 +633,42 @@ export function App() {
       // the user didn't initiate this and there's no obvious place to display it.
       console.warn("Failed to persist project name aliases:", errorMessage(error));
     });
-  }, [persistSettings, projectNameAliases, settings]);
+  }, [persistSettings, projectNameAliases, settings, settingsLoaded]);
+
+  useEffect(() => {
+    if (!settingsLoaded || !servicesLoaded) return;
+
+    // Older or previously damaged settings can lose the managed profile
+    // registry while services.json still contains valid profile assignments.
+    // Recover those orphaned ids so the profile picker and assignments remain
+    // usable instead of silently hiding the entire workflow.
+    const current = settingsRef.current;
+    const knownIds = new Set(current.profiles.map((profile) => profile.id));
+    const missingIds = Array.from(
+      new Set(
+        services
+          .map((service) => service.profile?.trim() ?? "")
+          .filter((profileId) => profileId && !knownIds.has(profileId))
+      )
+    );
+    if (missingIds.length === 0) return;
+
+    void persistSettings({
+      ...current,
+      profiles: [
+        ...current.profiles,
+        ...missingIds.map((profileId) => ({ id: profileId, name: profileId }))
+      ]
+    })
+      .then(() => {
+        setManagerMessage(
+          `Recovered ${missingIds.length} profile${missingIds.length === 1 ? "" : "s"} from service assignments`
+        );
+      })
+      .catch((error) => {
+        console.warn("Failed to recover service profiles:", errorMessage(error));
+      });
+  }, [persistSettings, services, servicesLoaded, settingsLoaded]);
 
   // Switch the active profile (null = "All profiles"), persisted in settings.
   const setActiveProfile = useCallback(
@@ -488,6 +681,17 @@ export function App() {
     },
     [persistSettings]
   );
+
+  const cycleProfile = useCallback(() => {
+    const current = settingsRef.current;
+    const ids: Array<string | null> = [null, ...current.profiles.map((profile) => profile.id)];
+    if (ids.length <= 1) return;
+    const index = ids.findIndex((id) => id === (current.activeProfile ?? null));
+    const next = ids[(index + 1 + ids.length) % ids.length] ?? null;
+    setActiveProfile(next);
+    const label = current.profiles.find((profile) => profile.id === next)?.name ?? "All profiles";
+    setManagerMessage(`Profile: ${label}`);
+  }, [setActiveProfile]);
 
   // Create a profile by name and switch to it. Powers the command-palette quick
   // add; Settings has the fuller create/rename/delete UI. Name uniqueness is
@@ -514,25 +718,6 @@ export function App() {
     [persistSettings]
   );
 
-  // Switching profiles is a pure view filter, but a hidden service shouldn't
-  // stay open or focused. When the active profile changes, drop panes that the
-  // new profile hides and clear the selection if it's no longer visible. The
-  // services themselves keep running — only the view is pruned.
-  useEffect(() => {
-    if (!activeProfile) return;
-    setPaneIds((current) =>
-      current.filter((id) => {
-        const service = servicesRef.current.find((candidate) => candidate.id === id);
-        return !service || isServiceInProfile(service, activeProfile);
-      })
-    );
-    setSelectedId((current) => {
-      if (!current) return current;
-      const service = servicesRef.current.find((candidate) => candidate.id === current);
-      return service && !isServiceInProfile(service, activeProfile) ? null : current;
-    });
-  }, [activeProfile]);
-
   // Count of running/starting services hidden by the active profile, surfaced
   // in the sidebar so a live-but-hidden service doesn't become a mystery.
   const runningElsewhere = useMemo(() => {
@@ -540,9 +725,29 @@ export function App() {
     return services.filter(
       (service) =>
         !isServiceInProfile(service, activeProfile) &&
-        (statuses[service.id] === "running" || statuses[service.id] === "starting")
+        (["running", "starting", "restarting"] as ServiceStatus[]).includes(
+          statuses[service.id]
+        )
     ).length;
   }, [services, activeProfile, statuses]);
+
+  const profileActivity = useMemo(() => {
+    const byProfile: Record<string, number> = {};
+    const profileIds = new Set(settings.profiles.map((profile) => profile.id));
+    let global = 0;
+    for (const service of services) {
+      if (!(["running", "starting", "restarting"] as ServiceStatus[]).includes(statuses[service.id])) {
+        continue;
+      }
+      const profileId = service.profile?.trim();
+      if (profileId && profileIds.has(profileId)) {
+        byProfile[profileId] = (byProfile[profileId] ?? 0) + 1;
+      } else {
+        global += 1;
+      }
+    }
+    return { global, byProfile };
+  }, [services, settings.profiles, statuses]);
 
   useEffect(() => {
     let cancelled = false;
@@ -665,11 +870,7 @@ export function App() {
   useEffect(() => {
     reloadServices()
       .then((loaded) => {
-        const first = loaded[0]?.id ?? null;
-        setSelectedId((current) => current ?? first);
-        setPaneIds((current) =>
-          current.length > 0 ? current : first ? [first] : []
-        );
+        setServicesLoaded(true);
         void scanPorts(loaded);
         void scanRuntimeRequirements(loaded).catch((error) => {
           console.warn("Failed to check runtime requirements:", errorMessage(error));
@@ -677,8 +878,113 @@ export function App() {
       })
       .catch(() => {
         /* error already surfaced in managerMessage */
+        setServicesLoaded(true);
       });
   }, [reloadServices, scanPorts, scanRuntimeRequirements]);
+
+  useEffect(() => {
+    if (!settingsLoaded || !servicesLoaded || workspaceRestoredRef.current) return;
+    const validIds = new Set(services.map((service) => service.id));
+    let panels = (settings.workspacePanels ?? [])
+      .map((panel) => {
+        const tabIds = panel.tabIds.filter((id) => validIds.has(id));
+        return {
+          ...panel,
+          tabIds,
+          activeTabId: tabIds.includes(panel.activeTabId) ? panel.activeTabId : tabIds[0] ?? ""
+        };
+      })
+      .filter((panel) => panel.tabIds.length > 0);
+    if (panels.length === 0) {
+      const restored = (settings.openPaneIds ?? []).filter((id) => validIds.has(id));
+      const splitIds = (settings.splitPaneIds ?? []).filter((id) => validIds.has(id));
+      if (splitIds.length > 0) {
+        panels = splitIds.map((id) => ({ id: crypto.randomUUID(), tabIds: [id], activeTabId: id }));
+        const remaining = restored.filter((id) => !splitIds.includes(id));
+        if (remaining.length > 0) {
+          const target = panels.find((panel) => panel.activeTabId === settings.focusedPaneId) ?? panels[0];
+          target.tabIds.push(...remaining);
+        }
+      } else if (restored.length > 0) {
+        const activeTabId = settings.focusedPaneId && restored.includes(settings.focusedPaneId)
+          ? settings.focusedPaneId
+          : restored[0];
+        panels = [{ id: crypto.randomUUID(), tabIds: restored, activeTabId }];
+      } else if (services[0]) {
+        panels = [{ id: crypto.randomUUID(), tabIds: [services[0].id], activeTabId: services[0].id }];
+      }
+    }
+    const focusedPanel = panels.find((panel) => panel.id === settings.focusedPanelId)
+      ?? panels.find((panel) => panel.activeTabId === settings.focusedPaneId)
+      ?? panels[0]
+      ?? null;
+    workspaceRestoredRef.current = true;
+    workspacePanelsRef.current = panels;
+    setWorkspacePanels(panels);
+    setFocusedPanelId(focusedPanel?.id ?? null);
+    setSelectedId(focusedPanel?.activeTabId ?? null);
+  }, [services, servicesLoaded, settings.focusedPaneId, settings.focusedPanelId, settings.openPaneIds, settings.splitPaneIds, settings.workspacePanels, settingsLoaded]);
+
+  useEffect(() => {
+    if (!settingsLoaded || settings.openServicesInTabs) return;
+    setWorkspacePanels((current) => {
+      const next = current.map((panel) => ({
+        ...panel,
+        tabIds: [panel.activeTabId]
+      }));
+      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+    });
+  }, [settings.openServicesInTabs, settingsLoaded]);
+
+  // Live services.json edits and in-app deletion can invalidate restored tabs.
+  // Keep the runtime workspace normalized after the one-time startup restore so
+  // a removed service cannot leave a blank panel or an invalid active tab that
+  // is then persisted back to settings.
+  useEffect(() => {
+    if (!workspaceRestoredRef.current) return;
+    const validIds = new Set(services.map((service) => service.id));
+    const current = workspacePanelsRef.current;
+    const next = current
+      .map((panel) => {
+        const tabIds = panel.tabIds.filter((id) => validIds.has(id));
+        return {
+          ...panel,
+          tabIds,
+          activeTabId: tabIds.includes(panel.activeTabId) ? panel.activeTabId : tabIds[0] ?? ""
+        };
+      })
+      .filter((panel) => panel.tabIds.length > 0);
+
+    if (JSON.stringify(next) === JSON.stringify(current)) return;
+
+    const focusedPanel =
+      next.find((panel) => panel.id === focusedPanelIdRef.current) ?? next[0] ?? null;
+    workspacePanelsRef.current = next;
+    setWorkspacePanels(next);
+    setFocusedPanelId(focusedPanel?.id ?? null);
+    setSelectedId(focusedPanel?.activeTabId ?? null);
+    setSearchPaneId((serviceId) => (serviceId && validIds.has(serviceId) ? serviceId : null));
+    setPaneSearchSeed((seed) => (seed && validIds.has(seed.serviceId) ? seed : null));
+  }, [services]);
+
+  useEffect(() => {
+    if (!workspaceRestoredRef.current) return;
+    const samePanels = JSON.stringify(settings.workspacePanels ?? []) === JSON.stringify(workspacePanels);
+    if (samePanels && (settings.focusedPanelId ?? null) === focusedPanelId && (settings.focusedPaneId ?? null) === selectedId) return;
+    const timer = window.setTimeout(() => {
+      void persistSettings({
+        ...settingsRef.current,
+        openPaneIds: paneIds,
+        focusedPaneId: selectedId,
+        splitPaneIds: workspacePanels.map((panel) => panel.activeTabId),
+        workspacePanels,
+        focusedPanelId
+      }).catch((error) => {
+        console.warn("Failed to persist workspace:", errorMessage(error));
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [focusedPanelId, paneIds, persistSettings, selectedId, settings.focusedPaneId, settings.focusedPanelId, settings.workspacePanels, workspacePanels]);
 
   // External edits to services.json (agent, script, editor) reload live.
   useEffect(() => {
@@ -1066,6 +1372,7 @@ export function App() {
         serviceId,
         `\r\n\x1b[33m[manager] auto-restarting (attempt ${record.count}/${maxAttempts})\x1b[0m\r\n`
       );
+      setStatuses((current) => ({ ...current, [serviceId]: "restarting" }));
       window.setTimeout(() => {
         void startServiceRef.current(service);
       }, AUTO_RESTART_DELAY_MS);
@@ -1834,20 +2141,36 @@ export function App() {
   }, [selected, clearLog]);
 
   const toggleProjectNamePrivacy = useCallback((groupName: string) => {
-    const hidden = !settings.hiddenProjectNames[groupName];
+    const current = settingsRef.current;
+    const hidden = !current.hiddenProjectNames[groupName];
     const nextSettings = {
-      ...settings,
+      ...current,
       hiddenProjectNames: {
-        ...settings.hiddenProjectNames,
+        ...current.hiddenProjectNames,
         [groupName]: hidden
       },
-      projectNameAliases: hidden ? projectNameAliases : settings.projectNameAliases
+      projectNameAliases: hidden ? projectNameAliases : current.projectNameAliases
     };
 
     void persistSettings(nextSettings).catch((error) => {
       console.warn("Failed to toggle project name privacy:", errorMessage(error));
     });
-  }, [persistSettings, projectNameAliases, settings]);
+  }, [persistSettings, projectNameAliases]);
+
+  const toggleProjectPinned = useCallback((groupName: string) => {
+    const current = settingsRef.current;
+    const nextPinned = { ...(current.pinnedProjectNames ?? {}) };
+    const pinned = !(nextPinned[groupName] ?? false);
+    if (pinned) {
+      nextPinned[groupName] = true;
+    } else {
+      delete nextPinned[groupName];
+    }
+
+    void persistSettings({ ...current, pinnedProjectNames: nextPinned }).catch((error) => {
+      console.warn("Failed to toggle pinned project:", errorMessage(error));
+    });
+  }, [persistSettings]);
 
   // Display name for a service, masked when stream mode is on and the service
   // is flagged sensitive. Used everywhere a service name is shown as UI chrome.
@@ -1982,6 +2305,25 @@ export function App() {
         return;
       }
 
+      const shortcutTarget = event.target as HTMLElement | null;
+      const shortcutInForm =
+        shortcutTarget != null &&
+        (shortcutTarget.tagName === "INPUT" ||
+          shortcutTarget.tagName === "TEXTAREA" ||
+          shortcutTarget.isContentEditable) &&
+        !shortcutTarget.classList.contains("xterm-helper-textarea");
+
+      // Ctrl/Cmd + Shift + Down cycles profiles in visible order, including
+      // All profiles, and wraps at the end.
+      if (event.shiftKey && event.key === "ArrowDown") {
+        if (!shortcutInForm) {
+          event.preventDefault();
+          event.stopPropagation();
+          cycleProfile();
+        }
+        return;
+      }
+
       if (event.altKey || event.shiftKey) {
         return;
       }
@@ -2048,7 +2390,7 @@ export function App() {
         if (service) {
           event.preventDefault();
           event.stopPropagation();
-          openSingle(service.id);
+          openService(service.id);
         }
         return;
       }
@@ -2104,13 +2446,14 @@ export function App() {
     restartService,
     stopService,
     clearSelectedLog,
-    openSingle,
+    openService,
     paneIds,
     closePane,
     settingsOpen,
     searchPaneId,
     commandOpen,
     profilePromptOpen
+    ,cycleProfile
   ]);
 
   // Suppress the WebView's native context menu on non-editable app chrome.
@@ -2166,6 +2509,7 @@ export function App() {
         activeProfile={activeProfile}
         setActiveProfile={setActiveProfile}
         runningElsewhere={runningElsewhere}
+        profileActivity={profileActivity}
         dropIndicator={dropIndicator}
         dragId={dragId}
         dragIdRef={dragIdRef}
@@ -2180,6 +2524,7 @@ export function App() {
         setDropIndicator={setDropIndicator}
         setEditing={setEditing}
         toggleGroupCollapsed={toggleGroupCollapsed}
+        toggleProjectPinned={toggleProjectPinned}
         toggleProjectNamePrivacy={toggleProjectNamePrivacy}
         startGroup={startGroup}
         stopGroup={stopGroup}
@@ -2309,6 +2654,8 @@ export function App() {
             statuses={statuses}
             pids={pids}
             gridColumns={settings.paneGridColumns}
+            tabMode={settings.openServicesInTabs ?? true}
+            panels={workspacePanels}
             awaitingOutput={awaitingOutput}
             startHealth={startHealth}
             terminalsRef={terminalsRef}
@@ -2322,11 +2669,13 @@ export function App() {
             onStopBlockerAndRestart={stopBlockerAndRestart}
             onAdoptRunningInstance={adoptRunningInstance}
             onReleaseAdopted={releaseAdopted}
-            onFocus={setSelectedId}
-            onClose={(id) => {
+            onFocus={focusPanelTab}
+            onTabFocus={focusPanelTab}
+            onTabMove={movePanelTab}
+            onClose={(panelId, id) => {
               if (searchPaneId === id) setSearchPaneId(null);
               if (paneSearchSeed?.serviceId === id) setPaneSearchSeed(null);
-              closePane(id);
+              closePane(id, panelId);
             }}
             onStart={manualStart}
             onStop={stopService}

@@ -24,6 +24,16 @@ pub struct Profile {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspacePanel {
+    pub id: String,
+    #[serde(default)]
+    pub tab_ids: Vec<String>,
+    #[serde(default)]
+    pub active_tab_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     #[serde(default = "default_editor_command_string")]
     pub editor_command: String,
@@ -35,6 +45,10 @@ pub struct AppSettings {
     /// minimized project stays minimized across restarts. Absent = expanded.
     #[serde(default)]
     pub collapsed_project_names: BTreeMap<String, bool>,
+    /// Projects shown before unpinned projects in the sidebar. The map keeps
+    /// project ordering preferences out of individual service configuration.
+    #[serde(default)]
+    pub pinned_project_names: BTreeMap<String, bool>,
     /// Projects flagged sensitive in the Settings list. Distinct from
     /// `hidden_project_names` (the manual sidebar toggle): these are hidden
     /// only while stream mode is on, never on their own.
@@ -49,6 +63,18 @@ pub struct AppSettings {
     /// profiles". Cleared on load/save if it doesn't match an existing profile.
     #[serde(default)]
     pub active_profile: Option<String>,
+    #[serde(default)]
+    pub open_pane_ids: Vec<String>,
+    #[serde(default)]
+    pub focused_pane_id: Option<String>,
+    #[serde(default)]
+    pub split_pane_ids: Vec<String>,
+    #[serde(default)]
+    pub workspace_panels: Vec<WorkspacePanel>,
+    #[serde(default)]
+    pub focused_panel_id: Option<String>,
+    #[serde(default = "default_open_services_in_tabs")]
+    pub open_services_in_tabs: bool,
     #[serde(default = "default_auto_restart_max_attempts")]
     pub auto_restart_max_attempts: u32,
     #[serde(default = "default_auto_restart_window_ms")]
@@ -68,10 +94,17 @@ impl Default for AppSettings {
             hide_project_names: false,
             hidden_project_names: BTreeMap::new(),
             collapsed_project_names: BTreeMap::new(),
+            pinned_project_names: BTreeMap::new(),
             sensitive_project_names: BTreeMap::new(),
             project_name_aliases: BTreeMap::new(),
             profiles: Vec::new(),
             active_profile: None,
+            open_pane_ids: Vec::new(),
+            focused_pane_id: None,
+            split_pane_ids: Vec::new(),
+            workspace_panels: Vec::new(),
+            focused_panel_id: None,
+            open_services_in_tabs: true,
             auto_restart_max_attempts: DEFAULT_AUTO_RESTART_MAX_ATTEMPTS,
             auto_restart_window_ms: DEFAULT_AUTO_RESTART_WINDOW_MS,
             max_log_chunks: DEFAULT_MAX_LOG_CHUNKS,
@@ -95,6 +128,10 @@ fn default_max_log_chunks() -> u32 {
 
 fn default_pane_grid_columns() -> u32 {
     DEFAULT_PANE_GRID_COLUMNS
+}
+
+fn default_open_services_in_tabs() -> bool {
+    true
 }
 
 fn default_show_timestamps() -> bool {
@@ -203,7 +240,10 @@ fn migrate_global_project_privacy(settings: &mut AppSettings) {
 /// or renamed-away profile can never leave the app stuck on a phantom filter.
 fn normalize_active_profile(settings: &mut AppSettings) {
     if let Some(active) = &settings.active_profile {
-        let exists = settings.profiles.iter().any(|profile| &profile.id == active);
+        let exists = settings
+            .profiles
+            .iter()
+            .any(|profile| &profile.id == active);
         if !exists {
             settings.active_profile = None;
         }
@@ -219,4 +259,20 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, AppError> {
             message: source.to_string(),
         })?;
     Ok(app_config_dir.join("settings.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+
+    #[test]
+    fn older_settings_default_to_tabs_with_no_panel_state() {
+        let settings: AppSettings = serde_json::from_str("{}").expect("settings should load");
+
+        assert!(settings.open_services_in_tabs);
+        assert!(settings.workspace_panels.is_empty());
+        assert!(settings.focused_panel_id.is_none());
+        assert!(settings.pinned_project_names.is_empty());
+    }
+
 }

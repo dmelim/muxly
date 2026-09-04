@@ -1,4 +1,11 @@
-export type ServiceStatus = "stopped" | "starting" | "running" | "stopping" | "exited" | "failed";
+export type ServiceStatus =
+  | "stopped"
+  | "starting"
+  | "restarting"
+  | "running"
+  | "stopping"
+  | "exited"
+  | "failed";
 
 export type ServiceConfig = {
   id: string;
@@ -77,6 +84,13 @@ export type Profile = {
   name: string;
 };
 
+export type WorkspacePanel = {
+  id: string;
+  tabIds: string[];
+  activeTabId: string;
+};
+
+
 export type AppSettings = {
   editorCommand: string;
   // Manual per-project "hide name" toggle (the sidebar eye button). Hides the
@@ -85,6 +99,8 @@ export type AppSettings = {
   // Per-project collapsed (minimized) state in the sidebar. Persisted so a
   // project you minimize stays minimized across restarts. Absent = expanded.
   collapsedProjectNames: Record<string, boolean>;
+  // Pinned projects are shown before unpinned projects in the sidebar.
+  pinnedProjectNames?: Record<string, boolean>;
   // Projects flagged sensitive in the Settings list. Independent of the manual
   // toggle above — these are hidden only while stream mode is on.
   sensitiveProjectNames: Record<string, boolean>;
@@ -94,6 +110,14 @@ export type AppSettings = {
   // Id of the active profile, or null for "All profiles". Cleared by the
   // backend if it no longer names an existing profile.
   activeProfile: string | null;
+  // Continuously persisted workspace state. Optional for backwards
+  // compatibility with settings files written before pane restore existed.
+  openPaneIds?: string[];
+  focusedPaneId?: string | null;
+  splitPaneIds?: string[];
+  workspacePanels?: WorkspacePanel[];
+  focusedPanelId?: string | null;
+  openServicesInTabs?: boolean;
   // Auto-restart guardrails — when a service crashes (status: failed), we
   // re-spawn up to `autoRestartMaxAttempts` times within `autoRestartWindowMs`.
   // A quiet period exceeding the window resets the budget.

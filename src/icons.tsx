@@ -75,6 +75,17 @@ export function SearchIcon({ className }: IconProps) {
   );
 }
 
+/** Push pin - keep a service at the top of its group. */
+export function PinIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M12 17v5" />
+      <path d="m5 17 2-6V5h10v6l2 6z" />
+      <path d="M5 5h14" />
+    </svg>
+  );
+}
+
 /** Eye — privacy visible/off toggle. */
 export function EyeIcon({ className }: IconProps) {
   return (

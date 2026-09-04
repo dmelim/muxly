@@ -4,6 +4,7 @@ import { BuiltinServiceIcon } from "./serviceIcons";
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
   starting: "bg-amber-400",
+  restarting: "bg-amber-400 animate-pulse",
   running: "bg-cyan-400",
   stopping: "bg-orange-400",
   exited: "bg-sky-400",

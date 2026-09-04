@@ -1,20 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { MutableRefObject, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
-import type { ServiceConfig, ServiceStatus } from "./types";
+import type { ServiceConfig, ServiceStatus, WorkspacePanel } from "./types";
 import type { StartHealth } from "./appTypes";
 import { displayServiceName, formatCommand, redactSensitive } from "./types";
-import { groupKey } from "./appUtils";
+import { groupKey, statusLabels } from "./appUtils";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
   starting: "bg-amber-400",
+  restarting: "bg-amber-400 animate-pulse",
   running: "bg-cyan-400",
   stopping: "bg-orange-400",
   exited: "bg-sky-400",
@@ -59,6 +61,10 @@ type TerminalPanesProps = {
   pids: Record<string, number>;
   /** Max columns before the pane grid wraps to a new row. */
   gridColumns: number;
+  tabMode: boolean;
+  panels: WorkspacePanel[];
+  onTabFocus: (panelId: string, serviceId: string) => void;
+  onTabMove: (serviceId: string, targetPanelId: string, targetIndex: number) => void;
   /** Per-service flag: a PTY run has started but not yet produced real output.
    * Drives the in-pane "waiting for output…" affordance. */
   awaitingOutput: Record<string, boolean>;
@@ -86,8 +92,8 @@ type TerminalPanesProps = {
   /** Per-service "this foreign process is acting as the service" record.
    * Drives the adopted badge in the pane header. */
   adoptedPids: Record<string, { pid: number; port: number }>;
-  onFocus: (serviceId: string) => void;
-  onClose: (serviceId: string) => void;
+  onFocus: (panelId: string, serviceId: string) => void;
+  onClose: (panelId: string, serviceId: string) => void;
   onStart: (service: ServiceConfig) => void;
   onStop: (service: ServiceConfig) => void;
   onClear: (serviceId: string) => void;
@@ -106,6 +112,8 @@ export function TerminalPanes({
   statuses,
   pids,
   gridColumns,
+  tabMode,
+  panels,
   awaitingOutput,
   startHealth,
   terminalsRef,
@@ -117,6 +125,8 @@ export function TerminalPanes({
   portBlockers,
   adoptedPids,
   onFocus,
+  onTabFocus,
+  onTabMove,
   onClose,
   onStart,
   onStop,
@@ -127,6 +137,31 @@ export function TerminalPanes({
   onAdoptRunningInstance,
   onReleaseAdopted
 }: TerminalPanesProps) {
+  const panelHostsRef = useRef(new Map<string, HTMLDivElement>());
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+  const [draggedTabSourcePanelId, setDraggedTabSourcePanelId] = useState<string | null>(null);
+  const draggedTabIdRef = useRef<string | null>(null);
+  const [tabDropTarget, setTabDropTarget] = useState<{ panelId: string; index: number } | null>(null);
+  const showTabDropTarget = useCallback((panelId: string, index: number) => {
+    if (!draggedTabIdRef.current) return;
+    setTabDropTarget((current) =>
+      current?.panelId === panelId && current.index === index ? current : { panelId, index }
+    );
+  }, []);
+
+  const finishTabDrag = useCallback(() => {
+    draggedTabIdRef.current = null;
+    setDraggedTabId(null);
+    setDraggedTabSourcePanelId(null);
+    setTabDropTarget(null);
+  }, []);
+
+  const dropTab = useCallback((panelId: string, index: number) => {
+    const serviceId = draggedTabIdRef.current;
+    if (serviceId) onTabMove(serviceId, panelId, index);
+    finishTabDrag();
+  }, [finishTabDrag, onTabMove]);
+
   if (paneServices.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-zinc-500">
@@ -135,57 +170,228 @@ export function TerminalPanes({
     );
   }
 
-  // The grid is column-capped, not column-fixed: with fewer panes than the
+  // The grid is column-capped, not column-fixed: with fewer panels than the
   // cap we use one column per pane so each one stays as wide as possible
   // instead of leaving empty cells. Past the cap we wrap to a new row.
-  const cols = Math.max(1, Math.min(gridColumns, paneServices.length));
+  const cols = Math.max(1, Math.min(gridColumns, panels.length));
+  const serviceById = new Map(paneServices.map((service) => [service.id, service]));
+  const draggedService = draggedTabId ? serviceById.get(draggedTabId) : null;
+  const renderTabDropPlaceholder = (panelId: string, index: number) => {
+    if (
+      !draggedService ||
+      draggedTabSourcePanelId === panelId ||
+      tabDropTarget?.panelId !== panelId ||
+      tabDropTarget.index !== index
+    ) {
+      return null;
+    }
+    return (
+      <div
+        key={`tab-drop-${panelId}-${index}`}
+        aria-hidden="true"
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          showTabDropTarget(panelId, index);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          dropTab(panelId, index);
+        }}
+        className="flex min-w-0 items-center gap-1 rounded-t-md border border-b-0 border-white/15 bg-white/5 px-2 py-1 text-xs text-zinc-500 opacity-85"
+      >
+        <span className="flex min-w-0 max-w-48 items-center gap-1.5 truncate">
+          <span className="size-1.5 shrink-0 rounded-full bg-zinc-600" />
+          <span className="truncate">{displayServiceName(draggedService, streamMode)}</span>
+        </span>
+        <span className="rounded p-0.5 text-zinc-600">
+          <CloseIcon className="size-3" />
+        </span>
+      </div>
+    );
+  };
 
   return (
-    <div
-      className="grid min-h-0 flex-1 gap-1.5 p-1.5"
-      style={{
-        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-        gridAutoRows: "minmax(0, 1fr)"
-      }}
-    >
+    <div className="relative min-h-0 flex-1">
+      <div
+        className={`grid h-full min-h-0 gap-1.5 p-1.5 `}
+        style={{
+          gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+          gridAutoRows: "minmax(0, 1fr)"
+        }}
+      >
+      {panels.map((panel) => (
+        <section
+          key={panel.id}
+          aria-label="Terminal panel"
+          className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+        >
+          {tabMode ? (
+            <div
+              role="tablist"
+              aria-label="Panel tabs"
+              onDragOver={(event) => {
+                if (!draggedTabIdRef.current) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                showTabDropTarget(panel.id, panel.tabIds.length);
+              }}
+              onDrop={(event) => {
+                if (!draggedTabIdRef.current) return;
+                event.preventDefault();
+                dropTab(panel.id, panel.tabIds.length);
+              }}
+              className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/10 px-1.5 pt-1.5"
+            >
+              {panel.tabIds.map((serviceId, tabIndex) => {
+                const service = serviceById.get(serviceId);
+                if (!service) return null;
+                return (
+                  <Fragment key={service.id}>
+                    {renderTabDropPlaceholder(panel.id, tabIndex)}
+                    <div
+                      role="presentation"
+                      className={`relative flex min-w-0 items-center gap-1 rounded-t-md border border-b-0 px-2 text-xs ${
+                        service.id === panel.activeTabId
+                          ? "border-white/15 bg-white/10 text-zinc-100"
+                          : "border-transparent text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+                      } ${draggedTabId === service.id ? "opacity-50" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        draggable
+                        aria-selected={service.id === panel.activeTabId}
+                        aria-label={`${displayServiceName(service, streamMode)}, ${statusLabels[statuses[service.id] ?? "stopped"]}`}
+                        onClick={() => onTabFocus(panel.id, service.id)}
+                        onDragStart={(event) => {
+                          draggedTabIdRef.current = service.id;
+                          setDraggedTabId(service.id);
+                          setDraggedTabSourcePanelId(panel.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", service.id);
+                        }}
+                        onDragOver={(event) => {
+                          if (!draggedTabIdRef.current) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                          const bounds = event.currentTarget.getBoundingClientRect();
+                          const index = event.clientX < bounds.left + bounds.width / 2
+                            ? tabIndex
+                            : tabIndex + 1;
+                          showTabDropTarget(panel.id, index);
+                        }}
+                        onDrop={(event) => {
+                          if (!draggedTabIdRef.current) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const bounds = event.currentTarget.getBoundingClientRect();
+                          const index = event.clientX < bounds.left + bounds.width / 2
+                            ? tabIndex
+                            : tabIndex + 1;
+                          dropTab(panel.id, index);
+                        }}
+                        onDragEnd={finishTabDrag}
+                        className="flex min-w-0 max-w-48 self-stretch cursor-grab items-center gap-1.5 truncate py-1 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                      >
+                        <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${statusDots[statuses[service.id] ?? "stopped"]}`} />
+                        <span className="truncate">{displayServiceName(service, streamMode)}</span>
+                        <span className="sr-only">{statusLabels[statuses[service.id] ?? "stopped"]}</span>
+                      </button>
+                      <button type="button" onClick={() => onClose(panel.id, service.id)} aria-label={`Close ${displayServiceName(service, streamMode)} tab`} className="rounded p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40">
+                        <CloseIcon className="size-3" />
+                      </button>
+                    </div>
+                  </Fragment>
+                );
+              })}
+              {renderTabDropPlaceholder(panel.id, panel.tabIds.length)}
+            </div>
+          ) : null}
+          <div
+            ref={(host) => {
+              if (host) panelHostsRef.current.set(panel.id, host);
+              else panelHostsRef.current.delete(panel.id);
+            }}
+            className="relative min-h-0 flex-1"
+          />
+        </section>
+      ))}
+      </div>
       {paneServices.map((service) => {
-        const seed =
-          searchSeed && searchSeed.serviceId === service.id ? searchSeed : null;
+        const panel = panels.find((candidate) => candidate.tabIds.includes(service.id));
+        if (!panel) return null;
+        const seed = searchSeed && searchSeed.serviceId === service.id ? searchSeed : null;
         const flashing = flashServiceId === service.id;
         return (
-          <PaneShell key={service.id} flashing={flashing} flashNonce={flashNonce}>
-            <PaneView
-              service={service}
-              streamMode={streamMode}
-              alias={projectNameAliases[groupKey(service)] ?? ""}
-              status={statuses[service.id] ?? "stopped"}
-              running={pids[service.id] != null || adoptedPids[service.id] != null}
-              awaitingOutput={awaitingOutput[service.id] ?? false}
-              startHealth={startHealth[service.id] ?? null}
-              focused={service.id === focusedId}
-              showClose={paneServices.length > 1}
-              searchOpen={service.id === searchPaneId}
-              searchSeed={seed}
-              blocker={portBlockers[service.id] ?? null}
-              adopted={adoptedPids[service.id] ?? null}
-              terminalsRef={terminalsRef}
-              logsRef={logsRef}
-              onFocus={() => onFocus(service.id)}
-              onClose={() => onClose(service.id)}
-              onStart={() => onStart(service)}
-              onStop={() => onStop(service)}
-              onClear={() => onClear(service.id)}
-              onOpenSearch={() => onOpenSearch(service.id)}
-              onCloseSearch={onCloseSearch}
-              onStopBlockerAndRestart={() => onStopBlockerAndRestart(service)}
-              onAdoptRunningInstance={() => onAdoptRunningInstance(service)}
-              onReleaseAdopted={() => onReleaseAdopted(service.id)}
-            />
-          </PaneShell>
+          <StablePane
+            key={service.id}
+            panelId={panel.id}
+            panelHostsRef={panelHostsRef}
+            active={service.id === panel.activeTabId}
+          >
+            <PaneShell flashing={flashing} flashNonce={flashNonce}>
+              <PaneView
+                service={service}
+                streamMode={streamMode}
+                alias={projectNameAliases[groupKey(service)] ?? ""}
+                status={statuses[service.id] ?? "stopped"}
+                running={pids[service.id] != null || adoptedPids[service.id] != null}
+                awaitingOutput={awaitingOutput[service.id] ?? false}
+                startHealth={startHealth[service.id] ?? null}
+                focused={service.id === focusedId}
+                showIdentity={!tabMode}
+                showClose={!tabMode && panels.length > 1}
+                searchOpen={service.id === searchPaneId}
+                searchSeed={seed}
+                blocker={portBlockers[service.id] ?? null}
+                adopted={adoptedPids[service.id] ?? null}
+                terminalsRef={terminalsRef}
+                logsRef={logsRef}
+                onFocus={() => onFocus(panel.id, service.id)}
+                onClose={() => onClose(panel.id, service.id)}
+                onStart={() => onStart(service)}
+                onStop={() => onStop(service)}
+                onClear={() => onClear(service.id)}
+                onOpenSearch={() => onOpenSearch(service.id)}
+                onCloseSearch={onCloseSearch}
+                onStopBlockerAndRestart={() => onStopBlockerAndRestart(service)}
+                onAdoptRunningInstance={() => onAdoptRunningInstance(service)}
+                onReleaseAdopted={() => onReleaseAdopted(service.id)}
+              />
+            </PaneShell>
+          </StablePane>
         );
       })}
     </div>
   );
+}
+
+// React owns each service at one stable position, independent of panel membership.
+// Moving the portal's existing host preserves xterm, scrollback and search state.
+function StablePane({ panelId, panelHostsRef, active, children }: {
+  panelId: string;
+  panelHostsRef: MutableRefObject<Map<string, HTMLDivElement>>;
+  active: boolean;
+  children: ReactNode;
+}) {
+  const [host] = useState(() => document.createElement("div"));
+  useLayoutEffect(() => {
+    const target = panelHostsRef.current.get(panelId);
+    host.className = active ? "h-full" : "hidden";
+    if (target && host.parentElement !== target) {
+      const focused = host.contains(document.activeElement)
+        ? document.activeElement as HTMLElement
+        : null;
+      target.appendChild(host);
+      if (active) focused?.focus({ preventScroll: true });
+    }
+  });
+  useLayoutEffect(() => () => host.remove(), [host]);
+  return createPortal(children, host);
 }
 
 // Thin wrapper around each pane that runs a one-shot amber background
@@ -223,7 +429,7 @@ function PaneShell({
   return (
     <div
       ref={ref}
-      className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-white/5"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
     >
       {children}
     </div>
@@ -354,6 +560,7 @@ type PaneViewProps = {
   /** Start health for a not-yet-producing run, or null when healthy. */
   startHealth: StartHealth | null;
   focused: boolean;
+  showIdentity: boolean;
   showClose: boolean;
   /** Whether the in-pane search bar should be shown for this pane. */
   searchOpen: boolean;
@@ -387,6 +594,7 @@ function PaneView({
   awaitingOutput,
   startHealth,
   focused,
+  showIdentity,
   showClose,
   searchOpen,
   searchSeed,
@@ -564,12 +772,12 @@ function PaneView({
   return (
     <div
       onMouseDown={onFocus}
-      className={`flex min-h-0 flex-1 flex-col ${
-        focused ? "ring-1 ring-inset ring-cyan-500/30" : ""
+      className={`flex min-h-0 flex-1 flex-col ring-1 ring-inset ${
+        focused ? "ring-cyan-500/30" : "ring-[var(--muxly-border)]"
       }`}
     >
       <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
-        <span className="flex min-w-0 items-center gap-2">
+        {showIdentity ? <span className="flex min-w-0 items-center gap-2">
           {/* Adopted services show a cyan dot regardless of the underlying
               ServiceStatus, since the foreign process is what's actually
               listening on the port right now. */}
@@ -607,7 +815,7 @@ function PaneView({
               </button>
             </Tooltip>
           ) : null}
-        </span>
+        </span> : <span />}
         <span className="flex shrink-0 items-center gap-0.5">
           {running ? (
             <PaneIconButton
@@ -630,7 +838,7 @@ function PaneView({
             <PaneIconButton
               label="Start"
               accent="text-cyan-400 hover:bg-cyan-500/15 hover:text-cyan-300"
-              disabled={status === "running" || status === "starting"}
+              disabled={status === "running" || status === "starting" || status === "restarting"}
               onClick={onStart}
             >
               <PlayIcon className="size-3.5" />

@@ -13,6 +13,7 @@ import {
   EyeOffIcon,
   GripVerticalIcon,
   PlayIcon,
+  PinIcon,
   PlusIcon,
   SplitIcon,
   StopIcon
@@ -41,6 +42,7 @@ type Props = {
   // How many running/starting services are hidden by the active profile, so the
   // user is reminded something is alive outside the current view.
   runningElsewhere: number;
+  profileActivity: { global: number; byProfile: Record<string, number> };
   dropIndicator: DropIndicator;
   dragId: string | null;
   dragIdRef: MutableRefObject<string | null>;
@@ -55,6 +57,7 @@ type Props = {
   setDropIndicator: (indicator: DropIndicator | ((current: DropIndicator) => DropIndicator)) => void;
   setEditing: (target: EditTarget | null) => void;
   toggleGroupCollapsed: (groupName: string) => void;
+  toggleProjectPinned: (groupName: string) => void;
   toggleProjectNamePrivacy: (groupName: string) => void;
   startGroup: (groupName: string) => void;
   stopGroup: (groupName: string) => void;
@@ -89,6 +92,7 @@ export function ServicesSidebar({
   activeProfile,
   setActiveProfile,
   runningElsewhere,
+  profileActivity,
   dropIndicator,
   dragId,
   dragIdRef,
@@ -103,6 +107,7 @@ export function ServicesSidebar({
   setDropIndicator,
   setEditing,
   toggleGroupCollapsed,
+  toggleProjectPinned,
   toggleProjectNamePrivacy,
   startGroup,
   stopGroup,
@@ -171,6 +176,7 @@ export function ServicesSidebar({
               profiles={profiles}
               activeProfile={activeProfile}
               setActiveProfile={setActiveProfile}
+              activity={profileActivity}
             />
             {activeProfile && runningElsewhere > 0 ? (
               <p className="mt-2 flex items-center gap-1.5 text-[11px] text-cyan-300/90">
@@ -211,9 +217,10 @@ export function ServicesSidebar({
         {groupedServices.map(([groupName, groupServicesList]) => {
           const anyRunning = groupServicesList.some((service) => {
             const status = statuses[service.id];
-            return status === "running" || status === "starting";
+            return status === "running" || status === "starting" || status === "restarting";
           });
           const collapsed = collapsedGroups[groupName] ?? false;
+          const groupPinned = settings.pinnedProjectNames?.[groupName] ?? false;
           const groupHidden = settings.hiddenProjectNames[groupName] ?? false;
           const displayGroupName = displayProjectName(groupName);
           // A service drag onto this header appends to the group (end-of-group);
@@ -341,6 +348,18 @@ export function ServicesSidebar({
                   </Tooltip>
                 </div>
                 <div className="flex shrink-0 gap-0.5">
+                  <Tooltip label={groupPinned ? "Unpin project" : "Pin project"}>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => toggleProjectPinned(groupName)}
+                      aria-label={`${groupPinned ? "Unpin" : "Pin"} project ${displayGroupName}`}
+                      aria-pressed={groupPinned}
+                      className={groupPinned ? "text-cyan-400" : "text-zinc-500"}
+                    >
+                      <PinIcon className="size-3.5" />
+                    </Button>
+                  </Tooltip>
                   <Tooltip label={groupHidden ? "Show project name" : "Hide project name"}>
                     <Button
                       variant="ghost"
@@ -440,7 +459,7 @@ export function ServicesSidebar({
                         role="button"
                         tabIndex={0}
                         onClick={(event) => {
-                          if (event.shiftKey) {
+                          if (event.ctrlKey || event.metaKey) {
                             openInSplit(service.id);
                           } else {
                             openService(service.id);

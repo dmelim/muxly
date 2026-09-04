@@ -404,6 +404,26 @@ export function SettingsView({
                 aria-label="Max pane grid columns"
               />
             </FormRow>
+            <label className="flex cursor-pointer items-start gap-3 pt-1">
+              <input
+                type="checkbox"
+                checked={settings.openServicesInTabs ?? true}
+                onChange={(event) => {
+                  setSaveMessage(null);
+                  void onSave({ ...settings, openServicesInTabs: event.target.checked }).catch(
+                    (error) => setSaveMessage(error instanceof Error ? error.message : String(error))
+                  );
+                }}
+                className="mt-0.5 size-4 cursor-pointer accent-cyan-500"
+                aria-label="Open new services in tabs"
+              />
+              <span className="text-sm">
+                <span className="block text-zinc-200">Open new services in tabs</span>
+                <span className="mt-0.5 block text-xs text-zinc-500">
+                  A normal click opens a tab in the focused panel. Ctrl/Cmd-click opens a separate panel with its own tabs.
+                </span>
+              </span>
+            </label>
           </Section>
 
           <Section

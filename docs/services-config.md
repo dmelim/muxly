@@ -93,10 +93,20 @@ or hand-written file keeps loading:
   "editorCommand": "cursor",
   "hiddenProjectNames": { "my-app": true },
   "collapsedProjectNames": { "my-app": true },
+  "pinnedProjectNames": { "my-app": true },
   "sensitiveProjectNames": { "my-app": true },
   "projectNameAliases": { "my-app": "alpha-tango-sierra-42" },
   "profiles": [{ "id": "day-job", "name": "Day job" }],
   "activeProfile": "day-job",
+  "openPaneIds": ["api", "web"],
+  "focusedPaneId": "web",
+  "splitPaneIds": ["api", "web"],
+  "workspacePanels": [
+    { "id": "panel-a", "tabIds": ["api", "worker"], "activeTabId": "api" },
+    { "id": "panel-b", "tabIds": ["web"], "activeTabId": "web" }
+  ],
+  "focusedPanelId": "panel-b",
+  "openServicesInTabs": true,
   "autoRestartMaxAttempts": 3,
   "autoRestartWindowMs": 60000,
   "maxLogChunks": 5000,
@@ -114,6 +124,12 @@ or hand-written file keeps loading:
 | `projectNameAliases`     | object<string,string>  | Persisted random aliases used when a project name is hidden/masked. |
 | `profiles`               | array of `{id, name}`  | The user's managed profiles. Empty = feature unused. Referenced by each service's `profile`. |
 | `activeProfile`          | string \| null         | Id of the currently selected profile, or null/absent for "All profiles". Cleared if it doesn't match an existing profile. |
+| `openPaneIds`            | array of strings       | Legacy flat list retained for backwards-compatible workspace restore. |
+| `focusedPaneId`          | string \| null         | Focused service tab restored on launch. |
+| `splitPaneIds`           | array of strings       | Legacy visible-panel list retained for backwards-compatible migration. |
+| `workspacePanels`        | array of panel objects | Ordered panels. Each has `id`, ordered `tabIds`, and one `activeTabId`. Stale service IDs are ignored. |
+| `focusedPanelId`         | string \| null         | Panel that receives normal service clicks and keyboard focus. |
+| `openServicesInTabs`     | boolean                | Normal clicks open tabs inside the focused panel. Ctrl/Cmd-click creates a panel. Defaults to `true`. |
 | `autoRestartMaxAttempts` | number                 | Max auto-restart attempts within the window. |
 | `autoRestartWindowMs`    | number                 | Rolling window (ms) for the auto-restart cap. |
 | `maxLogChunks`           | number                 | Per-service log-retention cap (ring-buffer size). |

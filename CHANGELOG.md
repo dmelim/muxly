@@ -30,6 +30,25 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- **Persistent panel workspaces with panel-owned tabs.** Panels now restore with independent ordered tab strips and active tabs. Normal clicks open tabs in the focused panel, Ctrl/Cmd-click creates a separate panel, and tabs can be reordered or dragged between panels with a muted tab-shaped placement preview and without stopping running services.
+
+### Changed
+
+- **Profile filters no longer close the focused service pane.** The active service remains visible while the sidebar switches profiles, and automatic restart backoff now has a distinct amber `Restarting` state.
+- **Tab workspaces are now the default.** New and older settings without an explicit preference open services as persistent tabs, and profile management uses flat rows with compact trash actions instead of nested cards.
+- **Panel tabs now carry service identity once.** Tabbed panels no longer repeat the active service name and status in the pane toolbar. Tabs remain outside the frame, while the service workspace below uses the same full outline in neutral and focused cyan states.
+
+### Fixed
+
+- **POSIX path masking preserves filenames.** Absolute paths no longer turn into numeric offsets, and already-masked paths are not processed again.
+- **Loading project aliases can no longer erase saved profiles and preferences.** Alias synchronization waits for persisted settings to load instead of writing empty startup defaults when services load first.
+- **Panel tab labels now use their full visual height as a click target.** The spacing below a service name is part of the tab button instead of an inert wrapper area.
+- **Removed services no longer leave broken workspace panels.** In-app deletion and live `services.json` edits remove stale tabs, repair active-tab and focus state, and prevent invalid panel layouts from being persisted again.
+- **Rapid settings actions no longer overwrite one another.** Complete settings snapshots are serialized and optimistic state advances immediately, so consecutive project pin and privacy actions build on the latest pending change.
+- **Orphaned service profile assignments restore the profile picker.** If the managed profile registry is missing but configured services still reference profile ids, Muxly rebuilds the registry instead of hiding the profile workflow.
+
 ## [0.5.1-mac-alpha.1] - 2026-08-20
 
 ### Added

@@ -108,10 +108,12 @@ works with Claude Code, Codex, and other Agent-Skills-compatible tools.
 | `Ctrl/Cmd + W` | Close the focused pane |
 | `Ctrl/Cmd + F` | Search within the focused pane |
 | `Ctrl/Cmd + Shift + F` | Search all logs |
+| `Ctrl/Cmd + Shift + ↓` | Cycle profiles |
 | `Ctrl/Cmd + 1…9` | Open the Nth service |
 | `Esc` | Close search / forms |
 
-`Shift`-click a service card to open it in an additional split pane.
+`Ctrl/Cmd`-click a service card to open it in a separate terminal panel. A
+normal click opens a tab inside the focused panel when tab opening is enabled.
 
 ## Project structure
 
