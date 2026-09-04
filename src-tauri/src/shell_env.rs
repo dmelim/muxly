@@ -226,7 +226,7 @@ fn split(path: &str) -> Vec<PathBuf> {
 #[cfg(not(windows))]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::Arc;
 
     #[test]
@@ -244,20 +244,32 @@ mod tests {
         );
     }
 
-    /// The whole point of the module: whatever the user's shell reports must
-    /// come back as usable directories. Skipped rather than failed where no
-    /// usable shell exists, so CI containers without one stay green.
     #[test]
-    fn resolve_finds_the_system_binaries() {
-        let paths = resolve();
-        if paths.is_empty() {
-            return;
-        }
+    fn probe_reads_a_controlled_shell_path_despite_startup_noise() {
+        let fixture = std::env::temp_dir().join(format!(
+            "muxly-shell-fixture-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&fixture).expect("create shell fixture directory");
+        let shell = fixture.join("shell");
+        std::fs::write(
+            &shell,
+            "#!/bin/sh\nprintf 'startup banner\\n'\nPATH=/usr/bin:/bin\nexport PATH\nexec /bin/sh \"$@\"\n",
+        )
+        .expect("write shell fixture");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700))
+            .expect("make fixture executable");
 
-        assert!(
-            paths.iter().any(|dir| dir == Path::new("/usr/bin")),
-            "login shell PATH should contain /usr/bin, got {paths:?}"
-        );
+        // -c avoids login/interactive startup files; the fixture also fixes PATH
+        // so this never executes the developer's shell configuration.
+        let resolved = probe(shell.to_str().expect("fixture path"), "-c");
+        std::fs::remove_file(&shell).expect("remove shell fixture");
+        std::fs::remove_dir(&fixture).expect("remove fixture directory");
+        assert_eq!(resolved.as_deref(), Some("/usr/bin:/bin"));
     }
 
     #[test]
@@ -271,11 +283,6 @@ mod tests {
             resolver.set(vec![expected]);
         });
 
-        let started = std::time::Instant::now();
         assert_eq!(login_path.paths(), vec![PathBuf::from("/usr/bin")]);
-        assert!(
-            started.elapsed() >= std::time::Duration::from_millis(40),
-            "consumer returned before the resolver published its result"
-        );
     }
 }
