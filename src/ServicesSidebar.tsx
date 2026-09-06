@@ -45,7 +45,7 @@ type Props = {
   setActiveProfile: (profileId: string | null) => void;
   // How many running/starting services are hidden by the active profile, so the
   // user is reminded something is alive outside the current view.
-  runningElsewhere: number;
+  runningElsewhere: ServiceConfig[];
   profileActivity: { global: number; byProfile: Record<string, number> };
   serviceQuery: string;
   setServiceQuery: (query: string) => void;
@@ -210,12 +210,17 @@ export function ServicesSidebar({
               setActiveProfile={setActiveProfile}
               activity={profileActivity}
             />
-            {activeProfile && runningElsewhere > 0 ? (
-              <p className="mt-2 flex items-center gap-1.5 text-[11px] text-cyan-300/90">
+            {activeProfile && runningElsewhere.length > 0 ? (
+              <Tooltip
+                className="mt-2"
+                label={`${runningElsewhere.length} ${runningElsewhere.length === 1 ? "service" : "services"} running in other profiles:\n${runningElsewhere.map(maskName).join("\n")}`}
+              >
+              <p className="flex items-center gap-1.5 text-[11px] text-cyan-300/90">
                 <span className="size-1.5 rounded-full bg-[var(--muxly-status-running)]" aria-hidden="true" />
-                {runningElsewhere} running in other{" "}
-                {runningElsewhere === 1 ? "profile" : "profiles"}
+                {runningElsewhere.length} running in other{" "}
+                {runningElsewhere.length === 1 ? "profile" : "profiles"}
               </p>
+              </Tooltip>
             ) : null}
           </div>
         ) : null}

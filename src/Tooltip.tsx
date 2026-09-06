@@ -39,7 +39,15 @@ export function Tooltip({ label, side = "bottom", className = "", children }: To
     const b = bubble.getBoundingClientRect();
     const centered = t.left + t.width / 2 - b.width / 2;
     const left = Math.max(EDGE, Math.min(centered, window.innerWidth - b.width - EDGE));
-    const top = side === "top" ? t.top - b.height - GAP : t.bottom + GAP;
+    const above = t.top - b.height - GAP;
+    const below = t.bottom + GAP;
+    const preferred = side === "top" ? above : below;
+    const alternate = side === "top" ? below : above;
+    const fits = (top: number) => top >= EDGE && top + b.height <= window.innerHeight - EDGE;
+    const top = Math.max(EDGE, Math.min(
+      fits(preferred) ? preferred : alternate,
+      window.innerHeight - b.height - EDGE
+    ));
     setPos({ top, left });
   }, [side]);
 
@@ -74,7 +82,7 @@ export function Tooltip({ label, side = "bottom", className = "", children }: To
               role="tooltip"
               style={{ top: pos.top, left: pos.left }}
               className={
-                "pointer-events-none fixed z-50 whitespace-nowrap rounded-md " +
+                "pointer-events-none fixed z-50 max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] whitespace-pre-wrap break-words rounded-md " +
                 "border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 shadow-lg"
               }
             >

@@ -36,6 +36,7 @@ to `0.5.7` and is not part of this inventory.
 
 ### Added
 
+- The other-profile activity indicator now lists its running services and count on hover.
 - **A themed startup screen replaces the blank window.** An inline splash hands off to React until settings, services, and workspace restoration finish, with reduced-motion support and recoverable startup errors.
 - **Persistent panel workspaces with panel-owned tabs.** Panels now restore with independent ordered tab strips and active tabs. Normal clicks open tabs in the focused panel, Ctrl/Cmd-click creates a separate panel, and tabs can be reordered or dragged between panels with a muted tab-shaped placement preview and without stopping running services.
 - **Faster profile and privacy workflows.** New shortcuts mark the focused project sensitive and cycle profiles, profile switching retains the focused pane, and the profile selector shows running-service counts only beside the profile that owns each service.
@@ -56,6 +57,7 @@ to `0.5.7` and is not part of this inventory.
 
 ### Fixed
 
+- Tooltips flip away from window edges instead of being clipped.
 - **Startup diagnostics no longer block the main thread.** Port checks run with bounded concurrency and runtime discovery runs on a blocking worker after workspace restoration. Startup timings distinguish native setup, data loading, and optional diagnostics.
 - **Git errors respect Stream mode.** Repository and branch details in failure messages stay hidden while privacy masking is active.
 - **POSIX path masking preserves filenames.** Absolute paths no longer turn into numeric offsets, and already-masked paths are not processed again.

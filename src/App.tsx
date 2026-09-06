@@ -758,14 +758,14 @@ export function App() {
   // Count of running/starting services hidden by the active profile, surfaced
   // in the sidebar so a live-but-hidden service doesn't become a mystery.
   const runningElsewhere = useMemo(() => {
-    if (!activeProfile) return 0;
+    if (!activeProfile) return [];
     return services.filter(
       (service) =>
         !isServiceInProfile(service, activeProfile) &&
         (["running", "starting", "restarting"] as ServiceStatus[]).includes(
           statuses[service.id]
         )
-    ).length;
+    );
   }, [services, activeProfile, statuses]);
 
   const profileActivity = useMemo(() => {
