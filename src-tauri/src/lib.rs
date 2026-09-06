@@ -12,6 +12,7 @@ mod runtime;
 mod services;
 mod settings;
 mod shell_env;
+mod startup;
 
 use commands::{
     activate_runtime_fallback, app_version, check_port, check_runtime_requirements,
@@ -37,9 +38,25 @@ use std::{
 use tauri::{Manager, RunEvent, WindowEvent};
 
 pub fn run() {
+    let startup = startup::Startup::default();
     let app = tauri::Builder::default()
+        .manage(startup)
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && payload.event() == tauri::webview::PageLoadEvent::Finished
+            {
+                startup::reveal(webview.app_handle());
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .manage(ProcessRegistry::default())
         .manage(PtyRegistry::default())
         .manage(GitOperations::default())
@@ -48,10 +65,17 @@ pub fn run() {
         .manage(RuntimeFallbacks::default())
         .manage(LoginPath::default())
         .setup(|app| {
+            app.state::<startup::Startup>().mark("native setup");
+            let handle = app.handle().clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(5));
+                startup::reveal(&handle);
+            });
             // The history DB lives in the app data directory, which needs the
             // resolved app handle — hence setup() rather than an eager manage().
             let db = HistoryDb::open(app.handle())?;
             app.manage(db);
+            app.state::<startup::Startup>().mark("history ready");
             // Live-reload services.json when it changes on disk.
             services::config::watch_service_config(app.handle().clone());
             // Recover the user's real PATH when we were launched from the GUI
@@ -76,6 +100,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            startup::reveal_main_window,
             app_version,
             check_port,
             find_port_holder,

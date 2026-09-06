@@ -3,9 +3,66 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
     <title>Muxly</title>
+    <style>
+      :root { color-scheme: dark; --boot-background: #101215; --boot-foreground: #f4f4f5; --boot-muted: #71717a; --boot-accent: #22d3ee; --boot-border: #2a2d31; background: var(--boot-background); }
+      body { margin: 0; }
+      .boot-screen { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; background: var(--boot-background); color: var(--boot-foreground); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; }
+      .boot-logo { width: 72px; height: 72px; }
+      .boot-name { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
+      .boot-message { margin: 0; max-width: 380px; font-size: 13px; line-height: 1.6; color: var(--boot-muted); }
+      .boot-track { width: 160px; height: 3px; overflow: hidden; border-radius: 4px; background: var(--boot-border); }
+      .boot-fill { width: 40%; height: 100%; background: var(--boot-accent); border-radius: inherit; animation: boot-sweep 1.4s ease-in-out infinite; }
+      .boot-reload { border: 1px solid var(--boot-border); border-radius: 6px; padding: 8px 16px; background: var(--boot-background); color: var(--boot-foreground); font: inherit; font-size: 13px; cursor: pointer; }
+      .boot-reload:hover { border-color: var(--boot-accent); }
+      .boot-reload:focus-visible { outline: 2px solid var(--boot-accent); outline-offset: 3px; }
+      @keyframes boot-sweep { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+      @media (prefers-reduced-motion: reduce) { .boot-fill { width: 100%; animation: none; } }
+    </style>
+    <script>
+      // The native settings file remains authoritative; only valid colours are mirrored.
+      try {
+        var cached = JSON.parse(localStorage.getItem("muxly.boot-theme") || "{}");
+        ["background", "foreground", "muted", "accent", "border"].forEach(function (key) {
+          if (typeof cached[key] === "string" && /^#[0-9a-f]{6}$/i.test(cached[key]))
+            document.documentElement.style.setProperty("--boot-" + key, cached[key]);
+        });
+      } catch (_) {}
+      performance.mark("muxly:inline splash");
+    </script>
   </head>
   <body>
+    <div id="boot-splash" class="boot-screen" role="status" aria-label="Loading Muxly">
+      <svg class="boot-logo" viewBox="0 0 72 72" aria-hidden="true"><rect width="72" height="72" rx="18" fill="var(--boot-border)" opacity=".25"/><g fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M16 30 26 20 36 30 46 20 56 30" stroke="var(--boot-foreground)"/><path d="M16 40 26 30 36 40 46 30 56 40" stroke="var(--boot-accent)"/><path d="M16 50 26 40 36 50 46 40 56 50" stroke="var(--boot-accent)" opacity=".55"/></g></svg>
+      <h1 class="boot-name">Muxly</h1>
+      <p id="boot-message" class="boot-message">Starting your workspace…</p>
+      <div class="boot-track" aria-hidden="true"><div class="boot-fill"></div></div>
+      <button id="boot-reload" class="boot-reload" hidden>Reload</button>
+    </div>
+    <script>
+      // Reveal as soon as markup exists. Waiting for rAF in a hidden webview can deadlock.
+      try {
+        var bridge = window.__TAURI_INTERNALS__;
+        if (bridge && typeof bridge.invoke === "function")
+          bridge.invoke("reveal_main_window").catch(function () {});
+      } catch (_) {}
+      (function () {
+        var ready = false;
+        function showProblem(message) {
+          if (ready) return;
+          document.getElementById("boot-message").textContent = message;
+          document.getElementById("boot-reload").hidden = false;
+        }
+        var timer = setTimeout(function () { showProblem("Startup is taking longer than expected. You can reload to try again."); }, 15000);
+        function failed() { showProblem("Muxly could not load. Please reload to try again."); }
+        window.addEventListener("error", failed);
+        window.addEventListener("muxly-react-ready", function () {
+          ready = true; clearTimeout(timer); window.removeEventListener("error", failed);
+        }, { once: true });
+        document.getElementById("boot-reload").onclick = function () { location.reload(); };
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

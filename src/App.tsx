@@ -31,6 +31,8 @@ import { SettingsView } from "./SettingsView";
 import { DetailsSidebar } from "./DetailsSidebar";
 import { ServicesSidebar } from "./ServicesSidebar";
 import { describeExitCode, shortExitCode } from "./exitCodes";
+import { StartupScreen } from "./StartupScreen";
+import { runPortCheck, runRuntimeCheck, startupMark, mirrorBootTheme } from "./startup";
 import { applyTheme, resolveTheme, type MuxlyTheme } from "./theme";
 import { fuzzySearchMatches } from "./search";
 import type { EditTarget, StartHealth } from "./appTypes";
@@ -245,6 +247,8 @@ export function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [servicesLoaded, setServicesLoaded] = useState(false);
   const workspaceRestoredRef = useRef(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
   // Mirrors `settings` so listeners with empty-deps useEffect closures
   // (process-exit auto-restart, output chunk buffering) read the latest
   // user-tunable values without having to re-mount on every settings change.
@@ -335,6 +339,12 @@ export function App() {
   );
 
   const resolvedTheme = previewTheme ?? savedTheme;
+  useEffect(() => {
+    if (settingsLoaded) mirrorBootTheme(savedTheme);
+  }, [savedTheme, settingsLoaded]);
+  useEffect(() => {
+    if (workspaceReady) startupMark("workspace ready");
+  }, [workspaceReady]);
 
   useEffect(() => {
     applyTheme(resolvedTheme);
@@ -594,10 +604,10 @@ export function App() {
       .then((loaded) => {
         setSettings(loaded);
         setSettingsLoaded(true);
+        startupMark("settings loaded");
       })
       .catch(() => {
-        /* default settings stay in place */
-        setSettingsLoaded(true);
+        setStartupError("Muxly could not load your settings. Check settings.json and reload.");
       });
   }, []);
 
@@ -826,6 +836,7 @@ export function App() {
   // Runs in parallel; failures are treated as "no conflict" so a dead probe
   // doesn't permanently disable a service in the UI.
   const scanPorts = useCallback(async (servicesToScan: ServiceConfig[]) => {
+    const started = performance.now();
     const probes = await Promise.all(
       servicesToScan
         // Auto-port services roll off a busy port by design, so a taken
@@ -833,13 +844,14 @@ export function App() {
         .filter((service) => service.port != null && !service.autoPort)
         .map(async (service) => {
           try {
-            const available = await invoke<boolean>("check_port", { port: service.port });
+            const available = await runPortCheck(() => invoke<boolean>("check_port", { port: service.port }));
             return [service.id, !available] as const;
           } catch {
             return [service.id, false] as const;
           }
         })
     );
+    startupMark("port diagnostics", performance.now() - started);
     setPortConflicts((current) => {
       const next = { ...current };
       for (const [id, conflict] of probes) next[id] = conflict;
@@ -847,10 +859,15 @@ export function App() {
     });
   }, []);
 
+  const runtimeRequestRef = useRef(0);
   const scanRuntimeRequirements = useCallback(async (servicesToScan: ServiceConfig[]) => {
-    const report = await invoke<RuntimeRequirementReport>("check_runtime_requirements", {
+    const request = ++runtimeRequestRef.current;
+    const started = performance.now();
+    const report = await runRuntimeCheck(() => invoke<RuntimeRequirementReport>("check_runtime_requirements", {
       services: servicesToScan
-    });
+    }));
+    startupMark("runtime diagnostics", performance.now() - started);
+    if (request !== runtimeRequestRef.current) return report;
     setRuntimeReport(report);
     setRuntimeWarningOpen(report.issues.length > 0);
     return report;
@@ -896,18 +913,26 @@ export function App() {
 
   useEffect(() => {
     reloadServices()
-      .then((loaded) => {
+      .then(() => {
         setServicesLoaded(true);
-        void scanPorts(loaded);
-        void scanRuntimeRequirements(loaded).catch((error) => {
-          console.warn("Failed to check runtime requirements:", errorMessage(error));
-        });
+        startupMark("services loaded");
       })
       .catch(() => {
-        /* error already surfaced in managerMessage */
-        setServicesLoaded(true);
+        setStartupError("Muxly could not load your services. Check services.json and reload.");
       });
-  }, [reloadServices, scanPorts, scanRuntimeRequirements]);
+  }, [reloadServices]);
+
+  useEffect(() => {
+    if (!workspaceReady) return;
+    // A task boundary lets the workspace commit before optional diagnostics.
+    const timer = window.setTimeout(() => {
+      void scanPorts(servicesRef.current);
+      void scanRuntimeRequirements(servicesRef.current).catch((error) => {
+        console.warn("Failed to check runtime requirements:", errorMessage(error));
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [workspaceReady, scanPorts, scanRuntimeRequirements]);
 
   useEffect(() => {
     if (!settingsLoaded || !servicesLoaded || workspaceRestoredRef.current) return;
@@ -946,6 +971,7 @@ export function App() {
       ?? panels[0]
       ?? null;
     workspaceRestoredRef.current = true;
+    setWorkspaceReady(true);
     workspacePanelsRef.current = panels;
     setWorkspacePanels(panels);
     setFocusedPanelId(focusedPanel?.id ?? null);
@@ -2583,6 +2609,8 @@ export function App() {
     window.addEventListener("contextmenu", onContextMenu);
     return () => window.removeEventListener("contextmenu", onContextMenu);
   }, []);
+
+  if (!workspaceReady || startupError) return <StartupScreen error={startupError} />;
 
   return (
     <>

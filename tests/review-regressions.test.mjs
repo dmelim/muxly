@@ -93,3 +93,46 @@ test("running status is independent of accent and terminals share the palette", 
     assert.equal(terminal.cursor, "#112233");
   } finally { delete globalThis.document; }
 });
+
+const { createTaskQueue, mirrorBootTheme } = await load("startup");
+
+test("startup queue bounds overlapping batches and releases failed slots", async () => {
+  const run = createTaskQueue(2);
+  let active = 0;
+  let maximum = 0;
+  const releases = [];
+  const jobs = Array.from({ length: 6 }, (_, index) => run(async () => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise((resolve) => releases.push(resolve));
+    active -= 1;
+    if (index === 1) throw new Error("probe failed");
+    return index;
+  }));
+  const resultsPromise = Promise.allSettled(jobs);
+  for (let batch = 0; batch < 3; batch += 1) {
+    assert.equal(active, 2);
+    releases.splice(0).forEach((release) => release());
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const results = await resultsPromise;
+  assert.equal(maximum, 2);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(await run(async () => "ready"), "ready");
+  assert.throws(() => createTaskQueue(0));
+});
+
+test("boot theme mirrors only display colours and tolerates unavailable storage", () => {
+  const properties = new Map();
+  let saved;
+  globalThis.document = { documentElement: { style: { setProperty: (key, value) => properties.set(key, value) } } };
+  globalThis.localStorage = { setItem: (key, value) => { saved = [key, JSON.parse(value)]; } };
+  try {
+    mirrorBootTheme(DEFAULT_THEME);
+    assert.equal(saved[0], "muxly.boot-theme");
+    assert.deepEqual(Object.keys(saved[1]).sort(), ["accent", "background", "border", "foreground", "muted"]);
+    assert.equal(properties.get("--boot-background"), DEFAULT_THEME.appBackground);
+    globalThis.localStorage.setItem = () => { throw new Error("storage disabled"); };
+    assert.doesNotThrow(() => mirrorBootTheme(DEFAULT_THEME));
+  } finally { delete globalThis.document; delete globalThis.localStorage; }
+});

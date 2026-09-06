@@ -148,7 +148,7 @@ fn default_theme_preset() -> String {
     "default".to_string()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     let path = settings_path(&app)?;
     if !path.exists() {

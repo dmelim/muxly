@@ -22,14 +22,16 @@ pub fn app_version() -> &'static str {
 
 /// Check whether a TCP port is currently bindable. Returns `true` if free.
 #[tauri::command]
-pub fn check_port(port: u16) -> bool {
-    is_port_available(port)
+pub async fn check_port(port: u16) -> Result<bool, AppError> {
+    tauri::async_runtime::spawn_blocking(move || is_port_available(port))
+        .await
+        .map_err(|error| AppError::ConfigUnavailable(format!("Port check failed: {error}")))
 }
 
 /// Find the PID of whatever foreign process is listening on `port`, if any.
 /// Returns `None` when the port is free or when we couldn't determine the
 /// holder (no `netstat`/`lsof`/`ss` available, parse failure, etc.).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn find_port_holder(port: u16) -> Option<u32> {
     find_port_holder_pid(port)
 }
@@ -43,7 +45,7 @@ pub fn kill_pid(pid: u32) -> Result<(), AppError> {
     kill_external_pid(pid).map_err(AppError::ProcessStop)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_services(
     app: AppHandle,
     config_dir: State<'_, ServicesConfigDir>,
@@ -52,21 +54,26 @@ pub fn load_services(
 }
 
 #[tauri::command]
-pub fn check_runtime_requirements(
+pub async fn check_runtime_requirements(
     app: AppHandle,
-    config_dir: State<'_, ServicesConfigDir>,
-    fallbacks: State<'_, RuntimeFallbacks>,
     services: Vec<ServiceConfig>,
-) -> RuntimeRequirementReport {
-    // Search the login shell's PATH too, so a GUI-launched app doesn't report
-    // every service as broken just because launchd handed it a minimal PATH.
-    let login_paths = crate::shell_env::login_paths(&app);
-    check_requirements(
-        &services,
-        config_dir.current().as_deref(),
-        &fallbacks,
-        &login_paths,
-    )
+) -> Result<RuntimeRequirementReport, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let config_dir = app.state::<ServicesConfigDir>();
+        let fallbacks = app.state::<RuntimeFallbacks>();
+        // Search the login shell's PATH too, so a GUI-launched app doesn't report
+        // every service as broken just because launchd handed it a minimal PATH.
+        let login_paths = crate::shell_env::login_paths(&app);
+        check_requirements(
+            &services,
+            config_dir.current().as_deref(),
+            &fallbacks,
+            &login_paths,
+        )
+    })
+    .await
+    .map_err(|error| AppError::ConfigUnavailable(format!("Runtime check failed: {error}")))
 }
 
 #[tauri::command]
@@ -97,7 +104,7 @@ pub fn save_services(
     save_service_config(&app, &config_dir, &services)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resolve_icon_image(
     config_dir: State<'_, ServicesConfigDir>,
     cwd: String,
