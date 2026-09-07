@@ -84,6 +84,23 @@ export type Profile = {
   name: string;
 };
 
+// A saved editor added by the user. `command` is one executable path or
+// command name; it is never parsed as a shell command line.
+export type CustomEditor = {
+  id: string;
+  name: string;
+  command: string;
+};
+
+// Editors found by the native discovery command. Detected entries are kept
+// separate from custom settings so a scan can never overwrite a user's draft.
+export type EditorCandidate = {
+  id: string;
+  label: string;
+  command: string;
+  path?: string | null;
+};
+
 export type WorkspacePanel = {
   id: string;
   tabIds: string[];
@@ -94,6 +111,8 @@ import type { MuxlyTheme, ThemePresetId } from "./theme";
 
 export type AppSettings = {
   editorCommand: string;
+  // Optional to keep settings.json written by older Muxly versions valid.
+  customEditors?: CustomEditor[];
   // Manual per-project "hide name" toggle (the sidebar eye button). Hides the
   // project name regardless of stream mode.
   hiddenProjectNames: Record<string, boolean>;

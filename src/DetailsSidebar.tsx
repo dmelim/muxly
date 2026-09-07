@@ -1,5 +1,7 @@
+import { useMemo } from "react";
 ﻿import type { AppSettings, ServiceConfig, ServiceHistory, ServiceStatus } from "./types";
 import type { EditTarget } from "./appTypes";
+import type { EditorCandidate } from "./types";
 import { formatCommand, redactSensitive } from "./types";
 import { Button } from "./Button";
 import { Detail } from "./Detail";
@@ -9,6 +11,10 @@ import { ServiceIconBadge } from "./ServiceIconBadge";
 import { groupKey, statusLabels, timeAgo } from "./appUtils";
 import { GitSection } from "./GitSection";
 import { openInEditor, openInFileManager, openServiceUrl } from "./appActions";
+import { Dropdown } from "./Dropdown";
+import { buildEditorOptions } from "./editorOptions";
+import { CodeIcon, FolderOpenIcon, GlobeIcon } from "./icons";
+import { Tooltip } from "./Tooltip";
 
 type Props = {
   editing: EditTarget | null;
@@ -33,6 +39,9 @@ type Props = {
   lastExit: Record<string, string>;
   history: Record<string, ServiceHistory>;
   iconImages: Record<string, string | null>;
+  detectedEditors: EditorCandidate[];
+  editorDiscoveryLoading: boolean;
+  editorDiscoveryError: string | null;
   displayProjectName: (groupName: string) => string;
   appendLog: (id: string, chunk: string) => void;
   onImport: (services: ServiceConfig[]) => Promise<void>;
@@ -56,6 +65,9 @@ export function DetailsSidebar({
   lastExit,
   history,
   iconImages,
+  detectedEditors,
+  editorDiscoveryLoading,
+  editorDiscoveryError,
   displayProjectName,
   appendLog,
   onImport,
@@ -63,6 +75,15 @@ export function DetailsSidebar({
   onDeleteService,
   onEdit
 }: Props) {
+  const editorOptions = useMemo(() => buildEditorOptions(
+    detectedEditors,
+    settings.customEditors,
+    settings.editorCommand
+  ).map((option) => ({
+    ...option,
+    icon: <CodeIcon className="size-3.5" />
+  })), [detectedEditors, settings.customEditors, settings.editorCommand]);
+
   if (editing?.mode === "import") {
     return (
       <ImportPanel
@@ -98,6 +119,9 @@ export function DetailsSidebar({
   const alias = selected ? projectNameAliases[groupKey(selected)] ?? "" : "";
   const redact = (text: string) =>
     selected ? redactSensitive(text, selected, alias, streamMode) : text;
+  const selectedPort = selected ? actualPorts[selected.id] ?? selected.port : null;
+  const hasValidPort =
+    typeof selectedPort === "number" && Number.isInteger(selectedPort) && selectedPort > 0 && selectedPort <= 65535;
 
   return (
     <>
@@ -113,40 +137,52 @@ export function DetailsSidebar({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {selected ? (
           <div className="space-y-5 p-5 text-sm">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  openInEditor(selected.cwd, selected.id, settings.editorCommand, appendLog)
-                }
-              >
-                Open in editor
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => openInFileManager(selected.cwd, selected.id, appendLog)}
-              >
-                Open folder
-              </Button>
-              {actualPorts[selected.id] ?? selected.port ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() =>
-                    openServiceUrl(
-                      (actualPorts[selected.id] ?? selected.port)!,
-                      selected.id,
-                      appendLog
-                    )
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Tooltip label="Open service in editor" side="top">
+                <Dropdown
+                  compact
+                  variant="toolbar"
+                  value={settings.editorCommand}
+                  options={editorOptions}
+                  onChange={(command) =>
+                    void openInEditor(selected.cwd, selected.id, command, appendLog)
                   }
+                  ariaLabel="Open service in editor"
+                  placeholder="Editor"
+                  className="shrink-0"
+                />
+              </Tooltip>
+              <span className="sr-only" aria-live="polite">
+                {editorDiscoveryLoading
+                  ? "Scanning for installed editors"
+                  : editorDiscoveryError
+                  ? "Editor scan unavailable; saved editor remains available"
+                  : ""}
+              </span>
+              <Tooltip label="Open service folder" side="top">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => openInFileManager(selected.cwd, selected.id, appendLog)}
+                  aria-label="Open service folder"
                 >
-                  Open localhost:{actualPorts[selected.id] ?? selected.port}
+                  <FolderOpenIcon className="size-4" />
                 </Button>
+              </Tooltip>
+              {hasValidPort ? (
+                <Tooltip label={`Open localhost:${selectedPort} in browser`} side="top">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openServiceUrl(selectedPort!, selected.id, appendLog)}
+                    aria-label={`Open localhost:${selectedPort} in browser`}
+                  >
+                    <GlobeIcon className="size-4" />
+                  </Button>
+                </Tooltip>
               ) : null}
             </div>
-            <dl className="space-y-5">
+            <dl className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,110px),1fr))] gap-x-4 gap-y-3">
               <Detail label="Icon">
                 <ServiceIconBadge
                   service={selected}
@@ -155,22 +191,26 @@ export function DetailsSidebar({
                   large
                 />
               </Detail>
-              <Detail label="Status">
-                {adoptedPids[selected.id]
-                  ? `Adopted (external pid ${adoptedPids[selected.id].pid})`
-                  : statusLabels[statuses[selected.id] ?? "stopped"]}
+              <Detail label="Status" className="col-span-full min-w-0">
+                <span className="[overflow-wrap:anywhere]">
+                  {adoptedPids[selected.id]
+                    ? `Adopted (external pid ${adoptedPids[selected.id].pid})`
+                    : statusLabels[statuses[selected.id] ?? "stopped"]}
+                </span>
               </Detail>
               <Detail label="PID">
                 {pids[selected.id] ?? adoptedPids[selected.id]?.pid ?? "None"}
               </Detail>
               <Detail label="Last Exit">{lastExit[selected.id] ?? "None"}</Detail>
-              <Detail label="Command">
+              <Detail label="Command" className="col-span-full min-w-0">
                 <span className="block min-w-0 max-w-full rounded-md bg-black/20 p-3 font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
                   {redact(formatCommand(selected))}
                 </span>
               </Detail>
-              <Detail label="Working Dir">
-                <span className="font-mono text-xs text-zinc-300">{redact(selected.cwd)}</span>
+              <Detail label="Working Dir" className="col-span-full min-w-0">
+                <span className="font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
+                  {redact(selected.cwd)}
+                </span>
               </Detail>
               <Detail label="Group">
                 {selected.group
@@ -195,10 +235,10 @@ export function DetailsSidebar({
                   ? "None"
                   : `${Object.keys(selected.env).length} variables`}
               </Detail>
-              <Detail label="Options">
+              <Detail label="Options" className="col-span-full min-w-0">
                 <EnabledOptions service={selected} />
               </Detail>
-              <Detail label="Repository">
+              <Detail label="Repository" className="col-span-full min-w-0">
                 <GitSection
                   key={selected.id}
                   service={selected}
@@ -207,7 +247,7 @@ export function DetailsSidebar({
               </Detail>
             </dl>
 
-            <div className="border-t border-white/10 pt-5">
+            <div className="pt-5">
               <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Run history</p>
               <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
                 <Detail label="Total runs">{history[selected.id]?.totalRuns ?? 0}</Detail>

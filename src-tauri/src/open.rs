@@ -13,13 +13,14 @@ use crate::{
 };
 use std::{
     ffi::OsString,
+    io,
     path::{Path, PathBuf},
     process::Command,
 };
 use tauri::{AppHandle, State};
 
 /// Open the given path in the user's editor of choice.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_in_editor(
     app: AppHandle,
     config_dir: State<'_, ServicesConfigDir>,
@@ -37,13 +38,9 @@ pub fn open_in_editor(
     // GUI-launched app doesn't inherit — so resolve against the login shell's
     // PATH before falling back to a bare name. See `shell_env`.
     let resolved = resolve_from_fallbacks(program, &search_paths(&app))
-        .map(|path| path.into_os_string())
-        .unwrap_or_else(|| OsString::from(program));
+        .unwrap_or_else(|| PathBuf::from(OsString::from(program)));
 
-    Command::new(&resolved)
-        .arg(&path)
-        .spawn()
-        .map(|_| ())
+    launch_editor(&resolved, &path)
         .map_err(|source| AppError::ProcessStart {
             program: program.to_string(),
             cwd: path,
@@ -88,6 +85,55 @@ pub fn open_url(url: String) -> Result<(), AppError> {
 
 fn resolve(cwd: &str, config_dir: &ServicesConfigDir) -> Result<PathBuf, AppError> {
     resolve_cwd(cwd, config_dir.current().as_deref())
+}
+
+fn launch_editor(editor: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        let mut command = Command::new(editor);
+        if is_shell_shim(editor) {
+            // Let Rust perform Windows argument quoting for the batch shim;
+            // hand-built `cmd /C` strings can reinterpret metacharacters in a
+            // user path. CREATE_NO_WINDOW suppresses only the shim console,
+            // leaving the target GUI editor visible.
+            command.creation_flags(0x0800_0000);
+        }
+        return command.arg(target).spawn().map(|_| ());
+    }
+
+    #[cfg(not(windows))]
+    {
+        #[cfg(target_os = "macos")]
+        if is_app_bundle(editor) {
+            return Command::new("open")
+                .args(["-a"])
+                .arg(editor)
+                .arg(target)
+                .spawn()
+                .map(|_| ());
+        }
+
+        Command::new(editor).arg(target).spawn().map(|_| ())
+    }
+}
+
+#[cfg(windows)]
+fn is_shell_shim(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some(extension)
+            if extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn is_app_bundle(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+        && path.is_dir()
 }
 
 #[cfg(windows)]

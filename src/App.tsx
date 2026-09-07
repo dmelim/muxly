@@ -11,6 +11,7 @@ import type {
   LoadedServices,
   RuntimeRequirementReport,
   ServiceConfig,
+  EditorCandidate,
   ServiceHistory,
   ServiceIcon,
   ServiceStatus,
@@ -262,6 +263,10 @@ export function App() {
   const settingsWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const servicePlacementQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editorCandidates, setEditorCandidates] = useState<EditorCandidate[]>([]);
+  const [editorDiscoveryLoading, setEditorDiscoveryLoading] = useState(false);
+  const [editorDiscoveryError, setEditorDiscoveryError] = useState<string | null>(null);
+  const editorScanSequenceRef = useRef(0);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   // Project collapse state is persisted in settings (see `collapsedProjectNames`)
   // so a minimized project stays minimized across restarts.
@@ -679,6 +684,38 @@ export function App() {
         setStartupError("Muxly could not load your settings. Check settings.json and reload.");
       });
   }, []);
+
+  const discoverEditors = useCallback(async (forceRescan = false) => {
+    const sequence = editorScanSequenceRef.current + 1;
+    editorScanSequenceRef.current = sequence;
+    setEditorDiscoveryLoading(true);
+    setEditorDiscoveryError(null);
+    try {
+      const candidates = await invoke<EditorCandidate[]>("discover_editors", {
+        forceRescan
+      });
+      if (editorScanSequenceRef.current === sequence) {
+        setEditorCandidates(candidates);
+      }
+    } catch (error) {
+      if (editorScanSequenceRef.current === sequence) {
+        setEditorDiscoveryError(errorMessage(error));
+      }
+    } finally {
+      if (editorScanSequenceRef.current === sequence) {
+        setEditorDiscoveryLoading(false);
+      }
+    }
+  }, []);
+
+  // The native scan is deliberately background work. It runs once after the
+  // workspace and settings are ready, then only again when the user presses
+  // Rescan in Settings.
+  useEffect(() => {
+    if (workspaceReady && settingsLoaded) {
+      void discoverEditors();
+    }
+  }, [discoverEditors, settingsLoaded, workspaceReady]);
 
   // Keep the ref synced with the live settings so closures captured by the
   // long-lived event listeners always see the latest user-tunable values.
@@ -2525,18 +2562,22 @@ export function App() {
         keywords: "preferences config",
         run: () => setSettingsOpen((open) => !open)
       },
-      {
-        id: "toggle-left-sidebar",
-        title: leftSidebarOpen ? "Hide services sidebar" : "Show services sidebar",
-        keywords: "panel left",
-        run: () => setLeftSidebarOpen((open) => !open)
-      },
-      {
-        id: "toggle-right-sidebar",
-        title: rightSidebarOpen ? "Hide details sidebar" : "Show details sidebar",
-        keywords: "panel right inspector details",
-        run: () => setRightSidebarOpen((open) => !open)
-      }
+      ...(settingsOpen
+        ? []
+        : [
+            {
+              id: "toggle-left-sidebar",
+              title: leftSidebarOpen ? "Hide services sidebar" : "Show services sidebar",
+              keywords: "panel left",
+              run: () => setLeftSidebarOpen((open) => !open)
+            },
+            {
+              id: "toggle-right-sidebar",
+              title: rightSidebarOpen ? "Hide details sidebar" : "Show details sidebar",
+              keywords: "panel right inspector details",
+              run: () => setRightSidebarOpen((open) => !open)
+            }
+          ])
     ],
     [streamMode, sensitiveCount, terminalOpen, settingsOpen, leftSidebarOpen, rightSidebarOpen, toggleStreamMode]
   );
@@ -2664,12 +2705,14 @@ export function App() {
 
       // Ctrl/Cmd + ← / → → toggle the left / right side panels.
       if (event.key === "ArrowLeft") {
+        if (settingsOpen) return;
         event.preventDefault();
         event.stopPropagation();
         setLeftSidebarOpen((open) => !open);
         return;
       }
       if (event.key === "ArrowRight") {
+        if (settingsOpen) return;
         event.preventDefault();
         event.stopPropagation();
         setRightSidebarOpen((open) => !open);
@@ -2795,18 +2838,24 @@ export function App() {
 
   if (!workspaceReady || startupError) return <StartupScreen error={startupError} />;
 
+  // Settings temporarily takes the workspace surface. Keep the user's
+  // sidebar flags and widths untouched so closing Settings restores the exact
+  // layout they had before opening it.
+  const effectiveLeftSidebarOpen = leftSidebarOpen && !settingsOpen;
+  const effectiveRightSidebarOpen = rightSidebarOpen && !settingsOpen;
+
   return (
     <>
     <main
       className="relative grid h-screen grid-rows-1 overflow-hidden bg-[#101215] text-zinc-100"
       style={{
-        gridTemplateColumns: `${leftSidebarOpen ? `${leftWidth}px` : "0"} 1fr ${
-          rightSidebarOpen ? `${rightWidth}px` : "0"
+        gridTemplateColumns: `${effectiveLeftSidebarOpen ? `${leftWidth}px` : "0"} 1fr ${
+          effectiveRightSidebarOpen ? `${rightWidth}px` : "0"
         }`
       }}
     >
       <ServicesSidebar
-        open={leftSidebarOpen}
+        open={effectiveLeftSidebarOpen}
         managerMessage={managerMessage}
         compact={compactSidebar}
         modKey={modKey}
@@ -2862,6 +2911,7 @@ export function App() {
               variant="ghost"
               size="icon"
               onClick={() => setLeftSidebarOpen((open) => !open)}
+              disabled={settingsOpen}
               aria-label="Toggle services sidebar"
             >
               <PanelLeftIcon className="size-4" />
@@ -2944,6 +2994,7 @@ export function App() {
                 variant="ghost"
                 size="icon"
                 onClick={() => setRightSidebarOpen((open) => !open)}
+                disabled={settingsOpen}
                 aria-label="Toggle details sidebar"
               >
                 <PanelRightIcon className="size-4" />
@@ -3028,6 +3079,10 @@ export function App() {
           <SettingsView
             settings={settings}
             services={services}
+            detectedEditors={editorCandidates}
+            editorDiscoveryLoading={editorDiscoveryLoading}
+            editorDiscoveryError={editorDiscoveryError}
+            onRescanEditors={() => discoverEditors(true)}
             onClose={() => setSettingsOpen(false)}
             onSave={persistSettings}
             onThemePreview={setPreviewTheme}
@@ -3040,8 +3095,9 @@ export function App() {
 
       <aside
         className={`flex min-h-0 flex-col overflow-hidden bg-[#15181d] ${
-          rightSidebarOpen ? "border-l border-white/10" : ""
+          effectiveRightSidebarOpen ? "border-l border-white/10" : "pointer-events-none invisible"
         }`}
+        aria-hidden={!effectiveRightSidebarOpen}
       >
         <DetailsSidebar
           editing={editing}
@@ -3058,6 +3114,9 @@ export function App() {
           lastExit={lastExit}
           history={history}
           iconImages={iconImages}
+          detectedEditors={editorCandidates}
+          editorDiscoveryLoading={editorDiscoveryLoading}
+          editorDiscoveryError={editorDiscoveryError}
           displayProjectName={displayProjectName}
           appendLog={appendLog}
           onImport={importServices}
@@ -3067,7 +3126,7 @@ export function App() {
         />
       </aside>
 
-      {leftSidebarOpen ? (
+      {effectiveLeftSidebarOpen ? (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -3079,7 +3138,7 @@ export function App() {
           <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover/lh:bg-cyan-500/60" />
         </div>
       ) : null}
-      {rightSidebarOpen ? (
+      {effectiveRightSidebarOpen ? (
         <div
           role="separator"
           aria-orientation="vertical"

@@ -25,6 +25,26 @@ const { redactSensitive } = await load("types");
 const { LogSearchCache } = await load("logSearchCache");
 const { DEFAULT_THEME, applyTheme, xtermTheme } = await load("theme");
 const { replaceActiveTab, moveTabToNewPanel, closeOtherTabs } = await load("workspaceContextOps");
+const { normalizeCustomEditors, buildEditorOptions, editorCommandKey } = await load("editorOptions");
+
+test("editor settings normalize custom entries and preserve unknown legacy defaults", () => {
+  const custom = normalizeCustomEditors([
+    { id: "one", name: "  Cursor  ", command: " C:\\Tools\\Cursor.exe " },
+    { id: "two", name: "Duplicate", command: "c:\\tools\\cursor.exe" },
+    { id: "three", name: "", command: "missing" },
+    { id: "four", name: "Broken", command: "bad\ncommand" }
+  ], true);
+  assert.deepEqual(custom, [{ id: "one", name: "Cursor", command: "C:\\Tools\\Cursor.exe" }]);
+
+  const options = buildEditorOptions(
+    [{ id: "vscode", label: "VS Code", command: "/usr/bin/code" }],
+    custom,
+    "legacy-editor --unknown"
+  );
+  assert.equal(options[0].value, "legacy-editor --unknown");
+  assert.equal(options[0].detail, "Saved default");
+  assert.deepEqual(options.slice(1).map((option) => option.label), ["Cursor", "VS Code"]);
+});
 
 test("context workspace operations preserve unique valid panel tabs", () => {
   const panels = [
@@ -152,4 +172,13 @@ test("boot theme mirrors only display colours and tolerates unavailable storage"
     globalThis.localStorage.setItem = () => { throw new Error("storage disabled"); };
     assert.doesNotThrow(() => mirrorBootTheme(DEFAULT_THEME));
   } finally { delete globalThis.document; delete globalThis.localStorage; }
+});
+
+
+test("editor identities respect platform path semantics", () => {
+  assert.notEqual(editorCommandKey("/tools/Editor.exe", false), editorCommandKey("/tools/editor.exe", false));
+  assert.notEqual(editorCommandKey("/tools/a\\b", false), editorCommandKey("/tools/a/b", false));
+  assert.equal(editorCommandKey("C:\\Tools\\Editor.exe", true), editorCommandKey("c:/tools/editor.exe", true));
+  const editors = [{ id: "a", name: "A", command: "/tools/Editor" }, { id: "b", name: "B", command: "/tools/editor" }];
+  assert.equal(normalizeCustomEditors(editors, false).length, 2);
 });

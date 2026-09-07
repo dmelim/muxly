@@ -46,6 +46,7 @@ to `0.5.7` and is not part of this inventory.
 - **Local Git awareness and safe branch switching.** The Details inspector shows repository root, branch, dirty state, and local ahead/behind counts, with non-blocking refresh and clean-worktree-only switching between existing local branches. Stream mode hides branch identities and disables ambiguous switching.
 - **Service and Settings search.** The Services sidebar filters configuration fields without affecting running processes, while Settings search finds sections through labels and documented keywords.
 - **Pinned projects and tabbed Settings.** Entire project groups can stay at the top of the Services sidebar, while Settings is split into General, Workspace, Appearance, and Privacy tabs with cross-tab search.
+- **Editor discovery and custom defaults.** Settings discovers installed graphical editors through bounded platform-aware checks, preserves legacy editor commands, and lets users save validated custom editor entries.
 
 ### Changed
 
@@ -56,8 +57,12 @@ to `0.5.7` and is not part of this inventory.
 - **Panel tabs now carry service identity once.** Tabbed panels no longer repeat the active service name and status in the pane toolbar. Tabs remain outside the frame, while the service workspace below uses the same full outline in neutral and focused cyan states.
 - **Settings navigation and actions use less vertical space.** Section tabs now sit in a left rail, sensitive-service groups collapse to compact project rows, and Save is a floating icon action instead of a full-width bottom bar.
 - **Additive actions have clearer hover feedback.** Dashed New and Import buttons now strengthen their border and gain a subtle cyan surface instead of relying on text colour alone.
+- **Details actions and fields are more compact.** Editor, folder, and browser actions now use icon controls with accessible tooltips, and short inspector facts use paired columns while long values span the available width.
+- **Settings temporarily hides both sidebars.** Opening Settings preserves each sidebar's visibility and width and restores them when Settings closes.
 
 ### Fixed
+
+- Editor discovery skips non-launchable files, shares concurrent scans, and preserves platform path semantics; dropdown keyboard handling no longer dismisses Settings or leaves stale selections.
 
 - Tooltips flip away from window edges instead of being clipped.
 - **Startup diagnostics no longer block the main thread.** Port checks run with bounded concurrency and runtime discovery runs on a blocking worker after workspace restoration. Startup timings distinguish native setup, data loading, and optional diagnostics.

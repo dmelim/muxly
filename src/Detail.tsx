@@ -2,14 +2,15 @@
 
 type Props = {
   label: string;
+  className?: string;
   children: ReactNode;
 };
 
-export function Detail({ label, children }: Props) {
+export function Detail({ label, className, children }: Props) {
   return (
-    <div>
+    <div className={className}>
       <dt className="text-xs uppercase tracking-[0.14em] text-zinc-500">{label}</dt>
-      <dd className="mt-1 text-zinc-300">{children}</dd>
+      <dd className="mt-1 min-w-0 [overflow-wrap:anywhere] text-zinc-300">{children}</dd>
     </div>
   );
 }

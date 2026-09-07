@@ -201,8 +201,9 @@ export function ServicesSidebar({
   };
   return (
     <aside
+      aria-hidden={!open}
       className={`flex min-h-0 flex-col overflow-hidden bg-[#15181d] ${
-        open ? "border-r border-white/10" : ""
+        open ? "border-r border-white/10" : "pointer-events-none invisible"
       }`}
     >
       <div className="border-b border-white/10 px-5 py-4">

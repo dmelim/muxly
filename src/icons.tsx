@@ -259,3 +259,36 @@ export function AlertTriangleIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Code brackets — editor actions and editor settings. */
+export function CodeIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="m8 9-4 3 4 3" />
+      <path d="m16 9 4 3-4 3" />
+      <path d="m14 5-4 14" />
+    </svg>
+  );
+}
+
+/** Folder with an open lid — reveal the service working directory. */
+export function FolderOpenIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v1" />
+      <path d="M3 8v9.5A2.5 2.5 0 0 0 5.5 20h11.9a2.5 2.5 0 0 0 2.4-1.8L21 12H5a2 2 0 0 0-2 2" />
+    </svg>
+  );
+}
+
+/** Globe — open the running service in the default browser. */
+export function GlobeIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a14 14 0 0 1 0 18" />
+      <path d="M12 3a14 14 0 0 0 0 18" />
+    </svg>
+  );
+}

@@ -22,6 +22,17 @@ pub struct Profile {
     pub name: String,
 }
 
+/// A user supplied executable path or command name. The command is passed to
+/// the native launcher as one executable value; it is never interpreted as a
+/// shell command line.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomEditor {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePanel {
@@ -37,6 +48,8 @@ pub struct WorkspacePanel {
 pub struct AppSettings {
     #[serde(default = "default_editor_command_string")]
     pub editor_command: String,
+    #[serde(default)]
+    pub custom_editors: Vec<CustomEditor>,
     #[serde(default, skip_serializing)]
     pub hide_project_names: bool,
     #[serde(default)]
@@ -95,6 +108,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             editor_command: default_editor_command().to_string(),
+            custom_editors: Vec::new(),
             hide_project_names: false,
             hidden_project_names: BTreeMap::new(),
             collapsed_project_names: BTreeMap::new(),
@@ -170,6 +184,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     if settings.editor_command.trim().is_empty() {
         settings.editor_command = default_editor_command().to_string();
     }
+    normalize_custom_editors(&mut settings.custom_editors);
     settings.auto_restart_max_attempts = settings.auto_restart_max_attempts.min(20);
     settings.auto_restart_window_ms = settings.auto_restart_window_ms.clamp(1_000, 3_600_000);
     settings.max_log_chunks = settings.max_log_chunks.clamp(100, 100_000);
@@ -189,6 +204,7 @@ pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSet
     } else {
         settings.editor_command = settings.editor_command.trim().to_string();
     }
+    normalize_custom_editors(&mut settings.custom_editors);
     // Clamp the numeric knobs to sensible bounds — saves us from a
     // typo'd "0 ms window" bricking auto-restart or a runaway log buffer
     // eating memory.
@@ -232,6 +248,80 @@ pub fn default_editor_command() -> &'static str {
 
 fn default_editor_command_string() -> String {
     default_editor_command().to_string()
+}
+
+const MAX_CUSTOM_EDITORS: usize = 32;
+const MAX_EDITOR_NAME_LENGTH: usize = 80;
+const MAX_EDITOR_COMMAND_LENGTH: usize = 1024;
+
+fn normalize_custom_editors(editors: &mut Vec<CustomEditor>) {
+    let mut seen_commands = std::collections::BTreeSet::new();
+    let mut seen_ids = std::collections::BTreeSet::new();
+    let mut normalized = Vec::with_capacity(editors.len().min(MAX_CUSTOM_EDITORS));
+
+    for (index, editor) in editors.drain(..).enumerate() {
+        if normalized.len() >= MAX_CUSTOM_EDITORS {
+            break;
+        }
+        let Some(name) = normalize_editor_text(&editor.name, MAX_EDITOR_NAME_LENGTH) else {
+            continue;
+        };
+        let Some(command) = normalize_editor_command(&editor.command) else {
+            continue;
+        };
+        let command_key = command_key(&command);
+        if !seen_commands.insert(command_key) {
+            continue;
+        }
+
+        let mut id = normalize_editor_text(&editor.id, 120)
+            .unwrap_or_else(|| format!("custom-editor-{}", index + 1));
+        if !seen_ids.insert(id.clone()) {
+            let base = id.clone();
+            let mut suffix = 2;
+            while !seen_ids.insert(format!("{base}-{suffix}")) {
+                suffix += 1;
+            }
+            id = format!("{base}-{suffix}");
+        }
+        normalized.push(CustomEditor { id, name, command });
+    }
+
+    *editors = normalized;
+}
+
+fn normalize_editor_text(value: &str, max_length: usize) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.contains('\0') || trimmed.contains(['\r', '\n']) {
+        return None;
+    }
+    if trimmed.chars().count() > max_length {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn normalize_editor_command(value: &str) -> Option<String> {
+    let trimmed = normalize_editor_text(value, MAX_EDITOR_COMMAND_LENGTH)?;
+    if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0] as char;
+        let last = trimmed.as_bytes()[trimmed.len() - 1] as char;
+        if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+            return normalize_editor_text(&trimmed[1..trimmed.len() - 1], MAX_EDITOR_COMMAND_LENGTH);
+        }
+    }
+    Some(trimmed)
+}
+
+fn command_key(value: &str) -> String {
+    #[cfg(windows)]
+    {
+        value.replace(['\\', '/'], "/").to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        value.to_string()
+    }
 }
 
 fn migrate_global_project_privacy(settings: &mut AppSettings) {
@@ -320,7 +410,7 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_theme, AppSettings};
+    use super::{normalize_custom_editors, normalize_theme, AppSettings, CustomEditor};
 
     #[test]
     fn older_settings_default_to_tabs_with_no_panel_state() {
@@ -330,6 +420,39 @@ mod tests {
         assert!(settings.workspace_panels.is_empty());
         assert!(settings.focused_panel_id.is_none());
         assert!(settings.pinned_project_names.is_empty());
+        assert!(settings.custom_editors.is_empty());
+    }
+
+    #[test]
+    fn custom_editor_normalization_rejects_invalid_values_without_truncating() {
+        let mut editors = vec![
+            CustomEditor {
+                id: "one".into(),
+                name: "  Code  ".into(),
+                command: " \"/opt/Code\" ".into(),
+            },
+            CustomEditor {
+                id: "duplicate".into(),
+                name: "Duplicate".into(),
+                command: "/opt/Code".into(),
+            },
+            CustomEditor {
+                id: "newline".into(),
+                name: "Bad\nName".into(),
+                command: "bad".into(),
+            },
+            CustomEditor {
+                id: "long".into(),
+                name: "Long".into(),
+                command: "x".repeat(1025),
+            },
+        ];
+
+        normalize_custom_editors(&mut editors);
+
+        assert_eq!(editors.len(), 1);
+        assert_eq!(editors[0].name, "Code");
+        assert_eq!(editors[0].command, "/opt/Code");
     }
 
     #[test]

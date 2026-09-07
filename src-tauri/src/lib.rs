@@ -1,4 +1,5 @@
 mod commands;
+mod editor;
 mod error;
 mod events;
 mod git;
@@ -20,6 +21,7 @@ use commands::{
     resolve_icon_image, save_services, service_pty_resize, service_pty_write, start_service,
     stop_service,
 };
+use editor::{discover_editors, EditorDiscoveryCache};
 use git::GitOperations;
 use history::{get_service_history, HistoryDb};
 use import::scan_importable;
@@ -64,6 +66,7 @@ pub fn run() {
         .manage(ServicesConfigDir::default())
         .manage(RuntimeFallbacks::default())
         .manage(LoginPath::default())
+        .manage(EditorDiscoveryCache::default())
         .setup(|app| {
             app.state::<startup::Startup>().mark("native setup");
             let handle = app.handle().clone();
@@ -110,6 +113,7 @@ pub fn run() {
             activate_runtime_fallback,
             load_settings,
             save_settings,
+            discover_editors,
             resolve_icon_image,
             save_services,
             start_service,

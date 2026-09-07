@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AppSettings, ServiceConfig } from "./types";
+import type { AppSettings, EditorCandidate, ServiceConfig } from "./types";
 import { displayServiceName, maskSensitiveName } from "./types";
 import { groupServices } from "./appUtils";
 import { Button } from "./Button";
+import { Dropdown } from "./Dropdown";
 import { Tooltip } from "./Tooltip";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
@@ -12,11 +13,22 @@ import {
   EyeIcon,
   EyeOffIcon,
   SaveIcon,
-  SearchIcon
+  SearchIcon,
+  CodeIcon,
+  RefreshIcon
 } from "./icons";
 import type { MuxlyTheme } from "./theme";
 import { ThemeSettings } from "./ThemeSettings";
 import { fuzzySearchMatches } from "./search";
+import {
+  buildEditorOptions,
+  editorCommandKey,
+  MAX_CUSTOM_EDITORS,
+  MAX_EDITOR_COMMAND_LENGTH,
+  MAX_EDITOR_NAME_LENGTH,
+  normalizeCustomEditors,
+  normalizeEditorCommand
+} from "./editorOptions";
 
 // Bounds — must match the clamps in `src-tauri/src/settings.rs` so the form
 // can show the same limits the backend will enforce on save.
@@ -41,7 +53,7 @@ const SETTINGS_TAB_SECTIONS: Record<SettingsTab, string[]> = {
   privacy: ["Privacy", "Sensitive services"]
 };
 const SETTINGS_SEARCH_METADATA = {
-  Editor: "editor command open in editor code code.cmd nvim subl",
+  Editor: "editor default command open in editor code code.cmd nvim subl installed detected scan rescan custom executable path add remove",
   "Auto-restart": "auto restart crash max attempts re-spawn window seconds budget",
   Logs: "logs output buffer max log chunks prepend timestamps hh:mm:ss",
   Layout: "layout panels panes grid columns tabs open new services split",
@@ -52,6 +64,7 @@ const SETTINGS_SEARCH_METADATA = {
 } as const;
 const UNTOUCHED_FIELDS = {
   editorCommand: false,
+  customEditors: false,
   maxAttempts: false,
   windowSeconds: false,
   maxLogChunks: false,
@@ -65,6 +78,10 @@ type Props = {
   // Live list of services — used to compute the "all hidden" state and to
   // know which group names exist when toggling the master privacy switch.
   services: ServiceConfig[];
+  detectedEditors: EditorCandidate[];
+  editorDiscoveryLoading: boolean;
+  editorDiscoveryError: string | null;
+  onRescanEditors: () => Promise<void>;
   onClose: () => void;
   // Returns the persisted settings (possibly clamped by the backend) so the
   // form can re-sync to authoritative values after save.
@@ -90,6 +107,10 @@ type Props = {
 export function SettingsView({
   settings,
   services,
+  detectedEditors,
+  editorDiscoveryLoading,
+  editorDiscoveryError,
+  onRescanEditors,
   onClose,
   onSave,
   onThemePreview,
@@ -98,6 +119,12 @@ export function SettingsView({
   streamMode
 }: Props) {
   const [editorCommand, setEditorCommand] = useState(settings.editorCommand);
+  const [customEditors, setCustomEditors] = useState(
+    () => normalizeCustomEditors(settings.customEditors)
+  );
+  const [newEditorName, setNewEditorName] = useState("");
+  const [newEditorCommand, setNewEditorCommand] = useState("");
+  const [customEditorError, setCustomEditorError] = useState<string | null>(null);
   const [maxAttempts, setMaxAttempts] = useState(String(settings.autoRestartMaxAttempts));
   const [windowSeconds, setWindowSeconds] = useState(
     String(Math.round(settings.autoRestartWindowMs / 1000))
@@ -116,6 +143,14 @@ export function SettingsView({
   const [pendingSensitiveProjects, setPendingSensitiveProjects] = useState<
     Record<string, boolean>
   >({});
+  const editorOptions = useMemo(
+    () =>
+      buildEditorOptions(detectedEditors, customEditors, editorCommand).map((option) => ({
+        ...option,
+        icon: <CodeIcon className="size-3.5" />
+      })),
+    [customEditors, detectedEditors, editorCommand]
+  );
   const sectionVisible = (title: keyof typeof SETTINGS_SEARCH_METADATA) =>
     settingsQuery.trim()
       ? sectionMatches(settingsQuery, title, SETTINGS_SEARCH_METADATA[title])
@@ -126,6 +161,9 @@ export function SettingsView({
   useEffect(() => {
     if (!touchedFields.editorCommand) {
       setEditorCommand(settings.editorCommand);
+    }
+    if (!touchedFields.customEditors) {
+      setCustomEditors(normalizeCustomEditors(settings.customEditors));
     }
     if (!touchedFields.maxAttempts) {
       setMaxAttempts(String(settings.autoRestartMaxAttempts));
@@ -179,6 +217,7 @@ export function SettingsView({
     const next: AppSettings = {
       ...settings,
       editorCommand,
+      customEditors,
       autoRestartMaxAttempts: clamp(parsedAttempts, 0, AUTO_RESTART_MAX_ATTEMPTS_LIMIT),
       autoRestartWindowMs:
         clamp(
@@ -196,6 +235,7 @@ export function SettingsView({
       // Re-sync from the backend's view of the truth — backend clamps may
       // differ from what the user typed (e.g. "999" attempts → 20).
       setEditorCommand(saved.editorCommand);
+      setCustomEditors(normalizeCustomEditors(saved.customEditors));
       setMaxAttempts(String(saved.autoRestartMaxAttempts));
       setWindowSeconds(String(Math.round(saved.autoRestartWindowMs / 1000)));
       setMaxLogChunks(String(saved.maxLogChunks));
@@ -207,6 +247,50 @@ export function SettingsView({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAddCustomEditor = () => {
+    setCustomEditorError(null);
+    const name = newEditorName.trim();
+    const command = normalizeEditorCommand(newEditorCommand);
+    if (!name || Array.from(name).length > MAX_EDITOR_NAME_LENGTH) {
+      setCustomEditorError(`Enter an editor name up to ${MAX_EDITOR_NAME_LENGTH} characters.`);
+      return;
+    }
+    if (!command || Array.from(command).length > MAX_EDITOR_COMMAND_LENGTH) {
+      setCustomEditorError("Enter one executable path or command, without arguments.");
+      return;
+    }
+    if (customEditors.some((editor) => editorCommandKey(editor.command) === editorCommandKey(command))) {
+      setCustomEditorError("That editor command is already in the list.");
+      return;
+    }
+    const id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `custom-editor-${Date.now()}`;
+    setCustomEditors((current) =>
+      normalizeCustomEditors([...current, { id, name, command }])
+    );
+    setTouchedFields((current) => ({ ...current, customEditors: true }));
+    setNewEditorName("");
+    setNewEditorCommand("");
+    setSaveMessage(null);
+  };
+
+  const handleRemoveCustomEditor = (id: string) => {
+    setCustomEditorError(null);
+    const editor = customEditors.find((candidate) => candidate.id === id);
+    if (!editor) return;
+    if (editorCommandKey(editor.command) === editorCommandKey(editorCommand)) {
+      setCustomEditorError(
+        "Choose another default editor before removing the saved editor."
+      );
+      return;
+    }
+    setCustomEditors((current) => current.filter((candidate) => candidate.id !== id));
+    setTouchedFields((current) => ({ ...current, customEditors: true }));
+    setSaveMessage(null);
   };
 
   // Toggle every existing group's privacy in one call. We always set explicit
@@ -326,6 +410,7 @@ export function SettingsView({
   // visible values match the persisted ones.
   const formDirty =
     (touchedFields.editorCommand && editorCommand.trim() !== settings.editorCommand) ||
+    (touchedFields.customEditors && !sameCustomEditors(customEditors, settings.customEditors)) ||
     (touchedFields.maxAttempts && maxAttempts !== String(settings.autoRestartMaxAttempts)) ||
     (touchedFields.windowSeconds &&
       windowSeconds !== String(Math.round(settings.autoRestartWindowMs / 1000))) ||
@@ -412,19 +497,126 @@ export function SettingsView({
             searchQuery={settingsQuery}
             keywords={SETTINGS_SEARCH_METADATA.Editor}
           >
-            <FormRow label="Editor command" hint='e.g. "code" or "code.cmd" on Windows, "nvim", "subl"'>
-              <input
-                value={editorCommand}
-                onChange={(event) => {
-                  setTouchedFields((current) => ({ ...current, editorCommand: true }));
-                  setEditorCommand(event.target.value);
-                  setSaveMessage(null);
-                }}
-                className="form-input font-mono text-xs"
-                placeholder="code"
-                aria-label="Editor command"
-              />
+            <FormRow
+              label="Default editor"
+              hint="Choose an installed editor or a saved custom command. The editor opens once when selected from a service; changing this choice takes effect after Save."
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Dropdown
+                  value={editorCommand}
+                  options={editorOptions}
+                  onChange={(command) => {
+                    setTouchedFields((current) => ({ ...current, editorCommand: true }));
+                    setEditorCommand(command);
+                    setCustomEditorError(null);
+                    setSaveMessage(null);
+                  }}
+                  ariaLabel="Default editor"
+                  placeholder="Choose an editor"
+                  className="min-w-0 flex-1"
+                />
+                <Tooltip label={editorDiscoveryLoading ? "Scanning for editors" : "Rescan installed editors"}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => void onRescanEditors()}
+                    disabled={editorDiscoveryLoading}
+                    aria-label="Rescan installed editors"
+                  >
+                    <RefreshIcon className={`size-4 ${editorDiscoveryLoading ? "animate-spin" : ""}`} />
+                  </Button>
+                </Tooltip>
+              </div>
+              <p className="mt-1 text-[11px] text-zinc-500" aria-live="polite">
+                {editorDiscoveryLoading
+                  ? "Scanning PATH and common application folders…"
+                  : editorDiscoveryError
+                  ? `Scan unavailable: ${editorDiscoveryError}`
+                  : detectedEditors.length > 0
+                  ? `${detectedEditors.length} installed editor${detectedEditors.length === 1 ? "" : "s"} detected.`
+                  : "No installed editors detected yet. You can add an executable path below."}
+              </p>
             </FormRow>
+
+            <div className="space-y-3 rounded-md border border-white/10 bg-black/10 p-3">
+              <div>
+                <p className="text-xs font-medium text-zinc-200">Custom editors</p>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Add a display name and one executable path or command. Paths with spaces are kept as one value; do not enter arguments.
+                </p>
+              </div>
+              <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto]">
+                <input
+                  value={newEditorName}
+                  maxLength={MAX_EDITOR_NAME_LENGTH}
+                  onChange={(event) => {
+                    setNewEditorName(event.target.value);
+                    setCustomEditorError(null);
+                  }}
+                  className="form-input min-w-0 text-xs"
+                  placeholder="Name, e.g. Fleet"
+                  aria-label="Custom editor name"
+                />
+                <input
+                  value={newEditorCommand}
+                  maxLength={MAX_EDITOR_COMMAND_LENGTH}
+                  onChange={(event) => {
+                    setNewEditorCommand(event.target.value);
+                    setCustomEditorError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleAddCustomEditor();
+                    }
+                  }}
+                  className="form-input min-w-0 font-mono text-xs"
+                  placeholder="Executable path or command"
+                  aria-label="Custom editor executable path or command"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleAddCustomEditor}
+                  disabled={customEditors.length >= MAX_CUSTOM_EDITORS}
+                >
+                  Add editor
+                </Button>
+              </div>
+              {customEditorError ? (
+                <p className="rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300" role="alert">
+                  {customEditorError}
+                </p>
+              ) : null}
+              {customEditors.length > 0 ? (
+                <ul className="divide-y divide-white/10 rounded-md border border-white/10">
+                  {customEditors.map((editor) => (
+                    <li key={editor.id} className="flex min-w-0 items-center gap-2 px-3 py-2">
+                      <CodeIcon className="size-3.5 shrink-0 text-zinc-500" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs text-zinc-200">{editor.name}</span>
+                        <span className="block truncate font-mono text-[11px] text-zinc-500">{editor.command}</span>
+                      </span>
+                      {editorCommandKey(editor.command) === editorCommandKey(editorCommand) ? (
+                        <span className="shrink-0 text-[10px] text-cyan-300">Default</span>
+                      ) : null}
+                      <Tooltip label={`Remove ${editor.name}`}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveCustomEditor(editor.id)}
+                          aria-label={`Remove custom editor ${editor.name}`}
+                        >
+                          <DeleteIcon className="size-3.5" />
+                        </Button>
+                      </Tooltip>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[11px] text-zinc-500">No custom editors saved.</p>
+              )}
+            </div>
           </Section>
 
           <Section
@@ -1094,4 +1286,17 @@ function parseInteger(value: string): number | null {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function sameCustomEditors(left: ReturnType<typeof normalizeCustomEditors>, right: unknown) {
+  const normalizedRight = normalizeCustomEditors(right);
+  return (
+    left.length === normalizedRight.length &&
+    left.every(
+      (editor, index) =>
+        editor.id === normalizedRight[index]?.id &&
+        editor.name === normalizedRight[index]?.name &&
+        editor.command === normalizedRight[index]?.command
+    )
+  );
 }
