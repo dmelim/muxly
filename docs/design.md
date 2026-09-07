@@ -173,6 +173,9 @@ border — accent when selected, `accent/40` when open elsewhere, transparent
 otherwise. The status dot and name lead; the command shows in muted monospace.
 Project group headers carry the pin action. Pinned projects form a stable group
 at the top of the sidebar while service order inside each project is unchanged.
+Dragging a service card into the terminal workspace opens it as a tab in the
+hovered panel; an empty workspace accepts the same gesture and creates its first
+panel. The destination uses a dashed cyan outline and a short drop label.
 
 ### Panels & dividers
 

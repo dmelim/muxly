@@ -76,12 +76,13 @@ export function DetailsSidebar({
   if (editing) {
     return (
       <ServiceForm
-        initial={editing.mode === "edit" ? editing.service : null}
+        key={`${editing.mode}-${"service" in editing && editing.service ? editing.service.id : "blank"}`}
+        initial={"service" in editing ? editing.service ?? null : null}
         existingIds={services
           .filter((service) => editing.mode !== "edit" || service.id !== editing.service.id)
           .map((service) => service.id)}
         profiles={settings.profiles}
-        defaultProfile={editing.mode === "new" ? activeProfile : null}
+        defaultProfile={editing.mode === "new" && !editing.service ? activeProfile : null}
         onSave={onSaveService}
         onCancel={() => onEdit(null)}
         onDelete={

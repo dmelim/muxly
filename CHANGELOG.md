@@ -36,6 +36,8 @@ to `0.5.7` and is not part of this inventory.
 
 ### Added
 
+- Themed context menus now provide service, project, and workspace-tab actions with keyboard navigation, privacy-aware labels, and single-instance terminal placement.
+- Services can now be dragged from the sidebar into the terminal workspace to open them as tabs in the hovered panel, including when the workspace is empty.
 - The other-profile activity indicator now lists its running services and count on hover.
 - **A themed startup screen replaces the blank window.** An inline splash hands off to React until settings, services, and workspace restoration finish, with reduced-motion support and recoverable startup errors.
 - **Persistent panel workspaces with panel-owned tabs.** Panels now restore with independent ordered tab strips and active tabs. Normal clicks open tabs in the focused panel, Ctrl/Cmd-click creates a separate panel, and tabs can be reordered or dragged between panels with a muted tab-shaped placement preview and without stopping running services.

@@ -24,6 +24,23 @@ const load = async (file) => import(await moduleUrl(new URL(`../src/${file}.ts`,
 const { redactSensitive } = await load("types");
 const { LogSearchCache } = await load("logSearchCache");
 const { DEFAULT_THEME, applyTheme, xtermTheme } = await load("theme");
+const { replaceActiveTab, moveTabToNewPanel, closeOtherTabs } = await load("workspaceContextOps");
+
+test("context workspace operations preserve unique valid panel tabs", () => {
+  const panels = [
+    { id: "one", tabIds: ["a", "b"], activeTabId: "b" },
+    { id: "two", tabIds: ["c"], activeTabId: "c" }
+  ];
+  const replaced = replaceActiveTab(panels, "one", "d");
+  assert.deepEqual(replaced[0], { id: "one", tabIds: ["a", "d"], activeTabId: "d" });
+  assert.strictEqual(replaceActiveTab(replaced, "one", "c"), replaced, "an existing service is never duplicated");
+  const moved = moveTabToNewPanel(replaced, "one", "d", "three");
+  assert.deepEqual(moved.map((panel) => panel.tabIds), [["a"], ["c"], ["d"]]);
+  assert.ok(moved.every((panel) => panel.tabIds.includes(panel.activeTabId)));
+  const closed = closeOtherTabs([{ id: "one", tabIds: ["a", "b"], activeTabId: "a" }, moved[1]], "one", "b");
+  assert.deepEqual(closed, [{ id: "one", tabIds: ["b"], activeTabId: "b" }, moved[1]]);
+  assert.strictEqual(closeOtherTabs(closed, "one", "missing"), closed, "a stale target is ignored");
+});
 const service = { id: "web", name: "SecretApp", group: "SecretGroup", cwd: "/work/project",
   program: "node", args: [], sensitive: true };
 

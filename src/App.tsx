@@ -25,11 +25,13 @@ import { RuntimeRequirements } from "./RuntimeRequirements";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
-import { TerminalPanes } from "./TerminalPanes";
+import { TerminalPanes, type TabMenuAction } from "./TerminalPanes";
 import { BottomTerminal } from "./BottomTerminal";
 import { SettingsView } from "./SettingsView";
 import { DetailsSidebar } from "./DetailsSidebar";
-import { ServicesSidebar } from "./ServicesSidebar";
+import { ServicesSidebar, type GroupMenuAction, type ServiceMenuAction } from "./ServicesSidebar";
+import { openInEditor, openInFileManager, openServiceUrl } from "./appActions";
+import { closeOtherTabs, moveTabToNewPanel, replaceActiveTab } from "./workspaceContextOps";
 import { describeExitCode, shortExitCode } from "./exitCodes";
 import { StartupScreen } from "./StartupScreen";
 import { runPortCheck, runRuntimeCheck, startupMark, mirrorBootTheme } from "./startup";
@@ -258,6 +260,7 @@ export function App() {
   // The ref advances optimistically, allowing rapid actions to build on every
   // change even before React has rendered the first saved snapshot.
   const settingsWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const servicePlacementQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   // Project collapse state is persisted in settings (see `collapsedProjectNames`)
@@ -519,6 +522,37 @@ export function App() {
     setSelectedId(serviceId);
   }, [focusExistingTab, focusedPanelId, workspacePanels]);
 
+  // A service dragged from the sidebar opens in the panel it was dropped on.
+  // An already-open service remains unique and is focused in its current panel,
+  // matching click and tab-drag behaviour for the single live xterm instance.
+  const openServiceInPanel = useCallback((serviceId: string, targetPanelId: string | null) => {
+    if (focusExistingTab(serviceId)) return;
+    const existingTarget = targetPanelId
+      ? workspacePanelsRef.current.find((panel) => panel.id === targetPanelId)
+      : null;
+    const panelId = existingTarget?.id ?? crypto.randomUUID();
+
+    setWorkspacePanels((current) => {
+      const target = current.find((panel) => panel.id === panelId);
+      if (!target) {
+        return [...current, { id: panelId, tabIds: [serviceId], activeTabId: serviceId }];
+      }
+      return current.map((panel) =>
+        panel.id === panelId
+          ? {
+              ...panel,
+              tabIds: settingsRef.current.openServicesInTabs
+                ? [...panel.tabIds, serviceId]
+                : [serviceId],
+              activeTabId: serviceId
+            }
+          : panel
+      );
+    });
+    setFocusedPanelId(panelId);
+    setSelectedId(serviceId);
+  }, [focusExistingTab]);
+
   // Ctrl/Cmd-click creates a panel. Existing tabs are focused rather than
   // duplicated because one live xterm instance belongs to each service.
   const openInSplit = useCallback((serviceId: string) => {
@@ -531,6 +565,41 @@ export function App() {
     setFocusedPanelId(panelId);
     setSelectedId(serviceId);
   }, [focusExistingTab]);
+
+  const openInExplicitTab = useCallback((serviceId: string) => {
+    if (focusExistingTab(serviceId)) return;
+    const current = workspacePanelsRef.current;
+    const panelId = focusedPanelIdRef.current ?? current[0]?.id ?? crypto.randomUUID();
+    const next = current.length === 0
+      ? [{ id: panelId, tabIds: [serviceId], activeTabId: serviceId }]
+      : current.map((panel) => panel.id === panelId
+        ? { ...panel, tabIds: [...panel.tabIds, serviceId], activeTabId: serviceId }
+        : panel);
+    workspacePanelsRef.current = next;
+    setWorkspacePanels(next);
+    setFocusedPanelId(panelId);
+    setSelectedId(serviceId);
+  }, [focusExistingTab]);
+
+  const replaceCurrentTab = useCallback((serviceId: string) => {
+    if (focusExistingTab(serviceId)) return;
+    const current = workspacePanelsRef.current;
+    const panelId = focusedPanelIdRef.current ?? current[0]?.id;
+    if (!panelId) return openInExplicitTab(serviceId);
+    const next = replaceActiveTab(current, panelId, serviceId);
+    workspacePanelsRef.current = next;
+    setWorkspacePanels(next);
+    setSelectedId(serviceId);
+  }, [focusExistingTab, openInExplicitTab]);
+
+  const moveToCurrentPanel = useCallback((serviceId: string) => {
+    const current = workspacePanelsRef.current;
+    const targetId = focusedPanelIdRef.current;
+    const source = current.find((panel) => panel.tabIds.includes(serviceId));
+    if (!source || !targetId) return;
+    if (source.id === targetId) return focusPanelTab(targetId, serviceId);
+    movePanelTab(serviceId, targetId, current.find((panel) => panel.id === targetId)?.tabIds.length ?? 0);
+  }, [focusPanelTab, movePanelTab]);
 
   // Auto-clear the flash so the CSS animation can re-fire on the next jump
   // (re-adding the same class to an element doesn't restart its animation).
@@ -1935,7 +2004,8 @@ export function App() {
   };
 
   const deleteServiceConfig = async (target: ServiceConfig) => {
-    if (pids[target.id]) {
+    const status = statuses[target.id] ?? "stopped";
+    if (pids[target.id] != null || adoptedPids[target.id] != null || ["running", "starting", "stopping", "restarting"].includes(status)) {
       throw new Error("Stop the service before deleting it");
     }
     const next = services.filter((service) => service.id !== target.id);
@@ -2282,6 +2352,116 @@ export function App() {
     });
   }, [persistSettings]);
 
+  const updateServicePlacement = useCallback(async (service: ServiceConfig, field: "group" | "profile", value: string | null) => {
+    const task = servicePlacementQueueRef.current.catch(() => undefined).then(async () => {
+      const next = servicesRef.current.map((candidate) => candidate.id === service.id ? { ...candidate, [field]: value } : candidate);
+      await invoke("save_services", { services: next });
+      const loaded = await reloadServices();
+      servicesRef.current = loaded;
+    });
+    servicePlacementQueueRef.current = task;
+    try { await task; } catch (error) { setManagerMessage(streamModeRef.current ? "Could not update hidden service" : errorMessage(error)); }
+  }, [reloadServices]);
+
+  const serviceMenuAction = useCallback((action: ServiceMenuAction, service: ServiceConfig, value?: string | null) => {
+    const currentService = servicesRef.current.find((candidate) => candidate.id === service.id);
+    if (!currentService) return;
+    service = currentService;
+    if (!(settingsRef.current.openServicesInTabs ?? true) && ["tab", "replace", "move-current"].includes(action)) return;
+    const currentStatus = statuses[service.id] ?? "stopped";
+    if (["start", "stop", "restart"].includes(action) && ["starting", "stopping", "restarting"].includes(currentStatus)) return;
+    if (action === "show") focusExistingTab(service.id);
+    else if (action === "tab") openInExplicitTab(service.id);
+    else if (action === "replace") replaceCurrentTab(service.id);
+    else if (action === "panel") {
+      const existing = workspacePanelsRef.current.find((panel) => panel.tabIds.includes(service.id));
+      if (existing) {
+        const newPanelId = crypto.randomUUID();
+        const next = moveTabToNewPanel(workspacePanelsRef.current, existing.id, service.id, newPanelId);
+        if (next === workspacePanelsRef.current) return;
+        workspacePanelsRef.current = next; setWorkspacePanels(next); setFocusedPanelId(newPanelId); setSelectedId(service.id);
+      } else openInSplit(service.id);
+    }
+    else if (action === "move-current") moveToCurrentPanel(service.id);
+    else if (action === "start") void manualStart(service);
+    else if (action === "stop") void stopService(service);
+    else if (action === "restart") void restartService(service);
+    else if (action === "edit") { setRightSidebarOpen(true); setEditing({ mode: "edit", service }); }
+    else if (action === "duplicate") { setRightSidebarOpen(true); setEditing({ mode: "duplicate", service: { ...service, id: crypto.randomUUID(), name: `${service.name} copy` } }); }
+    else if (action === "project" || action === "profile") void updateServicePlacement(service, action === "project" ? "group" : "profile", value ?? null);
+    else if (action === "editor") void openInEditor(service.cwd, service.id, settingsRef.current.editorCommand, appendLog);
+    else if (action === "reveal") void openInFileManager(service.cwd, service.id, appendLog);
+    else if (action === "browser" && (actualPortsRef.current[service.id] ?? service.port) != null) void openServiceUrl((actualPortsRef.current[service.id] ?? service.port)!, service.id, appendLog);
+    else if (action.startsWith("copy-")) {
+      if (streamModeRef.current && service.sensitive && (action === "copy-command" || action === "copy-cwd")) return;
+      const copyValue = action === "copy-name" ? displayServiceName(service, streamModeRef.current)
+        : action === "copy-command" ? formatCommand(service)
+        : action === "copy-cwd" ? service.cwd
+        : `http://localhost:${actualPortsRef.current[service.id] ?? service.port}`;
+      void navigator.clipboard.writeText(copyValue).catch((error) => setManagerMessage(errorMessage(error)));
+    }
+  }, [adoptedPids, appendLog, focusExistingTab, manualStart, moveToCurrentPanel, openInExplicitTab, openInSplit, pids, replaceCurrentTab, restartService, statuses, stopService, updateServicePlacement]);
+
+  const groupMenuAction = (action: GroupMenuAction, groupName: string) => {
+    if (action === "start") startGroup(groupName);
+    else if (action === "stop") stopGroup(groupName);
+    else if (action === "pin") toggleProjectPinned(groupName);
+    else if (action === "collapse") toggleGroupCollapsed(groupName);
+    else if (action === "sensitive") {
+      const sensitive = !(settingsRef.current.sensitiveProjectNames[groupName] ?? false);
+      const ids = servicesRef.current.filter((candidate) => groupKey(candidate) === groupName).map((candidate) => candidate.id);
+      void setServicesSensitive(ids, sensitive).then(() => {
+        const current = settingsRef.current;
+        const names = { ...current.sensitiveProjectNames };
+        if (sensitive) names[groupName] = true; else delete names[groupName];
+        return persistSettings({ ...current, sensitiveProjectNames: names });
+      }).catch((error) => setManagerMessage(streamModeRef.current ? "Could not update hidden project" : errorMessage(error)));
+    } else if (action === "add") {
+      setRightSidebarOpen(true);
+      setEditing({ mode: "new", service: {
+        id: crypto.randomUUID(), name: "", cwd: "", program: "", args: [], env: {}, port: null,
+        autoPort: false, autoRestart: false, usePty: false,
+        group: groupName === "Ungrouped" ? null : groupName,
+        profile: settingsRef.current.activeProfile ?? null
+      } });
+    }
+  };
+
+  const tabMenuAction = useCallback((action: TabMenuAction, panelId: string, serviceId: string, targetPanelId?: string) => {
+    const currentPanels = workspacePanelsRef.current;
+    const source = currentPanels.find((panel) => panel.id === panelId && panel.tabIds.includes(serviceId));
+    if (!source) return;
+    if (!(settingsRef.current.openServicesInTabs ?? true) && (action === "move" || action === "close-others")) return;
+    if (action === "move" && targetPanelId) movePanelTab(serviceId, targetPanelId, currentPanels.find((panel) => panel.id === targetPanelId)?.tabIds.length ?? 0);
+    else if (action === "new-panel") {
+      const newPanelId = crypto.randomUUID();
+      const current = workspacePanelsRef.current;
+      const next = moveTabToNewPanel(current, panelId, serviceId, newPanelId);
+      if (next === current) return;
+      workspacePanelsRef.current = next;
+      setWorkspacePanels(next);
+      setFocusedPanelId(newPanelId);
+      setSelectedId(serviceId);
+    } else if (action === "reveal") {
+      const service = servicesRef.current.find((candidate) => candidate.id === serviceId);
+      if (!service) return;
+      setLeftSidebarOpen(true);
+      setServiceQuery("");
+      setActiveProfile(service.profile && settingsRef.current.profiles.some((profile) => profile.id === service.profile) ? service.profile : null);
+      if (settingsRef.current.collapsedProjectNames[groupKey(service)]) toggleGroupCollapsed(groupKey(service));
+      setSelectedId(serviceId);
+    } else if (action === "close") closePane(serviceId, panelId);
+    else if (action === "close-others") {
+      const current = workspacePanelsRef.current;
+      const next = closeOtherTabs(current, panelId, serviceId);
+      if (next === current) return;
+      workspacePanelsRef.current = next;
+      setWorkspacePanels(next);
+      setFocusedPanelId(panelId);
+      setSelectedId(serviceId);
+    }
+  }, [closePane, movePanelTab, setActiveProfile, toggleGroupCollapsed]);
+
   // Display name for a service, masked when stream mode is on and the service
   // is flagged sensitive. Used everywhere a service name is shown as UI chrome.
   const maskName = useCallback(
@@ -2369,6 +2549,9 @@ export function App() {
   // typing in a real form field.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      // Floating controls own their keyboard interaction. In particular,
+      // Escape must close the list rather than discard the Settings draft.
+      if ((event.target as Element | null)?.closest?.('[role="menu"], [role="listbox"]')) return;
       if (event.key === "Escape") {
         if (profilePromptOpen) {
           setProfilePromptOpen(false);
@@ -2628,6 +2811,7 @@ export function App() {
         compact={compactSidebar}
         modKey={modKey}
         groupedServices={groupedServices}
+        allProjectNames={groupNames}
         statuses={statuses}
         collapsedGroups={collapsedGroups}
         settings={settings}
@@ -2666,6 +2850,9 @@ export function App() {
         reorderGroup={reorderGroup}
         openService={openService}
         openInSplit={openInSplit}
+        onServiceMenuAction={serviceMenuAction}
+        onGroupMenuAction={groupMenuAction}
+        onDeleteService={deleteServiceConfig}
       />
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
@@ -2803,6 +2990,13 @@ export function App() {
             onFocus={focusPanelTab}
             onTabFocus={focusPanelTab}
             onTabMove={movePanelTab}
+            onTabMenuAction={tabMenuAction}
+            sidebarDragId={dragId}
+            sidebarDragIdRef={dragIdRef}
+            onSidebarServiceDrop={(serviceId, panelId) => {
+              endDrag();
+              openServiceInPanel(serviceId, panelId);
+            }}
             onClose={(panelId, id) => {
               if (searchPaneId === id) setSearchPaneId(null);
               if (paneSearchSeed?.serviceId === id) setPaneSearchSeed(null);

@@ -2,7 +2,8 @@
 
 export type EditTarget =
   | { mode: "edit"; service: ServiceConfig }
-  | { mode: "new" }
+  | { mode: "duplicate"; service: ServiceConfig }
+  | { mode: "new"; service?: ServiceConfig }
   | { mode: "import" };
 
 // Surfaced health of an in-progress PTY start that hasn't produced output yet.

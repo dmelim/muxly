@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { MutableRefObject, ReactNode } from "react";
+import type { DragEvent, MutableRefObject, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -15,6 +15,7 @@ import { Tooltip } from "./Tooltip";
 import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
 import { fuzzySearchPattern } from "./search";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -51,6 +52,8 @@ const TERMINAL_OPTIONS = {
   scrollback: 5000
 } as const;
 
+const EMPTY_WORKSPACE_DROP_TARGET = "__empty_workspace__";
+
 type TerminalPanesProps = {
   /** Services shown as panes, left-to-right. */
   paneServices: ServiceConfig[];
@@ -70,6 +73,10 @@ type TerminalPanesProps = {
   panels: WorkspacePanel[];
   onTabFocus: (panelId: string, serviceId: string) => void;
   onTabMove: (serviceId: string, targetPanelId: string, targetIndex: number) => void;
+  onTabMenuAction: (action: TabMenuAction, panelId: string, serviceId: string, targetPanelId?: string) => void;
+  sidebarDragId: string | null;
+  sidebarDragIdRef: MutableRefObject<string | null>;
+  onSidebarServiceDrop: (serviceId: string, targetPanelId: string | null) => void;
   theme: MuxlyTheme;
   onPrivacySnapshotStart: (serviceId: string) => void;
   /** Per-service flag: a PTY run has started but not yet produced real output.
@@ -110,6 +117,7 @@ type TerminalPanesProps = {
   onAdoptRunningInstance: (service: ServiceConfig) => void;
   onReleaseAdopted: (serviceId: string) => void;
 };
+export type TabMenuAction = "move" | "new-panel" | "reveal" | "close" | "close-others";
 
 export function TerminalPanes({
   paneServices,
@@ -134,6 +142,10 @@ export function TerminalPanes({
   onFocus,
   onTabFocus,
   onTabMove,
+  onTabMenuAction,
+  sidebarDragId,
+  sidebarDragIdRef,
+  onSidebarServiceDrop,
   theme,
   onPrivacySnapshotStart,
   onClose,
@@ -152,6 +164,10 @@ export function TerminalPanes({
   const [draggedTabSourcePanelId, setDraggedTabSourcePanelId] = useState<string | null>(null);
   const draggedTabIdRef = useRef<string | null>(null);
   const [tabDropTarget, setTabDropTarget] = useState<{ panelId: string; index: number } | null>(null);
+  const [sidebarDropTarget, setSidebarDropTarget] = useState<string | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const tabMenuTargetRef = useRef<HTMLElement | null>(null);
+  useEffect(() => setTabMenu(null), [paneServices, panels, projectNameAliases, statuses, streamMode, tabMode]);
   const privacyReady = paneServices.every((service) => {
     const alias = projectNameAliases[groupKey(service)] ?? "";
     return renderedPrivacy[service.id] === privacySnapshotKey(service, streamMode, alias);
@@ -182,6 +198,32 @@ export function TerminalPanes({
     finishTabDrag();
   }, [finishTabDrag, onTabMove]);
 
+  const showSidebarDropTarget = useCallback(
+    (event: DragEvent<HTMLElement>, panelId: string) => {
+      if (!sidebarDragIdRef.current || draggedTabIdRef.current) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setSidebarDropTarget(panelId);
+    },
+    [sidebarDragIdRef]
+  );
+
+  const dropSidebarService = useCallback(
+    (event: DragEvent<HTMLElement>, panelId: string | null) => {
+      const serviceId = sidebarDragIdRef.current;
+      if (!serviceId || draggedTabIdRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setSidebarDropTarget(null);
+      onSidebarServiceDrop(serviceId, panelId);
+    },
+    [onSidebarServiceDrop, sidebarDragIdRef]
+  );
+
+  useEffect(() => {
+    if (!sidebarDragId) setSidebarDropTarget(null);
+  }, [sidebarDragId]);
+
   useEffect(() => {
     const nextTheme = xtermTheme(theme);
     for (const terminal of terminalsRef.current.values()) {
@@ -191,8 +233,22 @@ export function TerminalPanes({
 
   if (paneServices.length === 0) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-zinc-500">
-        No service open.
+      <div
+        onDragOver={(event) => showSidebarDropTarget(event, EMPTY_WORKSPACE_DROP_TARGET)}
+        onDragLeave={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          setSidebarDropTarget(null);
+        }}
+        onDrop={(event) => dropSidebarService(event, null)}
+        className="relative flex min-h-0 flex-1 items-center justify-center text-sm text-zinc-500"
+      >
+        {sidebarDropTarget === EMPTY_WORKSPACE_DROP_TARGET ? (
+          <div className="pointer-events-none absolute inset-1.5 flex items-center justify-center rounded-md border-2 border-dashed border-cyan-400/60 bg-cyan-400/5 text-cyan-200">
+            Drop to open tab
+          </div>
+        ) : (
+          "No service open."
+        )}
       </div>
     );
   }
@@ -253,8 +309,19 @@ export function TerminalPanes({
         <section
           key={panel.id}
           aria-label="Terminal panel"
-          className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+          onDragOver={(event) => showSidebarDropTarget(event, panel.id)}
+          onDragLeave={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+            setSidebarDropTarget((current) => current === panel.id ? null : current);
+          }}
+          onDrop={(event) => dropSidebarService(event, panel.id)}
+          className="relative flex min-h-0 min-w-0 flex-col overflow-hidden"
         >
+          {sidebarDropTarget === panel.id ? (
+            <div className="pointer-events-none absolute inset-1.5 z-20 flex items-center justify-center rounded-md border-2 border-dashed border-cyan-400/60 bg-cyan-400/5 text-sm text-cyan-200">
+              Drop to open tab
+            </div>
+          ) : null}
           {tabMode ? (
             <div
               role="tablist"
@@ -292,6 +359,29 @@ export function TerminalPanes({
                         draggable
                         aria-selected={service.id === panel.activeTabId}
                         aria-label={`${displayServiceName(service, streamMode)}, ${statusLabels[statuses[service.id] ?? "stopped"]}`}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          tabMenuTargetRef.current = event.currentTarget;
+                          const otherPanels = panels.filter((candidate) => candidate.id !== panel.id);
+                          setTabMenu({ x: event.clientX, y: event.clientY, items: [
+                            { id: "move", label: "Move to Panel", disabled: !tabMode || otherPanels.length === 0, reason: !tabMode ? "Tab mode is disabled in Settings" : "No other panel", children: otherPanels.map((candidate, index) => {
+                              const active = serviceById.get(candidate.activeTabId);
+                              return { id: candidate.id, label: active ? `Panel ${index + 1}: ${displayServiceName(active, streamMode)}` : `Panel ${index + 1}`, action: () => onTabMenuAction("move", panel.id, service.id, candidate.id) };
+                            }) },
+                            { id: "new-panel", label: "Move to New Panel", action: () => onTabMenuAction("new-panel", panel.id, service.id) },
+                            { id: "reveal", label: "Reveal in Sidebar", action: () => onTabMenuAction("reveal", panel.id, service.id) },
+                            { id: "s", separator: true },
+                            { id: "close", label: "Close Tab", action: () => onTabMenuAction("close", panel.id, service.id) },
+                            { id: "close-others", label: "Close Other Tabs", disabled: !tabMode || panel.tabIds.length < 2, reason: "No other tabs in this panel", action: () => onTabMenuAction("close-others", panel.id, service.id) }
+                          ] });
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+                          event.preventDefault();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: rect.left + 12, clientY: rect.bottom }));
+                        }}
                         onClick={() => onTabFocus(panel.id, service.id)}
                         onDragStart={(event) => {
                           draggedTabIdRef.current = service.id;
@@ -401,6 +491,7 @@ export function TerminalPanes({
           Updating private terminal display…
         </div>
       ) : null}
+      {tabMenu ? <ContextMenu {...tabMenu} onClose={() => setTabMenu(null)} restoreFocusRef={tabMenuTargetRef} /> : null}
     </div>
   );
 }

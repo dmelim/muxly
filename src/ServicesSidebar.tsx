@@ -1,5 +1,7 @@
 ﻿import type { MutableRefObject } from "react";
 import type { AppSettings, Profile, ServiceConfig, ServiceStatus } from "./types";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import type { EditTarget } from "./appTypes";
 import { formatCommand, redactSensitive } from "./types";
 import { Button } from "./Button";
@@ -7,6 +9,8 @@ import { Tooltip } from "./Tooltip";
 import { ServiceIconBadge } from "./ServiceIconBadge";
 import { ProfileSwitcher } from "./ProfileSwitcher";
 import { statusLabels } from "./appUtils";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
 import {
   ChevronRightIcon,
   EyeIcon,
@@ -33,6 +37,7 @@ type Props = {
   compact: boolean;
   modKey: string;
   groupedServices: Array<[string, ServiceConfig[]]>;
+  allProjectNames: string[];
   statuses: Record<string, ServiceStatus>;
   collapsedGroups: Record<string, boolean>;
   settings: AppSettings;
@@ -83,7 +88,13 @@ type Props = {
   ) => Promise<void>;
   openService: (serviceId: string) => void;
   openInSplit: (serviceId: string) => void;
+  onServiceMenuAction: (action: ServiceMenuAction, service: ServiceConfig, value?: string | null) => void;
+  onGroupMenuAction: (action: GroupMenuAction, groupName: string) => void;
+  onDeleteService: (service: ServiceConfig) => Promise<void>;
 };
+
+export type ServiceMenuAction = "show" | "tab" | "replace" | "panel" | "move-current" | "start" | "stop" | "restart" | "edit" | "duplicate" | "project" | "profile" | "editor" | "reveal" | "browser" | "copy-name" | "copy-command" | "copy-cwd" | "copy-url";
+export type GroupMenuAction = "start" | "stop" | "add" | "pin" | "collapse" | "sensitive";
 
 export function ServicesSidebar({
   open,
@@ -91,6 +102,7 @@ export function ServicesSidebar({
   compact,
   modKey,
   groupedServices,
+  allProjectNames,
   statuses,
   collapsedGroups,
   settings,
@@ -128,8 +140,65 @@ export function ServicesSidebar({
   endGroupDrag,
   reorderGroup,
   openService,
-  openInSplit
+  openInSplit,
+  onServiceMenuAction,
+  onGroupMenuAction
+  ,onDeleteService
 }: Props) {
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const menuTargetRef = useRef<HTMLElement | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ServiceConfig | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  useEffect(() => setMenu(null), [activeProfile, allProjectNames, groupedServices, paneIds, profiles, settings, statuses, streamMode]);
+  const showMenu = (event: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>, items: ContextMenuItem[]) => {
+    event.preventDefault();
+    event.stopPropagation();
+    menuTargetRef.current = event.currentTarget;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const mouse = "clientX" in event && event.clientX > 0;
+    setMenu({ x: mouse ? event.clientX : rect.left + 12, y: mouse ? event.clientY : rect.bottom, items });
+  };
+  const serviceItems = (service: ServiceConfig): ContextMenuItem[] => {
+    const status = statuses[service.id] ?? "stopped";
+    const busy = ["starting", "restarting", "stopping"].includes(status);
+    const live = ["running", "starting", "restarting", "stopping"].includes(status);
+    const isOpen = paneIds.includes(service.id);
+    const tabless = !(settings.openServicesInTabs ?? true);
+    const validUrl = service.port != null && service.port > 0 && service.port <= 65535;
+    const projects = allProjectNames;
+    return [
+      isOpen ? { id: "show", label: "Show Existing Tab", action: () => onServiceMenuAction("show", service) } : { id: "tab", label: "New Tab", disabled: tabless, reason: "Tab mode is disabled in Settings", action: () => onServiceMenuAction("tab", service) },
+      isOpen ? { id: "move-current", label: "Move to Current Panel", disabled: tabless, reason: "Tab mode is disabled in Settings", action: () => onServiceMenuAction("move-current", service) } : { id: "replace", label: "Replace Current Tab", disabled: tabless, reason: "Tab mode is disabled in Settings", action: () => onServiceMenuAction("replace", service) },
+      { id: "panel", label: "New Panel", action: () => onServiceMenuAction("panel", service) },
+      { id: "s1", separator: true },
+      { id: "start-stop", label: live ? "Stop" : "Start", disabled: busy, action: () => onServiceMenuAction(live ? "stop" : "start", service) },
+      { id: "restart", label: "Restart", disabled: busy, action: () => onServiceMenuAction("restart", service) },
+      { id: "s2", separator: true },
+      { id: "edit", label: "Edit Service", action: () => onServiceMenuAction("edit", service) },
+      { id: "duplicate", label: "Duplicate Service", action: () => onServiceMenuAction("duplicate", service) },
+      { id: "project", label: "Move to Project", children: [
+        ...projects.map((name) => ({ id: `project-${name}`, label: displayProjectName(name), checked: (service.group?.trim() || "Ungrouped") === name, disabled: (service.group?.trim() || "Ungrouped") === name, action: () => onServiceMenuAction("project", service, name === "Ungrouped" ? null : name) })),
+        ...(!projects.includes("Ungrouped") ? [{ id: "project-none", label: "Ungrouped", checked: !service.group, disabled: !service.group, action: () => onServiceMenuAction("project", service, null) }] : [])
+      ] },
+      { id: "profile", label: "Assign to Profile", children: [
+        { id: "profile-none", label: "Unassigned", checked: !service.profile, disabled: !service.profile, action: () => onServiceMenuAction("profile", service, null) },
+        ...profiles.map((profile, index) => ({ id: `profile-${profile.id}`, label: streamMode && service.sensitive ? `Profile ${index + 1}` : profile.name, checked: service.profile === profile.id, disabled: service.profile === profile.id, action: () => onServiceMenuAction("profile", service, profile.id) }))
+      ] },
+      { id: "s3", separator: true },
+      { id: "editor", label: "Open in configured Editor", action: () => onServiceMenuAction("editor", service) },
+      { id: "reveal", label: "Reveal in File Manager", action: () => onServiceMenuAction("reveal", service) },
+      { id: "browser", label: "Open in Browser", disabled: !validUrl, reason: "This service has no valid port", action: () => onServiceMenuAction("browser", service) },
+      { id: "copy", label: "Copy", children: [
+        { id: "copy-name", label: "Name", action: () => onServiceMenuAction("copy-name", service) },
+        { id: "copy-command", label: "Command", disabled: streamMode && service.sensitive, reason: "Hidden while Stream mode is on", action: () => onServiceMenuAction("copy-command", service) },
+        { id: "copy-cwd", label: "Working directory", disabled: streamMode && service.sensitive, reason: "Hidden while Stream mode is on", action: () => onServiceMenuAction("copy-cwd", service) },
+        { id: "copy-url", label: "URL", disabled: !validUrl, action: () => onServiceMenuAction("copy-url", service) }
+      ] },
+      { id: "s4", separator: true },
+      { id: "delete", label: "Delete Service…", danger: true, disabled: live, reason: "Stop the service before deleting it", action: () => setDeleteTarget(service) }
+    ];
+  };
   return (
     <aside
       className={`flex min-h-0 flex-col overflow-hidden bg-[#15181d] ${
@@ -264,6 +333,7 @@ export function ServicesSidebar({
           const collapsed = collapsedGroups[groupName] ?? false;
           const groupPinned = settings.pinnedProjectNames?.[groupName] ?? false;
           const groupHidden = settings.hiddenProjectNames[groupName] ?? false;
+          const groupSensitive = settings.sensitiveProjectNames[groupName] ?? false;
           const displayGroupName = displayProjectName(groupName);
           // A service drag onto this header appends to the group (end-of-group);
           // a group drag onto it reorders whole groups (before/after this one).
@@ -296,6 +366,20 @@ export function ServicesSidebar({
                 }`}
               />
               <div
+                onContextMenu={(event) => showMenu(event, [
+                  { id: "start", label: "Start All", action: () => onGroupMenuAction("start", groupName) },
+                  { id: "stop", label: "Stop All", disabled: !anyRunning, action: () => onGroupMenuAction("stop", groupName) },
+                  { id: "add", label: "Add Service Here", action: () => onGroupMenuAction("add", groupName) },
+                  { id: "pin", label: groupPinned ? "Unpin" : "Pin", action: () => onGroupMenuAction("pin", groupName) },
+                  { id: "collapse", label: collapsed ? "Expand" : "Collapse", action: () => onGroupMenuAction("collapse", groupName) },
+                  { id: "sensitive", label: groupSensitive ? "Unmark Sensitive" : "Mark Sensitive", action: () => onGroupMenuAction("sensitive", groupName) }
+                ])}
+                onKeyDown={(event) => {
+                  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: rect.left + 12, clientY: rect.bottom }));
+                }}
                 onDragOver={(event) => {
                   if (dragGroupRef.current) {
                     if (dragGroupRef.current === groupName) return;
@@ -467,12 +551,14 @@ export function ServicesSidebar({
                         }`}
                       />
                       <div
+                        onContextMenu={(event) => showMenu(event, serviceItems(service))}
                         draggable={!serviceQuery}
                         onDragStart={(event) => {
                           beginDrag(service.id);
-                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.effectAllowed = "copyMove";
                           try {
                             event.dataTransfer.setData("text/plain", service.id);
+                            event.dataTransfer.setData("application/x-muxly-service-id", service.id);
                           } catch {
                             /* Safari may throw on some MIME types. */
                           }
@@ -508,6 +594,10 @@ export function ServicesSidebar({
                           }
                         }}
                         onKeyDown={(event) => {
+                          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                            showMenu(event, serviceItems(service));
+                            return;
+                          }
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
                             openService(service.id);
@@ -591,6 +681,22 @@ export function ServicesSidebar({
           );
         })}
       </div>
+      {menu ? <ContextMenu {...menu} onClose={() => setMenu(null)} restoreFocusRef={menuTargetRef} /> : null}
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete service?"
+          message={deleteError ?? `Delete ${maskName(deleteTarget)} from Muxly? This does not remove project files.`}
+          confirmLabel="Delete"
+          destructive
+          busy={deleting}
+          onClose={() => { setDeleteTarget(null); setDeleteError(null); }}
+          onConfirm={() => {
+            setDeleting(true);
+            setDeleteError(null);
+            void onDeleteService(deleteTarget).then(() => setDeleteTarget(null)).catch(() => setDeleteError("Could not delete this service. Check the manager status and try again.")).finally(() => setDeleting(false));
+          }}
+        />
+      ) : null}
     </aside>
   );
 }
