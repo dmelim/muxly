@@ -30,9 +30,8 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
-Target release: `0.5.6`. This section is the release inventory until manual
-verification is complete. The coordinated side-panel design update is deferred
-to `0.5.7` and is not part of this inventory.
+Target release: `0.6.0`. This section is the release inventory until the planned
+design fixes and manual verification are complete.
 
 ### Added
 
