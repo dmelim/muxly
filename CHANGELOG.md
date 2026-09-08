@@ -61,6 +61,7 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Service search results can be dragged into workspace tabs while sidebar reordering remains disabled during filtering. Whitespace-only searches no longer disable reordering.
 - Editor discovery skips non-launchable files, shares concurrent scans, and preserves platform path semantics; dropdown keyboard handling no longer dismisses Settings or leaves stale selections.
 
 - Tooltips flip away from window edges instead of being clipped.

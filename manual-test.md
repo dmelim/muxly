@@ -175,8 +175,13 @@ branch tests.
       intact.
 - [ ] Search services by name, ID, group, program, and argument with mixed case
       and surrounding spaces. Confirm empty state, clear button, Escape, profile
-      filtering, `Ctrl/Cmd+1…9` order, collapsed groups, disabled drag while
-      filtering, running processes, and Stream mode behavior.
+      filtering, `Ctrl/Cmd+1…9` order, collapsed groups, running processes, and
+      Stream mode behavior.
+- [ ] While searching, drag a matching service into an existing panel and an
+      empty workspace. Confirm it opens as a tab. Drop onto another service or
+      group header and confirm sidebar order and group membership stay unchanged,
+      with no reorder indicators. Confirm group dragging is disabled. Clear the
+      search or enter only spaces and confirm service and group reordering work.
 - [ ] Search Settings by section, label, and synonyms including `tabs`, `panes`,
       `privacy`, `logs`, and `restart`. Confirm empty state, clearing, Escape,
       unsaved form values, theme settings, sensitive-name masking, and narrow

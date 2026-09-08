@@ -145,6 +145,7 @@ export function ServicesSidebar({
   onGroupMenuAction
   ,onDeleteService
 }: Props) {
+  const isFiltering = serviceQuery.trim().length > 0;
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const menuTargetRef = useRef<HTMLElement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ServiceConfig | null>(null);
@@ -298,9 +299,14 @@ export function ServicesSidebar({
 
       <div
         onDragEnter={(event) => {
+          if (isFiltering) return;
           if (dragIdRef.current || dragGroupRef.current) event.preventDefault();
         }}
         onDragOver={(event) => {
+          if (isFiltering) {
+            event.dataTransfer.dropEffect = "none";
+            return;
+          }
           if (dragIdRef.current || dragGroupRef.current) event.preventDefault();
         }}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
@@ -340,9 +346,9 @@ export function ServicesSidebar({
           // a group drag onto it reorders whole groups (before/after this one).
           // The two never overlap — only one of dragIdRef / dragGroupRef is set.
           const headerHighlighted =
-            dropIndicator?.kind === "end-of-group" && dropIndicator.groupName === groupName;
+            !isFiltering && dropIndicator?.kind === "end-of-group" && dropIndicator.groupName === groupName;
           const groupDropEdge =
-            dropIndicator?.kind === "group" && dropIndicator.groupName === groupName
+            !isFiltering && dropIndicator?.kind === "group" && dropIndicator.groupName === groupName
               ? dropIndicator.edge
               : null;
           const isGroupDragging = dragGroup === groupName;
@@ -382,6 +388,7 @@ export function ServicesSidebar({
                   event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: rect.left + 12, clientY: rect.bottom }));
                 }}
                 onDragOver={(event) => {
+                  if (isFiltering) return;
                   if (dragGroupRef.current) {
                     if (dragGroupRef.current === groupName) return;
                     event.preventDefault();
@@ -418,6 +425,7 @@ export function ServicesSidebar({
                   });
                 }}
                 onDrop={(event) => {
+                  if (isFiltering) return;
                   if (dragGroupRef.current) {
                     const sourceGroup = dragGroupRef.current;
                     event.preventDefault();
@@ -441,7 +449,8 @@ export function ServicesSidebar({
                 <div className="flex min-w-0 items-center gap-1">
                   <button
                     type="button"
-                    draggable={!serviceQuery}
+                    draggable={!isFiltering}
+                    disabled={isFiltering}
                     onDragStart={(event) => {
                       beginGroupDrag(groupName);
                       event.dataTransfer.effectAllowed = "move";
@@ -538,7 +547,7 @@ export function ServicesSidebar({
                     status !== "starting" &&
                     status !== "stopping";
                   const showDropLine =
-                    dropIndicator?.kind === "before-service" &&
+                    !isFiltering && dropIndicator?.kind === "before-service" &&
                     dropIndicator.serviceId === service.id &&
                     dragId !== service.id;
                   const isDragging = dragId === service.id;
@@ -553,7 +562,7 @@ export function ServicesSidebar({
                       />
                       <div
                         onContextMenu={(event) => showMenu(event, serviceItems(service))}
-                        draggable={!serviceQuery}
+                        draggable
                         onDragStart={(event) => {
                           beginDrag(service.id);
                           event.dataTransfer.effectAllowed = "copyMove";
@@ -566,6 +575,7 @@ export function ServicesSidebar({
                         }}
                         onDragEnd={endDrag}
                         onDragOver={(event) => {
+                          if (isFiltering) return;
                           const sourceId = dragIdRef.current;
                           if (!sourceId || sourceId === service.id) return;
                           event.preventDefault();
@@ -578,6 +588,7 @@ export function ServicesSidebar({
                           );
                         }}
                         onDrop={(event) => {
+                          if (isFiltering) return;
                           const sourceId = dragIdRef.current;
                           if (!sourceId || sourceId === service.id) return;
                           event.preventDefault();
