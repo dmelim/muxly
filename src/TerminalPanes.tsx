@@ -297,7 +297,27 @@ export function TerminalPanes({
   };
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div
+      className="relative min-h-0 flex-1"
+      onDragOverCapture={(event) => {
+        if (!sidebarDragIdRef.current || draggedTabIdRef.current) return;
+        // Portal content follows React ancestry, not its destination section.
+        // Resolve the physical panel from the DOM at the shared ancestor.
+        const panelId = (event.target as Element).closest<HTMLElement>("[data-terminal-panel]")?.dataset.terminalPanel;
+        if (panelId) {
+          event.stopPropagation();
+          showSidebarDropTarget(event, panelId);
+        } else setSidebarDropTarget(null);
+      }}
+      onDropCapture={(event) => {
+        if (!sidebarDragIdRef.current || draggedTabIdRef.current) return;
+        const panelId = (event.target as Element).closest<HTMLElement>("[data-terminal-panel]")?.dataset.terminalPanel;
+        if (panelId) dropSidebarService(event, panelId);
+      }}
+      onDragLeaveCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSidebarDropTarget(null);
+      }}
+    >
       <div
         className={`grid h-full min-h-0 gap-1.5 p-1.5 ${privacyReady ? "" : "invisible"}`}
         style={{
@@ -309,12 +329,7 @@ export function TerminalPanes({
         <section
           key={panel.id}
           aria-label="Terminal panel"
-          onDragOver={(event) => showSidebarDropTarget(event, panel.id)}
-          onDragLeave={(event) => {
-            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-            setSidebarDropTarget((current) => current === panel.id ? null : current);
-          }}
-          onDrop={(event) => dropSidebarService(event, panel.id)}
+          data-terminal-panel={panel.id}
           className="relative flex min-h-0 min-w-0 flex-col overflow-hidden"
         >
           {sidebarDropTarget === panel.id ? (

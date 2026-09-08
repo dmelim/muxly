@@ -32,7 +32,7 @@ import { SettingsView } from "./SettingsView";
 import { DetailsSidebar } from "./DetailsSidebar";
 import { ServicesSidebar, type GroupMenuAction, type ServiceMenuAction } from "./ServicesSidebar";
 import { openInEditor, openInFileManager, openServiceUrl } from "./appActions";
-import { closeOtherTabs, moveTabToNewPanel, replaceActiveTab } from "./workspaceContextOps";
+import { closeOtherTabs, moveTabToNewPanel, placeServiceInPanel, replaceActiveTab } from "./workspaceContextOps";
 import { describeExitCode, shortExitCode } from "./exitCodes";
 import { StartupScreen } from "./StartupScreen";
 import { runPortCheck, runRuntimeCheck, startupMark, mirrorBootTheme } from "./startup";
@@ -528,35 +528,19 @@ export function App() {
   }, [focusExistingTab, focusedPanelId, workspacePanels]);
 
   // A service dragged from the sidebar opens in the panel it was dropped on.
-  // An already-open service remains unique and is focused in its current panel,
-  // matching click and tab-drag behaviour for the single live xterm instance.
+  // A drop explicitly places the service in the destination panel. Move its
+  // existing tab when necessary, preserving the single live xterm instance.
   const openServiceInPanel = useCallback((serviceId: string, targetPanelId: string | null) => {
-    if (focusExistingTab(serviceId)) return;
     const existingTarget = targetPanelId
       ? workspacePanelsRef.current.find((panel) => panel.id === targetPanelId)
       : null;
     const panelId = existingTarget?.id ?? crypto.randomUUID();
-
-    setWorkspacePanels((current) => {
-      const target = current.find((panel) => panel.id === panelId);
-      if (!target) {
-        return [...current, { id: panelId, tabIds: [serviceId], activeTabId: serviceId }];
-      }
-      return current.map((panel) =>
-        panel.id === panelId
-          ? {
-              ...panel,
-              tabIds: settingsRef.current.openServicesInTabs
-                ? [...panel.tabIds, serviceId]
-                : [serviceId],
-              activeTabId: serviceId
-            }
-          : panel
-      );
-    });
+    const next = placeServiceInPanel(workspacePanelsRef.current, panelId, serviceId, settingsRef.current.openServicesInTabs ?? true);
+    workspacePanelsRef.current = next;
+    setWorkspacePanels(next);
     setFocusedPanelId(panelId);
     setSelectedId(serviceId);
-  }, [focusExistingTab]);
+  }, []);
 
   // Ctrl/Cmd-click creates a panel. Existing tabs are focused rather than
   // duplicated because one live xterm instance belongs to each service.

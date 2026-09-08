@@ -1,5 +1,19 @@
 import type { WorkspacePanel } from "./types";
 
+export function placeServiceInPanel(panels: WorkspacePanel[], panelId: string, serviceId: string, tabs: boolean) {
+  const destination = panels.find((panel) => panel.id === panelId);
+  const next = panels.flatMap((panel) => {
+    if (panel.id === panelId) {
+      const tabIds = tabs ? (panel.tabIds.includes(serviceId) ? panel.tabIds : [...panel.tabIds, serviceId]) : [serviceId];
+      return [{ ...panel, tabIds, activeTabId: serviceId }];
+    }
+    if (!panel.tabIds.includes(serviceId)) return [panel];
+    const tabIds = panel.tabIds.filter((id) => id !== serviceId);
+    return tabIds.length ? [{ ...panel, tabIds, activeTabId: panel.activeTabId === serviceId ? tabIds[0] : panel.activeTabId }] : [];
+  });
+  return destination ? next : [...next, { id: panelId, tabIds: [serviceId], activeTabId: serviceId }];
+}
+
 export function replaceActiveTab(panels: WorkspacePanel[], panelId: string, serviceId: string) {
   if (panels.some((panel) => panel.tabIds.includes(serviceId))) return panels;
   return panels.map((panel) => {

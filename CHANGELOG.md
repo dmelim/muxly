@@ -61,6 +61,7 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Sidebar drops target the panel under the pointer, including terminal content, and move already-open services without duplicating terminals.
 - Service search results can be dragged into workspace tabs while sidebar reordering remains disabled during filtering. Whitespace-only searches no longer disable reordering.
 - Editor discovery skips non-launchable files, shares concurrent scans, and preserves platform path semantics; dropdown keyboard handling no longer dismisses Settings or leaves stale selections.
 

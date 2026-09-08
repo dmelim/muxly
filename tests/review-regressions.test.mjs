@@ -24,7 +24,7 @@ const load = async (file) => import(await moduleUrl(new URL(`../src/${file}.ts`,
 const { redactSensitive } = await load("types");
 const { LogSearchCache } = await load("logSearchCache");
 const { DEFAULT_THEME, applyTheme, xtermTheme } = await load("theme");
-const { replaceActiveTab, moveTabToNewPanel, closeOtherTabs } = await load("workspaceContextOps");
+const { replaceActiveTab, moveTabToNewPanel, closeOtherTabs, placeServiceInPanel } = await load("workspaceContextOps");
 const { normalizeCustomEditors, buildEditorOptions, editorCommandKey } = await load("editorOptions");
 
 test("editor settings normalize custom entries and preserve unknown legacy defaults", () => {
@@ -181,4 +181,19 @@ test("editor identities respect platform path semantics", () => {
   assert.equal(editorCommandKey("C:\\Tools\\Editor.exe", true), editorCommandKey("c:/tools/editor.exe", true));
   const editors = [{ id: "a", name: "A", command: "/tools/Editor" }, { id: "b", name: "B", command: "/tools/editor" }];
   assert.equal(normalizeCustomEditors(editors, false).length, 2);
+});
+
+test("sidebar placement honors the target panel and moves an existing terminal without duplicates", () => {
+  const panels = [
+    { id: "left", tabIds: ["a", "b"], activeTabId: "b" },
+    { id: "right", tabIds: ["c"], activeTabId: "c" }
+  ];
+  const next = placeServiceInPanel(panels, "right", "b", true);
+  assert.deepEqual(next, [
+    { id: "left", tabIds: ["a"], activeTabId: "a" },
+    { id: "right", tabIds: ["c", "b"], activeTabId: "b" }
+  ]);
+  assert.deepEqual(placeServiceInPanel(next, "right", "c", true)[1].tabIds, ["c", "b"]);
+  assert.deepEqual(placeServiceInPanel(next, "right", "a", false), [{ id: "right", tabIds: ["a"], activeTabId: "a" }]);
+  assert.deepEqual(placeServiceInPanel([], "first", "a", true), [{ id: "first", tabIds: ["a"], activeTabId: "a" }]);
 });
