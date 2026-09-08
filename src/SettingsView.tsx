@@ -14,9 +14,9 @@ import {
   EyeOffIcon,
   SaveIcon,
   SearchIcon,
-  CodeIcon,
   RefreshIcon
 } from "./icons";
+import { EditorLogo } from "./EditorLogo";
 import type { MuxlyTheme } from "./theme";
 import { ThemeSettings } from "./ThemeSettings";
 import { fuzzySearchMatches } from "./search";
@@ -147,7 +147,7 @@ export function SettingsView({
     () =>
       buildEditorOptions(detectedEditors, customEditors, editorCommand).map((option) => ({
         ...option,
-        icon: <CodeIcon className="size-3.5" />
+        icon: <EditorLogo command={option.value} label={option.label} className="size-3.5" />
       })),
     [customEditors, detectedEditors, editorCommand]
   );
@@ -513,6 +513,7 @@ export function SettingsView({
                   }}
                   ariaLabel="Default editor"
                   placeholder="Choose an editor"
+                  showSelectionIndicator={false}
                   className="min-w-0 flex-1"
                 />
                 <Tooltip label={editorDiscoveryLoading ? "Scanning for editors" : "Rescan installed editors"}>
@@ -592,14 +593,11 @@ export function SettingsView({
                 <ul className="divide-y divide-white/10 rounded-md border border-white/10">
                   {customEditors.map((editor) => (
                     <li key={editor.id} className="flex min-w-0 items-center gap-2 px-3 py-2">
-                      <CodeIcon className="size-3.5 shrink-0 text-zinc-500" />
+                      <EditorLogo command={editor.command} label={editor.name} className="size-3.5" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs text-zinc-200">{editor.name}</span>
                         <span className="block truncate font-mono text-[11px] text-zinc-500">{editor.command}</span>
                       </span>
-                      {editorCommandKey(editor.command) === editorCommandKey(editorCommand) ? (
-                        <span className="shrink-0 text-[10px] text-cyan-300">Default</span>
-                      ) : null}
                       <Tooltip label={`Remove ${editor.name}`}>
                         <Button
                           variant="ghost"

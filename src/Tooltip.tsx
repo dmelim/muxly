@@ -9,6 +9,7 @@ type TooltipProps = {
   /** Applied to the wrapper — use for layout (e.g. `flex-1`). */
   className?: string;
   children: ReactNode;
+  disabled?: boolean;
 };
 
 /** Delay before the bubble appears, for a native tooltip feel. */
@@ -24,7 +25,7 @@ const EDGE = 8;
  * ancestor's `overflow: hidden` (sidebars, terminal panes) and never spills
  * off-screen — its horizontal position is clamped to the viewport.
  */
-export function Tooltip({ label, side = "bottom", className = "", children }: TooltipProps) {
+export function Tooltip({ label, side = "bottom", className = "", children, disabled = false }: TooltipProps) {
   const triggerRef = useRef<HTMLSpanElement | null>(null);
   const bubbleRef = useRef<HTMLSpanElement | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
@@ -58,14 +59,17 @@ export function Tooltip({ label, side = "bottom", className = "", children }: To
   }, [open, place, label]);
 
   const show = useCallback(() => {
+    if (disabled) return;
+    window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => setOpen(true), SHOW_DELAY_MS);
-  }, []);
+  }, [disabled]);
   const hide = useCallback(() => {
     window.clearTimeout(timerRef.current);
     setOpen(false);
   }, []);
 
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
+  useEffect(() => { if (disabled) hide(); }, [disabled, hide]);
 
   return (
     <span
@@ -75,7 +79,7 @@ export function Tooltip({ label, side = "bottom", className = "", children }: To
       onMouseLeave={hide}
     >
       {children}
-      {open
+      {open && !disabled
         ? createPortal(
             <span
               ref={bubbleRef}

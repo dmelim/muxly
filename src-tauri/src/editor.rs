@@ -62,7 +62,7 @@ const EDITOR_SPECS: &[EditorSpec] = &[
     EditorSpec {
         id: "sublime",
         label: "Sublime Text",
-        commands: &["subl", "subl.exe"],
+        commands: &["subl", "subl.exe", "sublime_text"],
     },
     EditorSpec {
         id: "notepad++",
@@ -157,6 +157,47 @@ fn discover_for_app(app: &AppHandle) -> Vec<EditorCandidate> {
 
     let standard_paths = standard_paths();
     discover_from_dirs(&search_dirs, &standard_paths, true)
+}
+
+/// Resolve legacy bare commands using the same bounded discovery as Settings.
+/// Explicit paths are never replaced with a different installation.
+pub fn resolve_known_editor(app: &AppHandle, program: &str) -> Option<PathBuf> {
+    let id = known_editor_id(program)?;
+    let cache = app.state::<EditorDiscoveryCache>();
+    let mut stored = cache.0.lock();
+    let candidates = stored.get_or_insert_with(|| discover_for_app(app));
+    candidates
+        .iter()
+        .find(|candidate| candidate.id == id)
+        .map(|candidate| PathBuf::from(&candidate.command))
+}
+
+fn known_editor_id(program: &str) -> Option<&'static str> {
+    if program.contains(['/', '\\']) {
+        return None;
+    }
+    EDITOR_SPECS
+        .iter()
+        .find(|spec| {
+            spec.commands.iter().any(|alias| {
+                #[cfg(windows)]
+                {
+                    let strip = |value: &str| {
+                        let value = value.to_ascii_lowercase();
+                        [".exe", ".cmd", ".bat", ".com"]
+                            .iter()
+                            .find_map(|suffix| value.strip_suffix(suffix).map(str::to_owned))
+                            .unwrap_or(value)
+                    };
+                    strip(alias) == strip(program)
+                }
+                #[cfg(not(windows))]
+                {
+                    *alias == program
+                }
+            })
+        })
+        .map(|spec| spec.id)
 }
 
 fn discover_from_dirs(
@@ -594,6 +635,20 @@ fn file_name_matches(path: &Path, command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::discover_from_dirs;
+
+    #[test]
+    fn legacy_aliases_never_replace_explicit_installations() {
+        assert_eq!(super::known_editor_id("code"), Some("vscode"));
+        assert_eq!(
+            super::known_editor_id("code-insiders"),
+            Some("vscode-insiders")
+        );
+        assert_eq!(super::known_editor_id("/portable/code"), None);
+        assert_eq!(super::known_editor_id("C:\\Portable\\Code.exe"), None);
+        assert_eq!(super::known_editor_id("unknown-editor"), None);
+        #[cfg(windows)]
+        assert_eq!(super::known_editor_id("CODE.CMD"), Some("vscode"));
+    }
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;

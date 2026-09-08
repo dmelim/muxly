@@ -35,9 +35,10 @@ pub fn open_in_editor(
         .unwrap_or(default_editor_command());
 
     // `code` and friends are shims installed into the *shell's* PATH, which a
-    // GUI-launched app doesn't inherit — so resolve against the login shell's
-    // PATH before falling back to a bare name. See `shell_env`.
-    let resolved = resolve_from_fallbacks(program, &search_paths(&app))
+    // GUI-launched app doesn't inherit. Prefer the detected installation, then
+    // the login shell's PATH, before falling back to a bare name.
+    let resolved = crate::editor::resolve_known_editor(&app, program)
+        .or_else(|| resolve_from_fallbacks(program, &search_paths(&app)))
         .unwrap_or_else(|| PathBuf::from(OsString::from(program)));
 
     launch_editor(&resolved, &path)

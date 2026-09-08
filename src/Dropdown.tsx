@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon } from "./icons";
+import { Tooltip } from "./Tooltip";
 
 export type DropdownOption = {
   value: string;
@@ -25,6 +26,8 @@ type Props = {
   // Compact trigger for inspector/tool rows. The menu keeps the same keyboard
   // and accessibility behaviour while the trigger uses the shared icon size.
   compact?: boolean;
+  tooltip?: string;
+  showSelectionIndicator?: boolean;
 };
 
 // The app's single themed dropdown. A native <select>'s option list is
@@ -39,7 +42,9 @@ export function Dropdown({
   placeholder,
   className,
   variant = "field",
-  compact = false
+  compact = false,
+  tooltip,
+  showSelectionIndicator = true
 }: Props) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -152,35 +157,37 @@ export function Dropdown({
 
   return (
     <div ref={rootRef} className={`relative ${className ?? ""}`}>
-      <button
-        type="button"
-        ref={triggerRef}
-        onClick={() => (open ? setOpen(false) : openMenu())}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            if (!open) openMenu();
-          } else if (event.key === "Escape") {
-            setOpen(false);
-          }
-        }}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-        className={`flex items-center rounded-md border border-white/10 text-left ${textSize} text-zinc-200 transition ${triggerBg} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${compact ? "h-7 w-11 justify-center gap-1 px-1" : "w-full justify-between gap-2 px-2.5 py-2"}`}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          {selected?.icon ? (
-            <span className="shrink-0 text-zinc-400">{selected.icon}</span>
-          ) : null}
-          <span className={`${compact ? "sr-only" : "truncate"} ${selected ? "" : "text-zinc-500"}`}>
-            {selected?.label ?? placeholder ?? ""}
+      <Tooltip label={tooltip ?? ""} disabled={open || !tooltip} className="w-full">
+        <button
+          type="button"
+          ref={triggerRef}
+          onClick={() => (open ? setOpen(false) : openMenu())}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              if (!open) openMenu();
+            } else if (event.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={ariaLabel}
+          className={`flex items-center rounded-md border border-white/10 text-left ${textSize} text-zinc-200 transition ${triggerBg} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${compact ? "h-7 w-11 justify-center gap-1 px-1" : "w-full justify-between gap-2 px-2.5 py-2"}`}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {selected?.icon ? (
+              <span className="shrink-0 text-zinc-400">{selected.icon}</span>
+            ) : null}
+            <span className={`${compact ? "sr-only" : "truncate"} ${selected ? "" : "text-zinc-500"}`}>
+              {selected?.label ?? placeholder ?? ""}
+            </span>
           </span>
-        </span>
-        <ChevronDownIcon
-          className={`${compact ? "size-3" : "size-4"} shrink-0 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
+          <ChevronDownIcon
+            className={`${compact ? "size-3" : "size-4"} shrink-0 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+      </Tooltip>
 
       {open && menuPosition
         ? createPortal(
@@ -255,7 +262,7 @@ export function Dropdown({
                           {option.detail ? (
                             <span className="text-[10px] text-cyan-300">{option.detail}</span>
                           ) : null}
-                          {isSelected ? (
+                          {isSelected && showSelectionIndicator ? (
                             <CheckIcon className="size-4 text-cyan-400" />
                           ) : null}
                         </span>

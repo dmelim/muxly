@@ -88,11 +88,26 @@ function basename(command: string): string {
   return pieces[pieces.length - 1] || command;
 }
 
-/**
- * Merge native detections, saved custom editors, and the legacy configured
- * command into one selector list. The configured command is retained even if
- * discovery cannot see it, which keeps older settings and launches working.
- */
+// Match only known bare launcher aliases. Explicit paths must keep their identity:
+// two installations of the same product may intentionally be different editors.
+const EDITOR_ALIASES: Record<string, string[]> = {
+  vscode: ["code"], "vscode-insiders": ["code-insiders"], cursor: ["cursor"],
+  windsurf: ["windsurf"], zed: ["zed"], sublime: ["subl", "sublime_text"],
+  "notepad++": ["notepad++"], intellij: ["idea", "idea64"],
+  pycharm: ["pycharm", "pycharm64"], webstorm: ["webstorm", "webstorm64"],
+  rider: ["rider", "rider64"], clion: ["clion", "clion64"],
+  goland: ["goland", "goland64"], datagrip: ["datagrip", "datagrip64"],
+  rubymine: ["rubymine", "rubymine64"], phpstorm: ["phpstorm", "phpstorm64"],
+  rustrover: ["rustrover", "rustrover64"]
+};
+
+export function editorAliasId(command: string, windows = isWindows()): string | undefined {
+  if (/[\\/]/.test(command)) return undefined;
+  const alias = windows ? command.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "") : command;
+  return Object.entries(EDITOR_ALIASES).find(([, aliases]) => aliases.includes(alias))?.[0];
+}
+
+/** Retain unknown defaults while resolving known legacy aliases to detections. */
 export function buildEditorOptions(
   detected: EditorCandidate[] | null | undefined,
   customValue: unknown,
@@ -100,65 +115,31 @@ export function buildEditorOptions(
 ): EditorOption[] {
   const configured = normalizeEditorCommand(configuredValue);
   const custom = normalizeCustomEditors(customValue);
+  const candidates = (detected ?? []).filter((editor) => editor && safeText(editor.label, MAX_EDITOR_NAME_LENGTH) && normalizeEditorCommand(editor.command || editor.path));
+  const match = (command: string) => {
+    const key = normalizedKey(command);
+    const aliasId = editorAliasId(command);
+    return candidates.find((editor) =>
+      normalizedKey(editor.command || editor.path || "") === key
+      || (aliasId !== undefined && editor.id === aliasId));
+  };
+  const preferred = match(configured);
+  const customDefault = custom.find((editor) => normalizedKey(editor.command) === normalizedKey(configured));
   const options: EditorOption[] = [];
   const seen = new Set<string>();
-
   const add = (option: EditorOption) => {
-    const command = normalizeEditorCommand(option.value);
-    if (!command) return;
-    const key = normalizedKey(command);
-    if (seen.has(key)) {
-      const existing = options.find((candidate) => normalizedKey(candidate.value) === key);
-      if (existing?.source === "saved" && option.source !== "saved") {
-        existing.label = option.label;
-        existing.source = option.source;
-      }
-      return;
-    }
-    seen.add(key);
-    options.push({ ...option, value: command });
+    const key = normalizedKey(option.value);
+    if (!seen.has(key)) { seen.add(key); options.push(option); }
   };
-
   if (configured) {
-    add({
-      value: configured,
-      label: "Saved editor",
-      detail: "Saved default",
-      source: "saved"
-    });
+    add({ value: configured, label: customDefault?.name ?? preferred?.label ?? editorDisplayName(configured), source: customDefault ? "custom" : preferred ? "detected" : "saved" });
+    if (preferred) seen.add(normalizedKey(preferred.command || preferred.path || ""));
   }
-
-  for (const editor of custom) {
-    const label = safeText(editor.name, MAX_EDITOR_NAME_LENGTH);
-    const command = normalizeEditorCommand(editor.command);
-    if (!label || !command) continue;
-    add({
-      value: command,
-      label,
-      source: "custom"
-    });
-  }
-
-  for (const editor of detected ?? []) {
-    if (!editor || typeof editor !== "object") continue;
-    const label = safeText(editor.label, MAX_EDITOR_NAME_LENGTH);
-    const command = normalizeEditorCommand(editor.command || editor.path);
-    if (!label || !command) continue;
-    add({
-      value: command,
-      label,
-      source: "detected"
-    });
-  }
-
-  const saved = options[0];
-  const rest = options.slice(1).sort((left, right) => {
-    const sourceOrder = { custom: 0, detected: 1, saved: 2 };
-    const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
-    if (sourceDiff !== 0) return sourceDiff;
-    return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
-  });
-  return saved ? [saved, ...rest] : rest;
+  for (const editor of custom) add({ value: editor.command, label: editor.name, source: "custom" });
+  for (const editor of candidates) add({ value: normalizeEditorCommand(editor.command || editor.path), label: editor.label, source: "detected" });
+  const first = configured ? options.shift() : undefined;
+  options.sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+  return first ? [first, ...options] : options;
 }
 
 export function editorCommandKey(command: string, windows = isWindows()): string {

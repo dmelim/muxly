@@ -42,7 +42,8 @@ test("editor settings normalize custom entries and preserve unknown legacy defau
     "legacy-editor --unknown"
   );
   assert.equal(options[0].value, "legacy-editor --unknown");
-  assert.equal(options[0].detail, "Saved default");
+  assert.equal(options[0].label, "legacy-editor --unknown");
+  assert.equal(options[0].detail, undefined);
   assert.deepEqual(options.slice(1).map((option) => option.label), ["Cursor", "VS Code"]);
 });
 
@@ -181,6 +182,15 @@ test("editor identities respect platform path semantics", () => {
   assert.equal(editorCommandKey("C:\\Tools\\Editor.exe", true), editorCommandKey("c:/tools/editor.exe", true));
   const editors = [{ id: "a", name: "A", command: "/tools/Editor" }, { id: "b", name: "B", command: "/tools/editor" }];
   assert.equal(normalizeCustomEditors(editors, false).length, 2);
+});
+
+
+test("editor aliases resolve to one named default without merging explicit installations", () => {
+  const detected = [{ id: "vscode", label: "VS Code", command: "C:/Apps/VSCode/Code.exe" }];
+  const options = buildEditorOptions(detected, [], "code");
+  assert.deepEqual(options, [{ value: "code", label: "VS Code", source: "detected" }]);
+  assert.equal(buildEditorOptions(detected, [], "D:/Portable/Code.exe").length, 2);
+  assert.equal(buildEditorOptions(detected, [{ id: "custom", name: "My editor", command: "custom" }], "custom")[0].label, "My editor");
 });
 
 test("sidebar placement honors the target panel and moves an existing terminal without duplicates", () => {

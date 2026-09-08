@@ -5,6 +5,7 @@ import { Button } from "./Button";
 import { Dropdown } from "./Dropdown";
 import { RefreshIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
+import { Detail } from "./Detail";
 
 type GitState = {
   root: string;
@@ -92,8 +93,16 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
     ? "Git operation failed. Turn off Stream mode to view repository details."
     : message);
 
-  if (state === undefined) return <p className="text-xs text-zinc-500">Checking repository…</p>;
-  if (state === null) return <p className="text-xs text-zinc-500">Not a Git repository{displayMessage ? `: ${displayMessage}` : "."}</p>;
+  if (state === undefined) return (
+    <Detail label="Repository" className="col-span-full min-w-0">
+      <p className="text-xs text-zinc-500">Checking repository…</p>
+    </Detail>
+  );
+  if (state === null) return displayMessage ? (
+    <Detail label="Repository" className="col-span-full min-w-0">
+      <p role="status" className="text-xs text-amber-300">{displayMessage}</p>
+    </Detail>
+  ) : null;
 
   const branchLabel = privateMode ? "Private branch" : state.branch;
   const rootLabel = privateMode ? "Private repository" : state.root;
@@ -112,46 +121,48 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
     </Tooltip>
   );
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="font-mono text-zinc-200">{branchLabel}</span>
-        {state.dirty ? <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-300">Modified</span> : <span className="text-zinc-500">Clean</span>}
-        {state.ahead > 0 ? <span className="text-cyan-300">↑{state.ahead}</span> : null}
-        {state.behind > 0 ? <span className="text-amber-300">↓{state.behind}</span> : null}
+    <Detail label="Repository" className="col-span-full min-w-0">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-mono text-zinc-200">{branchLabel}</span>
+          {state.dirty ? <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-300">Modified</span> : <span className="text-zinc-500">Clean</span>}
+          {state.ahead > 0 ? <span className="text-cyan-300">↑{state.ahead}</span> : null}
+          {state.behind > 0 ? <span className="text-amber-300">↓{state.behind}</span> : null}
+        </div>
+        <p className="truncate font-mono text-[11px] text-zinc-500" title={privateMode ? undefined : state.root}>{rootLabel}</p>
+        <div className="flex items-center gap-2">
+          {refreshButton}
+          {!privateMode && !state.detached && branches.length > 0 ? (
+            <Dropdown
+              className="min-w-0 flex-1"
+              ariaLabel="Switch local Git branch"
+              value={state.branch}
+              options={branches.map((branch) => ({ value: branch, label: branch }))}
+              onChange={(branch) => {
+                if (branch === state.branch) return;
+                setBusy(true);
+                setMessage(null);
+                void invoke<GitState>("git_switch_branch", {
+                  cwd: service.cwd,
+                  branch,
+                  expectedRoot: state.root
+                })
+                  // A focus/manual refresh may still be resolving from before
+                  // the checkout. Force a new request so that stale snapshot can
+                  // neither be reused nor overwrite the switched branch state.
+                  .then(() => refresh(true))
+                  .catch((error) => setMessage(error instanceof Error ? error.message : String(error)))
+                  .finally(() => setBusy(false));
+              }}
+            />
+          ) : privateMode && !state.detached && branches.length > 0 ? (
+            <p className="text-[11px] text-zinc-500">
+              Branch switching is unavailable while Stream mode hides branch names.
+            </p>
+          ) : null}
+        </div>
+        {displayMessage ? <p role="status" className="text-right text-[11px] text-amber-300">{displayMessage}</p> : null}
       </div>
-      <p className="truncate font-mono text-[11px] text-zinc-500" title={privateMode ? undefined : state.root}>{rootLabel}</p>
-      <div className="flex items-center gap-2">
-        {refreshButton}
-        {!privateMode && !state.detached && branches.length > 0 ? (
-          <Dropdown
-            className="min-w-0 flex-1"
-            ariaLabel="Switch local Git branch"
-            value={state.branch}
-            options={branches.map((branch) => ({ value: branch, label: branch }))}
-            onChange={(branch) => {
-              if (branch === state.branch) return;
-              setBusy(true);
-              setMessage(null);
-              void invoke<GitState>("git_switch_branch", {
-                cwd: service.cwd,
-                branch,
-                expectedRoot: state.root
-              })
-                // A focus/manual refresh may still be resolving from before
-                // the checkout. Force a new request so that stale snapshot can
-                // neither be reused nor overwrite the switched branch state.
-                .then(() => refresh(true))
-                .catch((error) => setMessage(error instanceof Error ? error.message : String(error)))
-                .finally(() => setBusy(false));
-            }}
-          />
-        ) : privateMode && !state.detached && branches.length > 0 ? (
-          <p className="text-[11px] text-zinc-500">
-            Branch switching is unavailable while Stream mode hides branch names.
-          </p>
-        ) : null}
-      </div>
-      {displayMessage ? <p role="status" className="text-right text-[11px] text-amber-300">{displayMessage}</p> : null}
-    </div>
+    </Detail>
   );
 }

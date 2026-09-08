@@ -13,7 +13,8 @@ import { GitSection } from "./GitSection";
 import { openInEditor, openInFileManager, openServiceUrl } from "./appActions";
 import { Dropdown } from "./Dropdown";
 import { buildEditorOptions } from "./editorOptions";
-import { CodeIcon, FolderOpenIcon, GlobeIcon } from "./icons";
+import { EditorLogo } from "./EditorLogo";
+import { FolderOpenIcon, GlobeIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 
 type Props = {
@@ -81,7 +82,7 @@ export function DetailsSidebar({
     settings.editorCommand
   ).map((option) => ({
     ...option,
-    icon: <CodeIcon className="size-3.5" />
+    icon: <EditorLogo command={option.value} label={option.label} className="size-3.5" />
   })), [detectedEditors, settings.customEditors, settings.editorCommand]);
 
   if (editing?.mode === "import") {
@@ -138,20 +139,20 @@ export function DetailsSidebar({
         {selected ? (
           <div className="space-y-5 p-5 text-sm">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Tooltip label="Open service in editor" side="top">
-                <Dropdown
-                  compact
-                  variant="toolbar"
-                  value={settings.editorCommand}
-                  options={editorOptions}
-                  onChange={(command) =>
-                    void openInEditor(selected.cwd, selected.id, command, appendLog)
-                  }
-                  ariaLabel="Open service in editor"
-                  placeholder="Editor"
-                  className="shrink-0"
-                />
-              </Tooltip>
+              <Dropdown
+                compact
+                variant="toolbar"
+                value={settings.editorCommand}
+                options={editorOptions}
+                onChange={(command) =>
+                  void openInEditor(selected.cwd, selected.id, command, appendLog)
+                }
+                ariaLabel="Open service in editor"
+                placeholder="Editor"
+                tooltip="Open service in editor"
+                showSelectionIndicator={false}
+                className="shrink-0"
+              />
               <span className="sr-only" aria-live="polite">
                 {editorDiscoveryLoading
                   ? "Scanning for installed editors"
@@ -191,7 +192,7 @@ export function DetailsSidebar({
                   large
                 />
               </Detail>
-              <Detail label="Status" className="col-span-full min-w-0">
+              <Detail label="Status" className="min-w-0">
                 <span className="[overflow-wrap:anywhere]">
                   {adoptedPids[selected.id]
                     ? `Adopted (external pid ${adoptedPids[selected.id].pid})`
@@ -238,13 +239,11 @@ export function DetailsSidebar({
               <Detail label="Options" className="col-span-full min-w-0">
                 <EnabledOptions service={selected} />
               </Detail>
-              <Detail label="Repository" className="col-span-full min-w-0">
-                <GitSection
-                  key={selected.id}
-                  service={selected}
-                  privateMode={streamMode && Boolean(selected.sensitive)}
-                />
-              </Detail>
+              <GitSection
+                key={selected.id}
+                service={selected}
+                privateMode={streamMode && Boolean(selected.sensitive)}
+              />
             </dl>
 
             <div className="pt-5">

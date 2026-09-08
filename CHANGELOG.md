@@ -49,6 +49,8 @@ design fixes and manual verification are complete.
 
 ### Changed
 
+- Editor controls use product logos and list the default first without an extra badge; Details pairs icon/status and hides absent repositories.
+
 - **Search bars now share one fuzzy-matching implementation.** Service filtering, Settings, the command palette, global logs, terminal find, and built-in icon search use the same case-insensitive ordered-character matching, with stronger command matches ranked first.
 - **Profile filters no longer close the focused service pane.** The active service remains visible while the sidebar switches profiles, and automatic restart backoff now has a distinct amber `Restarting` state.
 - **Service editing uses compact themed actions.** Header close and destructive delete actions now use accessible icons and tooltips, and deletion uses the in-app confirmation dialog.
@@ -61,8 +63,10 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
-- Sidebar drops target the panel under the pointer, including terminal content, and move already-open services without duplicating terminals.
 - Service search results can be dragged into workspace tabs while sidebar reordering remains disabled during filtering. Whitespace-only searches no longer disable reordering.
+- Sidebar drops target the panel under the pointer, including terminal content, and move already-open services without duplicating terminals.
+- Legacy editor aliases resolve to detected installations, and editor tooltips no longer appear over open dropdown menus.
+
 - Editor discovery skips non-launchable files, shares concurrent scans, and preserves platform path semantics; dropdown keyboard handling no longer dismisses Settings or leaves stale selections.
 
 - Tooltips flip away from window edges instead of being clipped.
