@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
@@ -9,6 +9,8 @@ import { CloseIcon, TerminalIcon } from "./icons";
 import { PTY_CLOSED } from "./events";
 import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
+import { TerminalPrivacy } from "./TerminalPrivacy";
+import { setTerminalConcealed } from "./streamPrivacy";
 
 type PtyOutputEvent = { ptyId: string; chunk: string };
 type PtyClosedEvent = { ptyId: string };
@@ -24,6 +26,7 @@ const TERMINAL_OPTIONS = {
 } as const;
 
 type BottomTerminalProps = {
+  streamMode: boolean;
   /** Visible flag — the parent controls open/close so the height transitions
    * happen alongside other layout state, but the terminal mounts only when
    * open so we don't spawn a shell the user never asked for. */
@@ -44,12 +47,18 @@ type BottomTerminalProps = {
  * close/reopen we can buffer output later — for now "close" really means
  * "end this session", matching VS Code's terminal panel behaviour.
  */
-export function BottomTerminal({ open, height, theme, onClose, onResizeStart }: BottomTerminalProps) {
+export function BottomTerminal({ open, height, theme, streamMode, onClose, onResizeStart }: BottomTerminalProps) {
+  const concealedRef = useRef(streamMode);
+  concealedRef.current = streamMode;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const themeRef = useRef(theme);
   themeRef.current = theme;
+
+  useLayoutEffect(() => {
+    if (terminalRef.current) setTerminalConcealed(terminalRef.current, streamMode);
+  }, [streamMode, open]);
 
   useEffect(() => {
     if (terminalRef.current) terminalRef.current.options.theme = xtermTheme(theme);
@@ -69,8 +78,9 @@ export function BottomTerminal({ open, height, theme, onClose, onResizeStart }: 
     // user-facing identifier. Multiple shells could share this code later.
     const ptyId = `shell-${Math.random().toString(36).slice(2, 10)}`;
 
-    const terminal = new Terminal({ ...TERMINAL_OPTIONS, theme: xtermTheme(themeRef.current) });
+    const terminal = new Terminal({ ...TERMINAL_OPTIONS, theme: xtermTheme(themeRef.current), disableStdin: concealedRef.current });
     terminalRef.current = terminal;
+    terminal.attachCustomKeyEventHandler(() => !concealedRef.current);
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(
@@ -78,6 +88,7 @@ export function BottomTerminal({ open, height, theme, onClose, onResizeStart }: 
         // Route through the backend `open_url` command — `window.open` from a
         // Tauri webview doesn't reliably hand off to the system browser.
         event.preventDefault();
+        if (concealedRef.current) return;
         void invoke("open_url", { url: uri }).catch(() => {});
       })
     );
@@ -227,7 +238,9 @@ export function BottomTerminal({ open, height, theme, onClose, onResizeStart }: 
         </Tooltip>
       </div>
       <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden p-3">
-        <div ref={hostRef} className="h-full w-full overflow-hidden" />
+        <TerminalPrivacy concealed={streamMode}>
+          <div ref={hostRef} className="h-full w-full overflow-hidden" />
+        </TerminalPrivacy>
       </div>
     </div>
   );

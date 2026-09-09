@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ServiceConfig } from "./types";
 import { groupKey } from "./appUtils";
-import { LogSearchCache, type ServiceHits } from "./logSearchCache";
+import type { ServiceHits } from "./logSearchCache";
+import { StreamLogSearchCache } from "./streamLogSearchCache";
 import { fuzzySearchPattern } from "./search";
 
 type Props = {
@@ -36,7 +37,7 @@ export function GlobalSearch({
   // into logsRef during a long-running service become searchable without
   // the user having to retype.
   const [tick, setTick] = useState(0);
-  const cacheRef = useRef(new LogSearchCache());
+  const cacheRef = useRef(new StreamLogSearchCache());
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -104,6 +105,9 @@ export function GlobalSearch({
                   results.length
                 } service${results.length === 1 ? "" : "s"}`}
           </p>
+          {streamMode && services.some((service) => service.sensitive) ? (
+            <p className="mt-1.5 px-1 text-[11px] text-zinc-500">Sensitive service logs are excluded in Stream mode.</p>
+          ) : null}
         </div>
 
         {trimmed.length >= MIN_QUERY ? (

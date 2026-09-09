@@ -49,6 +49,8 @@ design fixes and manual verification are complete.
 
 ### Changed
 
+- **Stream mode conceals sensitive terminal output and the bottom shell.** Sensitive logs are excluded from global search, and concealed terminals cannot receive keyboard input or copy selections. Sessions keep processing their original output without resets, preventing split or cursor-positioned PTY output from leaking private paths.
+
 - Editor controls use product logos and list the default first without an extra badge; Details pairs icon/status and hides absent repositories.
 
 - **Search bars now share one fuzzy-matching implementation.** Service filtering, Settings, the command palette, global logs, terminal find, and built-in icon search use the same case-insensitive ordered-character matching, with stronger command matches ranked first.

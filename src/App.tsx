@@ -169,11 +169,8 @@ export function App() {
   // Kept in sync with `services` so closures captured by the long-lived event
   // listeners (which only mount once) always see the latest config.
   const servicesRef = useRef<ServiceConfig[]>([]);
-  // Stream mode and the project-name aliases, mirrored into refs so the
-  // long-lived output closure (appendLog) can redact sensitive paths in live
-  // log chunks without being re-created on every toggle.
+  // Long-lived command handlers read the current privacy mode.
   const streamModeRef = useRef(false);
-  const projectNameAliasesRef = useRef<Record<string, string>>({});
   // Per-service auto-restart bookkeeping: how many times we've re-spawned and
   // when the last attempt happened, so we can enforce the retry cap/window.
   const autoRestartRef = useRef<Record<string, { count: number; lastAt: number }>>({});
@@ -406,7 +403,6 @@ export function App() {
   // Mirror into refs so the once-mounted output closure can redact paths with
   // the current values without re-subscribing on every toggle (same pattern as
   // PaneView's streamModeRef).
-  projectNameAliasesRef.current = projectNameAliases;
   streamModeRef.current = streamMode;
   // A project name is replaced by its alias for either of two independent
   // reasons: the manual sidebar toggle (`hiddenProjectNames`) is on, which
@@ -1627,25 +1623,14 @@ export function App() {
 
     logsRef.current[serviceId] = chunks;
     logRevisionsRef.current[serviceId] = (logRevisionsRef.current[serviceId] ?? 0) + 1;
-    // The buffer above keeps raw output (the source of truth); redaction is a
-    // display-only transform applied to the live write, so toggling stream mode
-    // off and reopening the pane shows real paths again. Mirrors how name
-    // masking is applied at display time, not stored.
-    const display =
-      service && streamModeRef.current
-        ? redactSensitive(
-            annotated,
-            service,
-            projectNameAliasesRef.current[groupKey(service)] ?? "",
-            true
-          )
-        : annotated;
+    // Preserve the terminal protocol, including split escapes and cursor positions.
+    // Stream mode conceals sensitive hosts instead of editing individual writes.
     // Buffer the live write and flush it next frame (see pendingWritesRef).
     // Only buffer when a pane is actually showing this service; otherwise the
     // pane-mount replay from logsRef already covers it, and buffering here
     // could double-render against that replay. Registration in TerminalPanes
     // happens after the replay, so a present terminal means replay is done.
-    enqueueLiveTerminalWrite(serviceId, display, isPty);
+    enqueueLiveTerminalWrite(serviceId, annotated, isPty);
   }, [enqueueLiveTerminalWrite]);
 
   // Hide the "waiting for output…" hint for a service and cancel its pending
@@ -2322,21 +2307,8 @@ export function App() {
   const toggleStreamMode = useCallback(() => {
     const next = !streamModeRef.current;
 
-    // Anything waiting for the next animation frame was transformed for the
-    // previous privacy state. The raw copy already lives in logsRef, so discard
-    // those display writes and let each pane rebuild from the raw snapshot.
-    if (flushRafRef.current !== 0) {
-      cancelAnimationFrame(flushRafRef.current);
-      flushRafRef.current = 0;
-    }
-    pendingWritesRef.current.clear();
-    for (const pending of pendingPtyCarriageReturnsRef.current.values()) {
-      window.clearTimeout(pending.timer);
-    }
-    pendingPtyCarriageReturnsRef.current.clear();
-
-    // Update the long-lived output listener before scheduling React so output
-    // arriving during the transition is transformed for the new mode.
+    // Keep queued raw writes intact: privacy changes must not lose output or
+    // split terminal control sequences. The host is concealed before paint.
     streamModeRef.current = next;
     setStreamMode(next);
   }, []);
@@ -2502,14 +2474,12 @@ export function App() {
       {
         id: "stream-mode",
         title: streamMode
-          ? "Stream mode: show sensitive names"
-          : "Stream mode: hide sensitive names",
+          ? "Stream mode: show sensitive output"
+          : "Stream mode: hide sensitive output",
         subtitle:
           sensitiveCount === 0
-            ? "No services marked sensitive yet — set “Sensitive name” when editing a service"
-            : `Masks ${sensitiveCount} sensitive service name${
-                sensitiveCount === 1 ? "" : "s"
-              } so the window is safe to screen-share`,
+            ? "Hides the shell. Mark services sensitive to hide their output too."
+            : `Hides output for ${sensitiveCount} sensitive service${sensitiveCount === 1 ? "" : "s"} and the shell`,
         badge: streamMode ? "On" : "Off",
         keywords: "stream privacy mask hide sensitive screen share present demo record",
         run: toggleStreamMode
@@ -3052,6 +3022,7 @@ export function App() {
             }}
           />
           <BottomTerminal
+            streamMode={streamMode}
             open={terminalOpen}
             height={terminalHeight}
             theme={resolvedTheme}

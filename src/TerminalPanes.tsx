@@ -8,7 +8,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import type { ServiceConfig, ServiceStatus, WorkspacePanel } from "./types";
 import type { StartHealth } from "./appTypes";
-import { displayServiceName, formatCommand, redactSensitive } from "./types";
+import { displayServiceName, formatCommand } from "./types";
 import { groupKey, statusLabels } from "./appUtils";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
@@ -16,6 +16,8 @@ import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
 import { fuzzySearchPattern } from "./search";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { TerminalPrivacy } from "./TerminalPrivacy";
+import { isServiceOutputHidden, setTerminalConcealed } from "./streamPrivacy";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -59,10 +61,9 @@ type TerminalPanesProps = {
   paneServices: ServiceConfig[];
   /** The focused pane's service id — drives the toolbar/inspector. */
   focusedId: string | null;
-  /** When true, sensitive services show a masked name (stream mode). */
+  /** Conceals sensitive output and masks service names. */
   streamMode: boolean;
-  /** Project group name → stable alias, used to redact sensitive paths in the
-   * pane banner and replayed scrollback while stream mode is on. */
+  /** Project group name → stable alias for masked UI labels. */
   projectNameAliases: Record<string, string>;
   statuses: Record<string, ServiceStatus>;
   /** Live PIDs, keyed by service id — a present pid means the process runs. */
@@ -765,60 +766,41 @@ function PaneView({
   // the flicker: if the observer watched the same element xterm draws into,
   // `fit()` would perturb that element's box and re-trigger the observer in a
   // self-sustaining loop.
+  const concealed = isServiceOutputHidden(service, streamMode);
+  const concealedRef = useRef(concealed);
+  concealedRef.current = concealed;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   // The SearchAddon is held in state (not just a ref) so the PaneSearchBar
   // re-renders once it becomes available after the deferred terminal open.
   const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
-  // The terminal-open effect runs once (empty deps); this ref lets it read the
-  // current stream-mode state when it writes the one-time name banner, so a
-  // pane opened while stream mode is on starts masked. Toggling stream mode
-  // later updates the header (reactive) but not already-written scrollback.
+  // The deferred terminal setup reads current privacy state through refs.
   const streamModeRef = useRef(streamMode);
   streamModeRef.current = streamMode;
-  // Same one-shot-effect concern for the alias used to redact sensitive paths
-  // in the banner and replayed scrollback.
+  // Keep the readiness key current during deferred setup.
   const aliasRef = useRef(alias);
   aliasRef.current = alias;
   const renderedPrivacyRef = useRef<string | null>(null);
 
   const renderSnapshot = useCallback(
-    (terminal: Terminal, nextStreamMode: boolean, nextAlias: string, preserveView = false) => {
-      // Pending display writes were transformed for an older snapshot. Their
-      // raw chunks are already in logsRef, so discard them immediately before
-      // taking this atomic copy. New output cannot interleave until this
-      // synchronous snapshot construction returns and will queue after it.
+    (terminal: Terminal, nextStreamMode: boolean, nextAlias: string) => {
+      // Initial history already includes queued live chunks. Drop that backlog
+      // before copying history so registration cannot deliver it twice.
       onPrivacySnapshotStart(service.id);
-      const buffer = terminal.buffer.active;
-      const distanceFromBottom = preserveView ? buffer.baseY - buffer.viewportY : 0;
-      const selection = preserveView ? terminal.getSelectionPosition() : undefined;
-      const redact = (text: string) =>
-        redactSensitive(text, service, nextAlias, nextStreamMode);
-
       const key = privacySnapshotKey(service, nextStreamMode, nextAlias);
       const snapshot = [
-        `\x1b[1;36m${displayServiceName(service, nextStreamMode)}\x1b[0m\r\n`,
-        `${redact(`cwd: ${service.cwd}`)}\r\n`,
-        `${redact(`cmd: ${formatCommand(service)}`)}\r\n`,
+        `\x1b[1;36m${displayServiceName(service, false)}\x1b[0m\r\n`,
+        `cwd: ${service.cwd}\r\n`,
+        `cmd: ${formatCommand(service)}\r\n`,
         "\r\n",
-        ...(logsRef.current[service.id] ?? []).map(redact)
+        ...(logsRef.current[service.id] ?? [])
       ].join("");
 
-      if (preserveView) terminal.clear();
-      terminal.write(`${preserveView ? "\x1b[2J\x1b[H" : ""}${snapshot}`, () => {
-        if (preserveView) requestAnimationFrame(() => {
-          terminal.scrollToLine(Math.max(0, terminal.buffer.active.baseY - distanceFromBottom));
-          if (selection) {
-            const length =
-              Math.max(0, selection.end.y - selection.start.y) * terminal.cols +
-              Math.max(0, selection.end.x - selection.start.x);
-            if (length > 0) {
-              terminal.select(selection.start.x, selection.start.y, length);
-            }
-          }
-        });
-        renderedPrivacyRef.current = key;
-        onPrivacyRendered(service.id, key);
+      terminal.write(snapshot, () => {
+        if (renderedPrivacyRef.current === null) {
+          renderedPrivacyRef.current = key;
+          onPrivacyRendered(service.id, key);
+        }
       });
     },
     [logsRef, onPrivacyRendered, onPrivacySnapshotStart, service]
@@ -841,7 +823,8 @@ function PaneView({
     const terminal = new Terminal({
       ...TERMINAL_OPTIONS,
       convertEol: !isPty,
-      theme: xtermTheme(theme)
+      theme: xtermTheme(theme),
+      disableStdin: concealedRef.current
     });
     const fitAddon = new FitAddon();
     const search = new SearchAddon();
@@ -854,6 +837,7 @@ function PaneView({
         // webview isn't reliably routed to the system browser across OSes —
         // the OS-shell call is.
         event.preventDefault();
+        if (concealedRef.current) return;
         void invoke("open_url", { url: uri }).catch(() => {
           /* nothing useful to surface to the user here */
         });
@@ -871,6 +855,7 @@ function PaneView({
     let dataDisposable: { dispose: () => void } | null = null;
     if (isPty) {
       terminal.attachCustomKeyEventHandler((event) => {
+        if (concealedRef.current) return false;
         if (event.type !== "keydown" || event.key.toLowerCase() !== "c") {
           return true;
         }
@@ -929,6 +914,7 @@ function PaneView({
         return;
       }
       terminal.open(host);
+      setTerminalConcealed(terminal, concealedRef.current);
       safeFit();
       // Sync the freshly-measured size to the PTY (the backend spawns at a
       // default 120x30 until we know the pane's real dimensions).
@@ -965,17 +951,18 @@ function PaneView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Stream mode is a live privacy boundary. Rebuild the display from the raw
-  // ring buffer in the existing xterm instance so running PTYs, pane identity,
-  // search state, focus, and input wiring stay intact while already-rendered
-  // banners and scrollback change immediately in either direction.
+  // Conceal in the React commit and revoke selection/input before paint.
+  // No reset or replay: ConPTY state and queued raw writes stay intact.
   useLayoutEffect(() => {
     const terminal = terminalsRef.current.get(service.id);
     if (!terminal) return;
+    setTerminalConcealed(terminal, concealed);
     const key = privacySnapshotKey(service, streamMode, alias);
-    if (renderedPrivacyRef.current === key) return;
-    renderSnapshot(terminal, streamMode, alias, true);
-  }, [alias, renderSnapshot, service, streamMode, terminalsRef]);
+    if (renderedPrivacyRef.current !== key) {
+      renderedPrivacyRef.current = key;
+      onPrivacyRendered(service.id, key);
+    }
+  }, [alias, concealed, onPrivacyRendered, searchAddon, service, streamMode, terminalsRef]);
 
   return (
     <div
@@ -1059,6 +1046,7 @@ function PaneView({
                 ? "text-cyan-400 bg-cyan-500/15 hover:bg-cyan-500/20"
                 : "text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
             }
+            disabled={concealed}
             onClick={searchOpen ? onCloseSearch : onOpenSearch}
           >
             <SearchIcon className="size-3.5" />
@@ -1093,13 +1081,15 @@ function PaneView({
         />
       ) : null}
       <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3">
-        <div ref={hostRef} className="h-full w-full overflow-hidden" />
+        <TerminalPrivacy concealed={concealed}>
+          <div ref={hostRef} className="h-full w-full overflow-hidden" />
+        </TerminalPrivacy>
         {startHealth ? (
           <StartHealthNotice startHealth={startHealth} />
         ) : awaitingOutput ? (
           <WaitingForOutput />
         ) : null}
-        {searchOpen && searchAddon ? (
+        {!concealed && searchOpen && searchAddon ? (
           <PaneSearchBar
             searchAddon={searchAddon}
             seed={searchSeed}
