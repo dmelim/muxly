@@ -65,6 +65,7 @@ pub fn open_pty(
     rows: u16,
     cols: u16,
     cwd: Option<String>,
+    shell_id: Option<String>,
     on_output: Channel<PtyOutputEvent>,
 ) -> Result<(), AppError> {
     let pty_system = native_pty_system();
@@ -77,7 +78,17 @@ pub fn open_pty(
         })
         .map_err(|err| AppError::ProcessStop(format!("openpty failed: {err}")))?;
 
-    let (program, args) = default_shell();
+    let (program, args) = match shell_id.as_deref() {
+        None | Some("default") => default_shell(),
+        Some(id) => {
+            let profile = crate::shells::profiles(&app).into_iter()
+                .find(|profile| profile.id == id)
+                .ok_or_else(|| AppError::ConfigUnavailable(
+                    "Selected shell is no longer installed. Choose another shell.".into()
+                ))?;
+            (profile.program, profile.args)
+        }
+    };
     let working_dir = cwd
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)

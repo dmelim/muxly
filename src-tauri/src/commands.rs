@@ -170,9 +170,10 @@ pub fn pty_open(
     rows: u16,
     cols: u16,
     cwd: Option<String>,
+    shell_id: Option<String>,
     on_output: Channel<PtyOutputEvent>,
 ) -> Result<(), AppError> {
-    pty::open_pty(app, &registry, pty_id, rows, cols, cwd, on_output)
+    pty::open_pty(app, &registry, pty_id, rows, cols, cwd, shell_id, on_output)
 }
 
 #[tauri::command]

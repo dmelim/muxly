@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
@@ -11,6 +11,8 @@ import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
 import { TerminalPrivacy } from "./TerminalPrivacy";
 import { setTerminalConcealed } from "./streamPrivacy";
+import { Dropdown } from "./Dropdown";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type PtyOutputEvent = { ptyId: string; chunk: string };
 type PtyClosedEvent = { ptyId: string };
@@ -48,6 +50,19 @@ type BottomTerminalProps = {
  * "end this session", matching VS Code's terminal panel behaviour.
  */
 export function BottomTerminal({ open, height, theme, streamMode, onClose, onResizeStart }: BottomTerminalProps) {
+  const [shellId, setShellId] = useState("default");
+  const [shells, setShells] = useState<Array<{ id: string; label: string }>>([]);
+  const [pendingShell, setPendingShell] = useState<string | null>(null);
+  const [shellError, setShellError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) { setPendingShell(null); return; }
+    let cancelled = false;
+    setShellError(null);
+    void invoke<Array<{ id: string; label: string }>>("discover_shells")
+      .then((profiles) => { if (!cancelled) setShells(profiles); })
+      .catch(() => { if (!cancelled) setShellError("Shell discovery unavailable. The default shell is still available."); });
+    return () => { cancelled = true; };
+  }, [open]);
   const concealedRef = useRef(streamMode);
   concealedRef.current = streamMode;
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -137,6 +152,7 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
 
       const onOutput = new Channel<PtyOutputEvent>();
       onOutput.onmessage = (event) => {
+        if (disposed) return;
         terminal.write(event.chunk);
       };
 
@@ -146,8 +162,10 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
         rows: terminal.rows || 24,
         // `null` lets the backend pick the user home directory.
         cwd: null,
+        shellId,
         onOutput
       }).catch((error) => {
+        if (disposed) return;
         terminal.write(`\r\n\x1b[31m[shell] failed to start: ${formatError(error)}\x1b[0m\r\n`);
       });
 
@@ -198,7 +216,7 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, [open]);
+  }, [open, shellId]);
 
   if (!open) {
     return null;
@@ -206,7 +224,7 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
 
   return (
     <div
-      className="relative flex shrink-0 flex-col border-t border-white/10 bg-[#101215]"
+      className="relative mx-2 mb-2 flex shrink-0 flex-col border border-white/10 bg-[#101215] focus-within:border-cyan-400/40"
       style={{ height: `${height}px` }}
     >
       {/* Drag handle: a thin invisible strip overlapping the top border, with
@@ -221,11 +239,20 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
       >
         <span className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-transparent transition-colors group-hover/th:bg-cyan-500/60" />
       </div>
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-white/10 pl-3 pr-1.5">
+      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-white/10 py-1 pl-3 pr-2">
         <span className="flex items-center gap-2 text-xs font-medium text-zinc-300">
           <TerminalIcon className="size-3.5 text-cyan-400" />
           Shell
         </span>
+        <div className="flex items-center gap-2">
+          <Dropdown
+            variant="ghost"
+            className="w-44"
+            ariaLabel="Choose terminal shell"
+            value={shellId}
+            options={[{ value: "default", label: "Default shell" }, ...shells.map((shell) => ({ value: shell.id, label: shell.label }))]}
+            onChange={(next) => { if (next !== shellId) setPendingShell(next); }}
+          />
         <Tooltip label="Close terminal (Ctrl+↓)">
           <button
             type="button"
@@ -236,12 +263,21 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
             <CloseIcon className="size-3.5" />
           </button>
         </Tooltip>
+        </div>
       </div>
+      {shellError ? <p role="status" className="px-3 pt-2 text-xs text-amber-300">{shellError}</p> : null}
       <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden p-3">
         <TerminalPrivacy concealed={streamMode}>
           <div ref={hostRef} className="h-full w-full overflow-hidden" />
         </TerminalPrivacy>
       </div>
+      {pendingShell ? <ConfirmDialog
+        title="Switch shell"
+        message={`End the current shell session and start ${shells.find((shell) => shell.id === pendingShell)?.label ?? "the default shell"}? Any commands running in this shell will stop.`}
+        confirmLabel="Switch shell"
+        onClose={() => setPendingShell(null)}
+        onConfirm={() => { setShellId(pendingShell); setPendingShell(null); }}
+      /> : null}
     </div>
   );
 }

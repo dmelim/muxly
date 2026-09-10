@@ -13,6 +13,7 @@ mod runtime;
 mod services;
 mod settings;
 mod shell_env;
+mod shells;
 mod startup;
 
 use commands::{
@@ -124,6 +125,7 @@ pub fn run() {
             scan_importable,
             get_service_history,
             pty_open,
+            shells::discover_shells,
             pty_write,
             pty_resize,
             pty_close,
