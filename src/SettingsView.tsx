@@ -3,6 +3,7 @@ import type { AppSettings, EditorCandidate, ServiceConfig } from "./types";
 import { displayServiceName, maskSensitiveName } from "./types";
 import { groupServices } from "./appUtils";
 import { Button } from "./Button";
+import { Checkbox } from "./Checkbox";
 import { Dropdown } from "./Dropdown";
 import { Tooltip } from "./Tooltip";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -688,8 +689,7 @@ export function SettingsView({
               />
             </FormRow>
             <label className="flex cursor-pointer items-start gap-3 pt-1">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={settings.showTimestamps}
                 onChange={(event) => {
                   setSaveMessage(null);
@@ -701,7 +701,7 @@ export function SettingsView({
                     }
                   );
                 }}
-                className="mt-0.5 size-4 cursor-pointer accent-cyan-500"
+                className="mt-0.5"
                 aria-label="Prepend timestamps to log lines"
               />
               <span className="text-sm">
@@ -742,8 +742,7 @@ export function SettingsView({
               />
             </FormRow>
             <label className="flex cursor-pointer items-start gap-3 pt-1">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={settings.openServicesInTabs ?? true}
                 onChange={(event) => {
                   setSaveMessage(null);
@@ -751,7 +750,7 @@ export function SettingsView({
                     (error) => setSaveMessage(error instanceof Error ? error.message : String(error))
                   );
                 }}
-                className="mt-0.5 size-4 cursor-pointer accent-cyan-500"
+                className="mt-0.5"
                 aria-label="Open new services in tabs"
               />
               <span className="text-sm">
@@ -781,12 +780,11 @@ export function SettingsView({
             keywords={SETTINGS_SEARCH_METADATA.Privacy}
           >
             <label className="flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={allHidden}
                 onChange={handleHideAllToggle}
                 disabled={saving || groupNames.length === 0}
-                className="mt-0.5 size-4 cursor-pointer accent-cyan-500"
+                className="mt-0.5"
                 aria-label="Hide all project names"
               />
               <span className="text-sm">
@@ -879,14 +877,13 @@ export function SettingsView({
                         className="overflow-hidden rounded-md border border-white/10"
                       >
                         <div className="flex items-center gap-2 bg-white/5 px-3 py-2">
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={projectSensitive}
                             disabled={saving}
                             onChange={(event) =>
                               void handleProjectToggle(groupName, ids, event.target.checked)
                             }
-                            className="size-4 cursor-pointer accent-cyan-500"
+                            
                             aria-label={`Mark the ${projectLabel} project and its services sensitive`}
                           />
                           <button
@@ -917,8 +914,7 @@ export function SettingsView({
                             {groupList.map((service) => (
                               <li key={service.id}>
                                 <label className="flex cursor-pointer items-center gap-3 py-2 pl-9 pr-3 transition hover:bg-white/5">
-                                  <input
-                                    type="checkbox"
+                                  <Checkbox
                                     checked={isServiceSensitive(service)}
                                     disabled={saving}
                                     onChange={(event) =>
@@ -927,7 +923,7 @@ export function SettingsView({
                                         event.target.checked
                                       )
                                     }
-                                    className="size-4 cursor-pointer accent-cyan-500"
+                                    
                                     aria-label={`Mark ${displayServiceName(service, maskNames)} sensitive`}
                                   />
                                   <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">

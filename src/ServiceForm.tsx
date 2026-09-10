@@ -3,6 +3,8 @@ import type { Profile, ServiceConfig } from "./types";
 import { Button } from "./Button";
 import { Dropdown } from "./Dropdown";
 import { Field } from "./FormField";
+import { FieldHelp } from "./FieldHelp";
+import { Checkbox } from "./Checkbox";
 import { ServiceIconInput } from "./ServiceIconInput";
 import { looksLikeDevServer } from "./devServerHeuristics";
 import { fromDraft, toDraft, validate } from "./serviceFormModel";
@@ -11,8 +13,6 @@ import { Tooltip } from "./Tooltip";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CloseIcon, DeleteIcon } from "./icons";
 
-// Matches the shortcut label used elsewhere — `⌘` on macOS, `Ctrl` otherwise.
-const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
 
 
 type Props = {
@@ -104,7 +104,7 @@ export function ServiceForm({
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 text-sm">
-        <Field label="ID" hint="Unique short identifier, e.g. web-api">
+        <Field label="ID">
           <input
             value={draft.id}
             onChange={(e) => setDraft({ ...draft, id: e.target.value })}
@@ -225,25 +225,14 @@ export function ServiceForm({
           </Field>
         ) : null}
 
-        <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-1.5">
+<label className="flex items-start gap-2"><Checkbox
             checked={draft.autoPort}
             onChange={(e) => setDraft({ ...draft, autoPort: e.target.checked })}
             className="mt-0.5"
-          />
-          <span>
-            <span className="block text-xs font-medium uppercase tracking-wider text-zinc-400">
-              Auto-roll port if busy
-            </span>
-            <span className="block text-[11px] text-zinc-500">
-              Treat Port as a preference: if it's taken, start on the next free
-              port instead of failing. Muxly injects the chosen port as an env
-              var and substitutes any <code>{"{port}"}</code> in args and env
-              values, so the process always uses the right one.
-            </span>
-          </span>
-        </label>
+          /><span className="text-xs font-medium uppercase tracking-wider text-zinc-400">Auto-roll port if busy</span></label>
+<FieldHelp label="Auto-roll port if busy" hint="Use the next free port if the preferred port is busy. The chosen port is set in the port environment variable and replaces {port} in arguments and environment values." />
+</div>
 
         {draft.autoPort ? (
           <Field
@@ -259,56 +248,32 @@ export function ServiceForm({
           </Field>
         ) : null}
 
-        <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-1.5">
+<label className="flex items-start gap-2"><Checkbox
             checked={draft.autoRestart}
             onChange={(e) => setDraft({ ...draft, autoRestart: e.target.checked })}
             className="mt-0.5"
-          />
-          <span>
-            <span className="block text-xs font-medium uppercase tracking-wider text-zinc-400">
-              Auto-restart on crash
-            </span>
-            <span className="block text-[11px] text-zinc-500">
-              Re-spawn automatically if the process exits with an error (max 3 tries per minute)
-            </span>
-          </span>
-        </label>
+          /><span className="text-xs font-medium uppercase tracking-wider text-zinc-400">Auto-restart on crash</span></label>
+<FieldHelp label="Auto-restart on crash" hint="Restart when the process exits with an error. Retry limits and the restart window are configured in Settings." />
+</div>
 
-        <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-1.5">
+<label className="flex items-start gap-2"><Checkbox
             checked={draft.usePty}
             onChange={(e) => setDraft({ ...draft, usePty: e.target.checked })}
             className="mt-0.5"
-          />
-          <span>
-            <span className="block text-xs font-medium uppercase tracking-wider text-zinc-400">
-              Run in pseudo-terminal
-            </span>
-            <span className="block text-[11px] text-zinc-500">
-              Enable for dev servers with hot reload (Vite, WXT, Next.js). Without a TTY they can exit mid-rebuild. Output may include raw ANSI colour codes.
-            </span>
-          </span>
-        </label>
+          /><span className="text-xs font-medium uppercase tracking-wider text-zinc-400">Run in pseudo-terminal</span></label>
+<FieldHelp label="Run in pseudo-terminal" hint="Use for interactive commands and dev servers with hot reload, such as Vite, WXT, and Next.js. Some tools can exit during a rebuild without a terminal." />
+</div>
 
-        <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-1.5">
+<label className="flex items-start gap-2"><Checkbox
             checked={draft.sensitive}
             onChange={(e) => setDraft({ ...draft, sensitive: e.target.checked })}
             className="mt-0.5"
-          />
-          <span>
-            <span className="block text-xs font-medium uppercase tracking-wider text-zinc-400">
-              Sensitive name
-            </span>
-            <span className="block text-[11px] text-zinc-500">
-              Mask this service's name (sidebar, pane header, search) while Stream mode is on — toggle it from the command palette ({modKey}+P) before screen-sharing.
-            </span>
-          </span>
-        </label>
+          /><span className="text-xs font-medium uppercase tracking-wider text-zinc-400">Sensitive name</span></label>
+<FieldHelp label="Sensitive name" hint="Hide the service identity and terminal output while Stream mode is on. Enable Stream mode from the command palette before sharing your screen." />
+</div>
 
         {suggestPty ? (
           <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
@@ -345,18 +310,21 @@ export function ServiceForm({
             {error ?? validationError}
           </p>
         ) : null}
+        {onDelete ? (
+          <section aria-labelledby="delete-service-heading" className="space-y-3 rounded-md border border-rose-500/20 p-3">
+            <div>
+              <h3 id="delete-service-heading" className="text-xs font-semibold text-zinc-200">Delete service</h3>
+              <p className="mt-1 text-xs text-zinc-500">Remove this service from Muxly. Project files are kept.</p>
+            </div>
+            <Button variant="destructive" size="sm" onClick={() => setDeletePromptOpen(true)} disabled={saving}>
+              <DeleteIcon className="size-4" />
+              Delete service
+            </Button>
+          </section>
+        ) : null}
       </div>
 
-      <div className="flex items-center justify-between gap-2 border-t border-white/10 px-5 py-4">
-        {onDelete ? (
-          <Tooltip label="Delete service">
-            <Button variant="destructive" size="icon" onClick={() => setDeletePromptOpen(true)} disabled={saving} aria-label="Delete service">
-              <DeleteIcon className="size-4" />
-            </Button>
-          </Tooltip>
-        ) : (
-          <span />
-        )}
+      <div className="flex items-center justify-end gap-2 border-t border-white/10 px-5 py-4">
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={onCancel} disabled={saving}>
             Cancel
@@ -391,4 +359,3 @@ export function ServiceForm({
     </form>
   );
 }
-

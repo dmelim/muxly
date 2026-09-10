@@ -77,6 +77,8 @@ export function Tooltip({ label, side = "bottom", className = "", children, disa
       className={`inline-flex ${className}`}
       onMouseEnter={show}
       onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
     >
       {children}
       {open && !disabled

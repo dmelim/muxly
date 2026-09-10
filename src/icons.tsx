@@ -11,6 +11,15 @@ const STROKE = {
   strokeLinejoin: "round" as const
 };
 
+export function EditIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...STROKE} className={className} aria-hidden="true">
+      <path d="m16 3 5 5-12 12-6 1 1-6Z" />
+      <path d="m14 5 5 5" />
+    </svg>
+  );
+}
+
 /** Filled play triangle — Start. */
 export function PlayIcon({ className }: IconProps) {
   return (

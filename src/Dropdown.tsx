@@ -22,12 +22,13 @@ type Props = {
   className?: string;
   // "field" blends into form inputs (matches .form-input); "toolbar" is the
   // lighter sidebar/header look.
-  variant?: "field" | "toolbar";
+  variant?: "field" | "toolbar" | "ghost";
   // Compact trigger for inspector/tool rows. The menu keeps the same keyboard
   // and accessibility behaviour while the trigger uses the shared icon size.
   compact?: boolean;
   tooltip?: string;
   showSelectionIndicator?: boolean;
+  primaryAction?: { label: string; onClick: () => void };
 };
 
 // The app's single themed dropdown. A native <select>'s option list is
@@ -44,7 +45,8 @@ export function Dropdown({
   variant = "field",
   compact = false,
   tooltip,
-  showSelectionIndicator = true
+  showSelectionIndicator = true,
+  primaryAction
 }: Props) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -59,9 +61,9 @@ export function Dropdown({
   } | null>(null);
 
   const selected = options.find((option) => option.value === value);
-  const textSize = variant === "toolbar" ? "text-sm" : "text-[0.8125rem]";
+  const textSize = variant !== "field" ? "text-sm" : "text-[0.8125rem]";
   const triggerBg =
-    variant === "toolbar" ? "bg-white/5 hover:bg-white/10" : "bg-black/25 hover:bg-white/5";
+    variant === "ghost" ? "bg-transparent hover:bg-white/10" : variant === "toolbar" ? "bg-white/5 hover:bg-white/10" : "bg-black/25 hover:bg-white/5";
 
   useEffect(() => {
     if (!open) return;
@@ -156,7 +158,22 @@ export function Dropdown({
   };
 
   return (
-    <div ref={rootRef} className={`relative ${className ?? ""}`}>
+    <div ref={rootRef} className={`relative ${primaryAction ? "flex items-center" : ""} ${className ?? ""}`}>
+      {primaryAction ? (
+        <Tooltip label={primaryAction.label}>
+          <button
+            type="button"
+            aria-label={primaryAction.label}
+            onClick={() => {
+              setOpen(false);
+              primaryAction.onClick();
+            }}
+            className={`relative flex h-7 w-8 items-center justify-center rounded-l-md border ${variant === "ghost" ? "border-transparent" : "border-white/10"} text-zinc-200 transition ${triggerBg} focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40`}
+          >
+            {selected?.icon ?? <span className="text-xs">{selected?.label ?? placeholder}</span>}
+          </button>
+        </Tooltip>
+      ) : null}
       <Tooltip label={tooltip ?? ""} disabled={open || !tooltip} className="w-full">
         <button
           type="button"
@@ -173,9 +190,9 @@ export function Dropdown({
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-label={ariaLabel}
-          className={`flex items-center rounded-md border border-white/10 text-left ${textSize} text-zinc-200 transition ${triggerBg} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${compact ? "h-7 w-11 justify-center gap-1 px-1" : "w-full justify-between gap-2 px-2.5 py-2"}`}
+          className={`relative flex items-center ${primaryAction ? "rounded-r-md border border-l-0" : "rounded-md border"} ${variant === "ghost" ? "border-transparent" : "border-white/10"} text-left ${textSize} text-zinc-200 transition ${triggerBg} focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${primaryAction ? "h-7 w-7 justify-center" : compact ? "h-7 w-11 justify-center gap-1 px-1" : "w-full justify-between gap-2 px-2.5 py-2"}`}
         >
-          <span className="flex min-w-0 items-center gap-2">
+          <span className={primaryAction ? "sr-only" : "flex min-w-0 items-center gap-2"}>
             {selected?.icon ? (
               <span className="shrink-0 text-zinc-400">{selected.icon}</span>
             ) : null}

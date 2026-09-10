@@ -400,9 +400,7 @@ function iconValueLabel(type: ServiceFormDraft["iconType"]) {
 
 function iconValueHint(type: ServiceFormDraft["iconType"]) {
   if (type === "image") return "Absolute path, or relative to the service working dir";
-  if (type === "builtin") return "Search and choose a small visual marker";
-  if (type === "emoji") return "One short emoji or symbol";
-  return "Optional";
+  return undefined;
 }
 
 function iconValuePlaceholder(type: ServiceFormDraft["iconType"]) {

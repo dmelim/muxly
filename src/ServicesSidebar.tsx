@@ -203,11 +203,11 @@ export function ServicesSidebar({
   return (
     <aside
       aria-hidden={!open}
-      className={`flex min-h-0 flex-col overflow-hidden bg-[#15181d] ${
-        open ? "border-r border-white/10" : "pointer-events-none invisible"
+      className={`flex min-h-0 flex-col gap-2 overflow-hidden bg-[#101215] ${
+        open ? "p-2" : "pointer-events-none invisible"
       }`}
     >
-      <div className="border-b border-white/10 px-5 py-4">
+      <div className="shrink-0 border border-white/10 bg-transparent p-3">
         <h1 className="text-xl font-semibold tracking-normal">Muxly</h1>
         <p className="mt-2 line-clamp-2 text-xs text-zinc-500" title={managerMessage}>
           {managerMessage}
@@ -297,6 +297,8 @@ export function ServicesSidebar({
         ) : null}
       </div>
 
+      <section aria-labelledby="services-panel-heading" className="flex min-h-0 flex-1 flex-col border border-white/10 bg-transparent">
+        <h2 id="services-panel-heading" className="shrink-0 px-3 pb-1 pt-3 text-sm font-semibold text-zinc-100">Services</h2>
       <div
         onDragEnter={(event) => {
           if (isFiltering) return;
@@ -333,7 +335,11 @@ export function ServicesSidebar({
           </div>
         ) : null}
         {groupedServices.map(([groupName, groupServicesList]) => {
-          const anyRunning = groupServicesList.some((service) => {
+          const anyActive = groupServicesList.some((service) => {
+            const status = statuses[service.id];
+            return status === "running" || status === "starting" || status === "restarting" || status === "stopping";
+          });
+          const anyStoppable = groupServicesList.some((service) => {
             const status = statuses[service.id];
             return status === "running" || status === "starting" || status === "restarting";
           });
@@ -375,7 +381,7 @@ export function ServicesSidebar({
               <div
                 onContextMenu={(event) => showMenu(event, [
                   { id: "start", label: "Start All", action: () => onGroupMenuAction("start", groupName) },
-                  { id: "stop", label: "Stop All", disabled: !anyRunning, action: () => onGroupMenuAction("stop", groupName) },
+                  { id: "stop", label: "Stop All", disabled: !anyStoppable, action: () => onGroupMenuAction("stop", groupName) },
                   { id: "add", label: "Add Service Here", action: () => onGroupMenuAction("add", groupName) },
                   { id: "pin", label: groupPinned ? "Unpin" : "Pin", action: () => onGroupMenuAction("pin", groupName) },
                   { id: "collapse", label: collapsed ? "Expand" : "Collapse", action: () => onGroupMenuAction("collapse", groupName) },
@@ -511,29 +517,32 @@ export function ServicesSidebar({
                       {groupHidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
                     </Button>
                   </Tooltip>
-                  <Tooltip label={`Start all in ${displayGroupName}`}>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => startGroup(groupName)}
-                      aria-label={`Start all services in ${displayGroupName}`}
-                      className="text-cyan-400/80 hover:text-cyan-300"
-                    >
-                      <PlayIcon className="size-3.5" />
-                    </Button>
-                  </Tooltip>
-                  <Tooltip label={`Stop all in ${displayGroupName}`}>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => stopGroup(groupName)}
-                      disabled={!anyRunning}
-                      aria-label={`Stop all running services in ${displayGroupName}`}
-                      className="text-rose-400/80 hover:text-rose-300 disabled:text-zinc-500"
-                    >
-                      <StopIcon className="size-3.5" />
-                    </Button>
-                  </Tooltip>
+                  {anyActive ? (
+                    <Tooltip label={`Stop all in ${displayGroupName}`}>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => stopGroup(groupName)}
+                        disabled={!anyStoppable}
+                        aria-label={`Stop all running services in ${displayGroupName}`}
+                        className="text-rose-400/80 hover:text-rose-300 disabled:text-zinc-500"
+                      >
+                        <StopIcon className="size-3.5" />
+                      </Button>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip label={`Start all in ${displayGroupName}`}>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => startGroup(groupName)}
+                        aria-label={`Start all services in ${displayGroupName}`}
+                        className="text-cyan-400/80 hover:text-cyan-300"
+                      >
+                        <PlayIcon className="size-3.5" />
+                      </Button>
+                    </Tooltip>
+                  )}
                 </div>
               </div>
               <div className={collapsed ? "hidden" : "space-y-1.5"}>
@@ -693,6 +702,7 @@ export function ServicesSidebar({
           );
         })}
       </div>
+      </section>
       {menu ? <ContextMenu {...menu} onClose={() => setMenu(null)} restoreFocusRef={menuTargetRef} /> : null}
       {deleteTarget ? (
         <ConfirmDialog

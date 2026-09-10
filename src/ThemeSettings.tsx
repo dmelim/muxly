@@ -83,6 +83,7 @@ export function ThemeSettings({
     contrastRatio(draft.terminalForeground, draft.terminalBackground) < 4.5;
 
   const choosePreset = (value: string) => {
+    if (saving) return;
     const next = value as ThemePresetId;
     setPreset(next);
     if (next !== "custom") setDraft(THEME_PRESETS[next]);
@@ -90,18 +91,21 @@ export function ThemeSettings({
   };
 
   const setColor = (key: keyof MuxlyTheme, value: string) => {
+    if (saving) return;
     setPreset("custom");
     setDraft((current) => ({ ...current, [key]: value }));
     setMessage(null);
   };
 
   const save = async () => {
+    if (saving) return;
     const invalid = Object.values(draft).some((value) => !/^#[0-9a-f]{6}$/i.test(value));
     if (invalid) {
       setMessage("Use six-digit hex colours such as #22d3ee.");
       return;
     }
     setSaving(true);
+    setMessage(null);
     try {
       const overrides = preset === "custom" ? draft : {};
       await onSave({ ...settings, themePreset: preset, theme: overrides });
@@ -113,12 +117,32 @@ export function ThemeSettings({
     }
   };
 
+  const resetAll = async () => {
+    if (saving) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await onSave({ ...settings, themePreset: "default", theme: {} });
+      setPreset("default");
+      setDraft(DEFAULT_THEME);
+      setMessage("Default theme restored and saved");
+    } catch (error) {
+      const detail = error && typeof error === "object" && "message" in error
+        ? String(error.message)
+        : String(error);
+      setMessage(`Could not reset theme: ${detail}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <section className="space-y-4" aria-labelledby="appearance-heading">
       <div>
         <h3 id="appearance-heading" className="text-sm font-semibold text-zinc-100">Appearance</h3>
-        <p className="mt-1 text-xs text-zinc-500">Start with a preset, then customize semantic colours. Changes preview live and are not kept until saved.</p>
+        <p className="mt-1 text-xs text-zinc-500">Preview presets and colour edits, then save to keep them. Reset and save defaults restores the default theme immediately.</p>
       </div>
+      <fieldset disabled={saving} className="space-y-4">
       <Dropdown
         value={preset}
         ariaLabel="Theme preset"
@@ -138,6 +162,7 @@ export function ThemeSettings({
               variant="link"
               size="xs"
               onClick={() => {
+                setMessage(null);
                 setPreset("custom");
                 setDraft((current) => {
                   const next = { ...current };
@@ -180,10 +205,11 @@ export function ThemeSettings({
       <div className="flex items-center justify-between gap-3">
         <div className="flex gap-2">
           <Button variant="primary" size="sm" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save theme"}</Button>
-          <Button variant="secondary" size="sm" onClick={() => { setPreset("default"); setDraft(DEFAULT_THEME); setMessage(null); }}>Reset all</Button>
+          <Button variant="secondary" size="sm" onClick={() => void resetAll()} disabled={saving}>Reset and save defaults</Button>
         </div>
         {message ? <span role="status" className="text-xs text-zinc-400">{message}</span> : null}
       </div>
+      </fieldset>
     </section>
   );
 }

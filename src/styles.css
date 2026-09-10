@@ -28,6 +28,9 @@
 .bg-white\/10 { background-color: var(--muxly-hover-strong) !important; }
 .hover\:bg-white\/5:hover { background-color: var(--muxly-hover-subtle) !important; }
 .hover\:bg-white\/10:hover { background-color: var(--muxly-hover-strong) !important; }
+.hover\:bg-white\/15:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--muxly-hover-strong), white 10%) !important;
+}
 
 * {
   box-sizing: border-box;
@@ -143,6 +146,11 @@ button {
   transition: border-color 0.15s, background 0.15s;
 }
 
+/* Custom tab track supplies consistent square, arrowless chrome on WebKit
+   and WebView2; native touchpad and keyboard scrolling remain available. */
+.muxly-tab-viewport { scrollbar-width: none; }
+.muxly-tab-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
 .form-input.search-input {
   padding-left: 2rem;
   padding-right: 2rem;
@@ -159,8 +167,20 @@ button {
 }
 
 textarea.form-input {
-  resize: vertical;
+  resize: none;
   min-height: 4.5rem;
+}
+
+/* Keep numeric validation and keyboard stepping without OS-drawn spinners. */
+input.form-input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input.form-input[type="number"]::-webkit-inner-spin-button,
+input.form-input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .muxly-color-picker .react-colorful {

@@ -14,7 +14,7 @@ import { openInEditor, openInFileManager, openServiceUrl } from "./appActions";
 import { Dropdown } from "./Dropdown";
 import { buildEditorOptions } from "./editorOptions";
 import { EditorLogo } from "./EditorLogo";
-import { FolderOpenIcon, GlobeIcon } from "./icons";
+import { EditIcon, FolderOpenIcon, GlobeIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 
 type Props = {
@@ -126,19 +126,7 @@ export function DetailsSidebar({
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-        <h2 className="text-sm font-semibold">Details</h2>
-        {selected ? (
-          <Button variant="ghost" size="xs" onClick={() => onEdit({ mode: "edit", service: selected })}>
-            Edit
-          </Button>
-        ) : null}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {selected ? (
-          <div className="space-y-5 p-5 text-sm">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+<div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-3"><h2 className="text-sm font-semibold">Details</h2>{selected ? (            <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
               <Dropdown
                 compact
                 variant="toolbar"
@@ -147,9 +135,13 @@ export function DetailsSidebar({
                 onChange={(command) =>
                   void openInEditor(selected.cwd, selected.id, command, appendLog)
                 }
-                ariaLabel="Open service in editor"
+                primaryAction={{
+                  label: "Open service in configured editor",
+                  onClick: () => void openInEditor(selected.cwd, selected.id, settings.editorCommand, appendLog)
+                }}
+                ariaLabel="Choose editor to open service"
                 placeholder="Editor"
-                tooltip="Open service in editor"
+                tooltip="Choose editor to open service"
                 showSelectionIndicator={false}
                 className="shrink-0"
               />
@@ -182,7 +174,11 @@ export function DetailsSidebar({
                   </Button>
                 </Tooltip>
               ) : null}
-            </div>
+            <Tooltip label="Edit service"><Button variant="ghost" size="icon" aria-label="Edit service" onClick={() => onEdit({ mode: "edit", service: selected })}><EditIcon className="size-4" /></Button></Tooltip></div>
+) : null}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {selected ? (
+          <div className="space-y-5 p-3 text-sm">
             <dl className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,110px),1fr))] gap-x-4 gap-y-3">
               <Detail label="Icon">
                 <ServiceIconBadge
@@ -202,13 +198,13 @@ export function DetailsSidebar({
               <Detail label="PID">
                 {pids[selected.id] ?? adoptedPids[selected.id]?.pid ?? "None"}
               </Detail>
-              <Detail label="Last Exit">{lastExit[selected.id] ?? "None"}</Detail>
+              <Detail label="Last exit">{lastExit[selected.id] ?? "None"}</Detail>
               <Detail label="Command" className="col-span-full min-w-0">
                 <span className="block min-w-0 max-w-full rounded-md bg-black/20 p-3 font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
                   {redact(formatCommand(selected))}
                 </span>
               </Detail>
-              <Detail label="Working Dir" className="col-span-full min-w-0">
+              <Detail label="Working directory" className="col-span-full min-w-0">
                 <span className="font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
                   {redact(selected.cwd)}
                 </span>
@@ -246,9 +242,9 @@ export function DetailsSidebar({
               />
             </dl>
 
-            <div className="pt-5">
-              <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Run history</p>
-              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+            <section aria-labelledby="run-history-heading" className="pt-4">
+              <h3 id="run-history-heading" className="text-sm font-semibold text-zinc-100">Run history</h3>
+              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
                 <Detail label="Total runs">{history[selected.id]?.totalRuns ?? 0}</Detail>
                 <Detail label="Failed">{history[selected.id]?.failedRuns ?? 0}</Detail>
                 <Detail label="Last run">{timeAgo(history[selected.id]?.lastStartedAt ?? null)}</Detail>
@@ -256,7 +252,7 @@ export function DetailsSidebar({
                   {timeAgo(history[selected.id]?.lastFailureAt ?? null)}
                 </Detail>
               </dl>
-            </div>
+            </section>
           </div>
         ) : (
           <p className="p-5 text-sm text-zinc-500">

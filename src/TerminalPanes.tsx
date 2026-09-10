@@ -1,3 +1,4 @@
+import { TabsScrollArea } from "./TabsScrollArea";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DragEvent, MutableRefObject, ReactNode } from "react";
@@ -339,8 +340,8 @@ export function TerminalPanes({
             </div>
           ) : null}
           {tabMode ? (
-            <div
-              role="tablist"
+            <div className="flex min-w-0 shrink-0 items-end border-b border-white/10">
+            <TabsScrollArea role="tablist"
               aria-label="Panel tabs"
               onDragOver={(event) => {
                 if (!draggedTabIdRef.current) return;
@@ -353,7 +354,10 @@ export function TerminalPanes({
                 event.preventDefault();
                 dropTab(panel.id, panel.tabIds.length);
               }}
-              className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/10 px-1.5 pt-1.5"
+              onWheel={(event) => {
+                if (event.deltaY && !event.deltaX && !event.ctrlKey) event.currentTarget.scrollLeft += event.deltaY;
+              }}
+              className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-1.5 pt-1.5"
             >
               {panel.tabIds.map((serviceId, tabIndex) => {
                 const service = serviceById.get(serviceId);
@@ -363,7 +367,7 @@ export function TerminalPanes({
                     {renderTabDropPlaceholder(panel.id, tabIndex)}
                     <div
                       role="presentation"
-                      className={`relative flex min-w-0 items-center gap-1 rounded-t-md border border-b-0 px-2 text-xs ${
+                      className={`relative flex w-36 shrink-0 items-center gap-1 rounded-t-md border border-b-0 px-2 text-xs ${
                         service.id === panel.activeTabId
                           ? "border-white/15 bg-white/10 text-zinc-100"
                           : "border-transparent text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
@@ -372,6 +376,9 @@ export function TerminalPanes({
                       <button
                         type="button"
                         role="tab"
+                        ref={(node) => {
+                          if (node && service.id === panel.activeTabId) node.scrollIntoView({ block: "nearest", inline: "nearest" });
+                        }}
                         draggable
                         aria-selected={service.id === panel.activeTabId}
                         aria-label={`${displayServiceName(service, streamMode)}, ${statusLabels[statuses[service.id] ?? "stopped"]}`}
@@ -428,7 +435,7 @@ export function TerminalPanes({
                           dropTab(panel.id, index);
                         }}
                         onDragEnd={finishTabDrag}
-                        className="flex min-w-0 max-w-48 self-stretch cursor-grab items-center gap-1.5 truncate py-1 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                        className="flex min-w-0 flex-1 self-stretch cursor-grab items-center gap-1.5 truncate py-1 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
                       >
                         <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${statusDots[statuses[service.id] ?? "stopped"]}`} />
                         <span className="truncate">{displayServiceName(service, streamMode)}</span>
@@ -442,6 +449,7 @@ export function TerminalPanes({
                 );
               })}
               {renderTabDropPlaceholder(panel.id, panel.tabIds.length)}
+            </TabsScrollArea>
             </div>
           ) : null}
           <div
@@ -964,54 +972,8 @@ function PaneView({
     }
   }, [alias, concealed, onPrivacyRendered, searchAddon, service, streamMode, terminalsRef]);
 
-  return (
-    <div
-      onMouseDown={onFocus}
-      className={`flex min-h-0 flex-1 flex-col ring-1 ring-inset ${
-        focused ? "ring-cyan-500/30" : "ring-[var(--muxly-border)]"
-      }`}
-    >
-      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
-        {showIdentity ? <span className="flex min-w-0 items-center gap-2">
-          {/* Adopted services show a cyan dot regardless of the underlying
-              ServiceStatus, since the foreign process is what's actually
-              listening on the port right now. */}
-          <span
-            className={`size-2 rounded-full ${
-              adopted ? statusDots.running : statusDots[status]
-            } ${status === "stopping" ? "animate-pulse" : ""}`}
-          />
-          <span
-            className={`truncate text-xs font-medium ${
-              focused ? "text-zinc-100" : "text-zinc-400"
-            }`}
-          >
-            {displayServiceName(service, streamMode)}
-          </span>
-          {status === "stopping" ? (
-            <span className="flex shrink-0 items-center gap-1 rounded-full border border-orange-500/40 bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-200">
-              <span className="size-2 animate-spin rounded-full border border-orange-300/40 border-t-orange-300" />
-              <span>Stopping…</span>
-            </span>
-          ) : null}
-          {adopted ? (
-            <Tooltip label="External process adopted — Muxly did not spawn this PID, so its stdout/stderr are not captured.">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onReleaseAdopted();
-                }}
-                aria-label="Release adopted process (does not kill it)"
-                className="flex shrink-0 items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-200 transition hover:bg-cyan-500/20"
-              >
-                <span>adopted · pid {adopted.pid}</span>
-                <CloseIcon className="size-2.5 opacity-70" />
-              </button>
-            </Tooltip>
-          ) : null}
-        </span> : <span />}
-        <span className="flex shrink-0 items-center gap-0.5">
+  const paneActions = (
+<span className="flex shrink-0 items-center gap-0.5">
           {running ? (
             <PaneIconButton
               label={status === "stopping" ? "Stopping…" : "Stop"}
@@ -1071,7 +1033,58 @@ function PaneView({
             </>
           ) : null}
         </span>
-      </div>
+  );
+
+  return (
+    <div
+      onMouseDown={onFocus}
+      className={`relative flex min-h-0 flex-1 flex-col ring-1 ring-inset ${
+        focused ? "ring-cyan-500/30" : "ring-[var(--muxly-border)]"
+      }`}
+    >
+      {showIdentity ? <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
+        {showIdentity ? <span className="flex min-w-0 items-center gap-2">
+          {/* Adopted services show a cyan dot regardless of the underlying
+              ServiceStatus, since the foreign process is what's actually
+              listening on the port right now. */}
+          <span
+            className={`size-2 rounded-full ${
+              adopted ? statusDots.running : statusDots[status]
+            } ${status === "stopping" ? "animate-pulse" : ""}`}
+          />
+          <span
+            className={`truncate text-xs font-medium ${
+              focused ? "text-zinc-100" : "text-zinc-400"
+            }`}
+          >
+            {displayServiceName(service, streamMode)}
+          </span>
+          {status === "stopping" ? (
+            <span className="flex shrink-0 items-center gap-1 rounded-full border border-orange-500/40 bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-200">
+              <span className="size-2 animate-spin rounded-full border border-orange-300/40 border-t-orange-300" />
+              <span>Stopping…</span>
+            </span>
+          ) : null}
+          {adopted ? (
+            <Tooltip label="External process adopted — Muxly did not spawn this PID, so its stdout/stderr are not captured.">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReleaseAdopted();
+                }}
+                aria-label="Release adopted process (does not kill it)"
+                className="flex shrink-0 items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                <span>adopted · pid {adopted.pid}</span>
+                <CloseIcon className="size-2.5 opacity-70" />
+              </button>
+            </Tooltip>
+          ) : null}
+        </span> : <span />}
+        {paneActions}
+      </div> : null}
+      {!showIdentity ? <div className="absolute right-3 top-2 z-10">{paneActions}</div> : null}
       {blocker ? (
         <PortBlockerBanner
           pid={blocker.pid}

@@ -2546,7 +2546,7 @@ export function App() {
     function onKeyDown(event: KeyboardEvent) {
       // Floating controls own their keyboard interaction. In particular,
       // Escape must close the list rather than discard the Settings draft.
-      if ((event.target as Element | null)?.closest?.('[role="menu"], [role="listbox"]')) return;
+      if ((event.target as Element | null)?.closest?.('[role="menu"], [role="listbox"], [role="dialog"]')) return;
       if (event.key === "Escape") {
         if (profilePromptOpen) {
           setProfilePromptOpen(false);
@@ -2859,7 +2859,7 @@ export function App() {
       />
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
-        <header className="flex h-16 items-center justify-between border-b border-white/10 px-5">
+        <header className="mx-2 my-2 flex h-12 shrink-0 items-center justify-between border border-white/10 bg-transparent px-3">
           <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+←)`}>
             <Button
               variant="ghost"
@@ -3049,8 +3049,8 @@ export function App() {
       </section>
 
       <aside
-        className={`flex min-h-0 flex-col overflow-hidden bg-[#15181d] ${
-          effectiveRightSidebarOpen ? "border-l border-white/10" : "pointer-events-none invisible"
+        className={`flex min-h-0 min-w-0 flex-col overflow-hidden bg-transparent ${
+          effectiveRightSidebarOpen ? "m-2 border border-white/10" : "pointer-events-none invisible"
         }`}
         aria-hidden={!effectiveRightSidebarOpen}
       >

@@ -108,6 +108,11 @@ config value. Common sizes: `text-[10px]`–`text-[11px]` (labels/badges),
 Label/eyebrow text uses uppercase with wide tracking
 (`uppercase tracking-[0.14em]`–`tracking-[0.18em]`, `zinc-500`).
 
+Details inspector field labels use sentence case in the UI font, normal tracking,
+medium weight, and `text-xs text-zinc-400` for a softer, readable appearance.
+Section headings such as Run history use `text-sm font-semibold text-zinc-100`
+with `pt-4` spacing, clearly above the field labels in hierarchy without a divider.
+
 ## Layout
 
 A fixed-height, three-column shell — the document itself never scrolls
@@ -158,6 +163,11 @@ Focus is always visible: `ring-2 ring-cyan-400/40`.
 
 ### Tooltips
 
+Form checkboxes use the shared `Checkbox` component: dark surface, cyan checked
+state, SVG checkmark, and a visible keyboard focus ring. Number inputs retain
+native validation and keyboard stepping but hide browser spinner arrows.
+Textareas scroll within their defined height without native resize handles.
+
 Custom hover tooltip (`Tooltip`). The bubble renders through a **portal to
 `document.body`** with `position: fixed`, so it is never clipped by a panel's
 `overflow: hidden`; its horizontal position is clamped to the viewport.
@@ -179,13 +189,29 @@ panel. The destination uses a dashed cyan outline and a short drop label.
 
 ### Panels & dividers
 
+The left sidebar has two inset panels with `p-2` outer spacing and `gap-2`:
+a fixed controls/filter panel and a separately scrolling service-list panel.
+The service-list panel keeps a Services heading above its scrolling content.
+Both use transparent backgrounds and one-pixel neutral borders, letting the
+darker app background show through as well as around and between them.
+The central toolbar is also an inset transparent panel with a neutral outline
+and `mx-2 my-2` spacing; it has no separate full-width divider beneath it.
+The Details sidebar uses a transparent inset panel with `m-2` and a neutral
+outline. Its header groups the editor, folder, browser, and Edit icon actions
+beside the title without a separator below it.
+
 Terminal panes are clipping boxes (`overflow: hidden`) — xterm owns its own
 scrolling. Drag dividers are a 1.5px hairline (`white/10`) that lights to
 `accent/50`–`/60` on hover.
 
 Workspace panels and tabs are separate levels. A panel is one grid cell in the
 terminal layout and owns an ordered tab strip. Only its active tab is visible,
-but inactive terminals remain mounted. A normal service click opens a tab in
+but inactive terminals remain mounted. Tab-mode terminal controls float inside
+the panel's top-right corner without a surrounding card. Tabs occupy the full row width with a custom
+square, arrowless scrollbar revealed on hover or keyboard focus on Windows and macOS.
+The 5px accent-coloured scrollbar overlays the inside of the terminal panel just below the tab-row border, without reserving space between tabs and terminal.
+Tabs use a compact fixed width and truncate
+long labels; the active tab scrolls into view. A normal service click opens a tab in
 the focused panel; `Ctrl/Cmd`-click creates another panel with its own tabs.
 Tabs can be reordered within a panel or dragged to another panel; an insertion
 preview shaped like a muted copy of the dragged tab shows the exact drop
@@ -194,6 +220,12 @@ and an emptied source panel is removed.
 The service workspace below each tab strip has a one-pixel inset outline using
 the neutral border token when unfocused and the soft cyan accent when focused.
 The outline does not wrap or extend beside the tabs.
+
+The bottom shell drawer is inset with `mx-2 mb-2`, a neutral one-pixel border,
+and a soft cyan focus border, matching the service terminal cards. Its header
+uses the shared Dropdown for installed shell profiles. Switching profiles ends
+the current session through an in-app confirmation; the choice survives drawer
+close/reopen for the current app session.
 
 ### Scrollbars
 
@@ -247,6 +279,10 @@ in `src/theme.ts`; unknown keys are discarded by the backend. Presets are
 theme previews live to mounted React controls and xterm terminals, warns when
 primary text pairs fall below the WCAG 4.5:1 target, and restores the saved
 palette when an unsaved preview is closed.
+
+Reset and save defaults persists the default theme immediately and confirms
+success inline. Preset selection, colour edits, and group resets remain previews
+until Save theme is pressed.
 
 Each semantic colour row provides both direct six-digit hex entry and a themed,
 keyboard-accessible saturation and hue picker opened from its colour swatch.

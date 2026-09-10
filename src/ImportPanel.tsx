@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { ServiceConfig } from "./types";
 import { Button } from "./Button";
+import { Checkbox } from "./Checkbox";
 
 type ImportCandidate = {
   source: string;
@@ -172,8 +173,7 @@ export function ImportPanel({ existingIds, onImport, onCancel }: Props) {
                 className="rounded-md border border-white/10 bg-black/20 p-3"
               >
                 <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={row.selected}
                     onChange={(e) => patchRow(index, { selected: e.target.checked })}
                     className="mt-0.5"
