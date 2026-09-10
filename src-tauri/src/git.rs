@@ -1,4 +1,6 @@
 use serde::Serialize;
+#[path = "git_actions.rs"]
+pub mod actions;
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
@@ -98,7 +100,18 @@ pub fn git_switch_branch(
             ));
         }
     }
-    let result = run_git(&app, &root, &["switch", "--", &branch]);
+    let result = (|| {
+        // Recheck after acquiring the lock shared with commit and push.
+        let current = inspect(&app, &root)?.ok_or_else(|| {
+            AppError::ConfigUnavailable("Repository is unavailable".into())
+        })?;
+        if current.dirty || current.branch != before.branch {
+            return Err(AppError::ConfigUnavailable(
+                "Repository changed. Refresh Git state before switching branches.".into(),
+            ));
+        }
+        run_git(&app, &root, &["switch", "--", &branch])
+    })();
     if let Ok(mut active) = operations.0.lock() {
         active.remove(&root);
     }
@@ -230,6 +243,7 @@ fn git_command(app: &AppHandle, cwd: &Path) -> Command {
     let mut environment = HashMap::new();
     inject_fallback_path(&mut environment, &paths);
     command.envs(environment);
+    command.env("GIT_TERMINAL_PROMPT", "0");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

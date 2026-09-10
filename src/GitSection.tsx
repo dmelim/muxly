@@ -6,6 +6,7 @@ import { Dropdown } from "./Dropdown";
 import { RefreshIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 import { Detail } from "./Detail";
+import { GitPushModal } from "./GitPushModal";
 
 type GitState = {
   root: string;
@@ -27,6 +28,7 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [pushOpen, setPushOpen] = useState(false);
   const requestIdRef = useRef(0);
   const refreshRequestRef = useRef<{
     cwd: string;
@@ -76,6 +78,7 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
   useEffect(() => {
     requestIdRef.current += 1;
     setState(undefined);
+    setPushOpen(false);
     setBranches([]);
     setMessage(null);
     setBusy(false);
@@ -161,6 +164,25 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
             </p>
           ) : null}
         </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="w-full"
+          disabled={busy || refreshing || privateMode || state.detached}
+          onClick={() => setPushOpen(true)}
+        >
+          Push{state.ahead > 0 ? ` ↑${state.ahead}` : ""}…
+        </Button>
+        {privateMode ? <p className="text-[11px] text-zinc-500">Turn off Stream mode to review and publish repository changes.</p> : null}
+        {state.detached ? <p className="text-[11px] text-zinc-500">Check out a branch to commit or push.</p> : null}
+        {pushOpen && !privateMode ? (
+          <GitPushModal
+            key={service.cwd}
+            cwd={service.cwd}
+            onClose={() => setPushOpen(false)}
+            onComplete={() => void refresh(true)}
+          />
+        ) : null}
         {displayMessage ? <p role="status" className="text-right text-[11px] text-amber-300">{displayMessage}</p> : null}
       </div>
     </Detail>

@@ -132,6 +132,8 @@ pub fn run() {
             service_pty_write,
             git::git_overview,
             git::git_switch_branch,
+            git::actions::git_action_snapshot,
+            git::actions::git_run_action,
             service_pty_resize
         ])
         .build(tauri::generate_context!())
