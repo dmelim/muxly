@@ -35,6 +35,10 @@ design fixes and manual verification are complete.
 
 ### Added
 
+- The shell drawer now offers detected shell profiles, including Windows PowerShell, PowerShell 7, Command Prompt, and Git Bash when installed, with an explicit session-switch confirmation.
+
+- The repository inspector now offers a Push dialog with changed-file review, staged or all-change commits, remote selection, and separate Commit, Push, and Commit & push actions.
+
 - Themed context menus now provide service, project, and workspace-tab actions with keyboard navigation, privacy-aware labels, and single-instance terminal placement.
 - Services can now be dragged from the sidebar into the terminal workspace to open them as tabs in the hovered panel, including when the workspace is empty.
 - The other-profile activity indicator now lists its running services and count on hover.
@@ -48,6 +52,36 @@ design fixes and manual verification are complete.
 - **Editor discovery and custom defaults.** Settings discovers installed graphical editors through bounded platform-aware checks, preserves legacy editor commands, and lets users save validated custom editor entries.
 
 ### Changed
+
+- Project headers now use one state-aware group control, showing Start when all services are stopped and Stop while any service is active.
+
+- The Details sidebar is now a transparent inset panel, with editor, folder, browser, and icon-only Edit actions grouped in its header and no header separator.
+
+- Terminal actions float without a surrounding card inside the panel's top-right corner. Narrower tabs use the full row width with a custom square, arrowless 5px accent-coloured scrollbar overlaid just inside the panel below the tab border on hover or keyboard focus, leaving no gap above the terminal and remaining independent of system scrollbar appearance.
+
+- The central toolbar now sits in an inset panel instead of above a full-width divider, and the left service-list panel has a fixed Services heading.
+
+- The left sidebar now has two transparent inset panels: controls and filters above a separately scrolling service list, with the darker app background showing through and borders and spacing matching the terminal panels.
+
+- Settings and Import now use the shared Muxly checkbox styling. Numeric fields hide native spinner arrows, and textareas omit browser resize handles for consistent form chrome.
+
+- Service-form checkboxes now use custom dark styling, a cyan selected state, an SVG check icon, and a visible keyboard focus ring.
+
+- Service deletion now lives in a labeled section at the end of the scrolling form, leaving Cancel and Save in the fixed footer.
+
+- Service forms now put useful field guidance in information-icon tooltips and omit redundant ID and icon descriptions.
+
+- The commit and push dialog now uses a ghost close-icon button in its header.
+
+- The terminal shell selector now uses a ghost button with a transparent background and subtle hover treatment.
+
+- The shell drawer now uses an inset bordered card and cyan focus outline matching the service terminal panels.
+
+- Resetting all appearance colours now restores and saves the default theme immediately, with an explicit button label and saved confirmation.
+
+- Details inspector labels now use softer sentence-case typography, with a distinct heading and spacing for Run history.
+
+- The editor toolbar control now separates launching the configured editor from opening the editor menu, with a visible divider and independent click targets.
 
 - **Stream mode conceals sensitive terminal output and the bottom shell.** Sensitive logs are excluded from global search, and concealed terminals cannot receive keyboard input or copy selections. Sessions keep processing their original output without resets, preventing split or cursor-positioned PTY output from leaking private paths.
 
@@ -64,6 +98,10 @@ design fixes and manual verification are complete.
 - **Settings temporarily hides both sidebars.** Opening Settings preserves each sidebar's visibility and width and restores them when Settings closes.
 
 ### Fixed
+
+- Restored visible hover feedback for Push and other secondary buttons whose background was overridden by the theme styles.
+
+- Both startup loading stages now display the actual Muxly app logo instead of a simplified placeholder drawing.
 
 - Service search results can be dragged into workspace tabs while sidebar reordering remains disabled during filtering. Whitespace-only searches no longer disable reordering.
 - Sidebar drops target the panel under the pointer, including terminal content, and move already-open services without duplicating terminals.
