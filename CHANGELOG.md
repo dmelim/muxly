@@ -57,7 +57,7 @@ design fixes and manual verification are complete.
 
 - Project headers now use one state-aware group control, showing Start when all services are stopped and Stop while any service is active.
 
-- The Details sidebar is now a transparent inset panel, with editor, folder, browser, and icon-only Edit actions grouped in its header and no header separator.
+- The Details sidebar now names the inspected tab in its header, with editor, folder, browser, and icon-only Edit actions grouped beside it and no header separator.
 
 - Terminal actions float without a surrounding card inside the panel's top-right corner. Narrower tabs use the full row width with a custom square, arrowless 5px accent-coloured scrollbar overlaid just inside the panel below the tab border on hover or keyboard focus, leaving no gap above the terminal and remaining independent of system scrollbar appearance.
 

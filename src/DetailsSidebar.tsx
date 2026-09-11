@@ -2,7 +2,7 @@ import { useMemo } from "react";
 ﻿import type { AppSettings, ServiceConfig, ServiceHistory, ServiceStatus } from "./types";
 import type { EditTarget } from "./appTypes";
 import type { EditorCandidate } from "./types";
-import { formatCommand, redactSensitive } from "./types";
+import { displayServiceName, formatCommand, redactSensitive } from "./types";
 import { Button } from "./Button";
 import { Detail } from "./Detail";
 import { ImportPanel } from "./ImportPanel";
@@ -126,7 +126,7 @@ export function DetailsSidebar({
 
   return (
     <>
-<div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-3"><h2 className="text-sm font-semibold">Details</h2>{selected ? (            <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+<div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-3"><h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{selected ? displayServiceName(selected, streamMode) : "Details"}</h2>{selected ? (            <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
               <Dropdown
                 compact
                 variant="toolbar"
