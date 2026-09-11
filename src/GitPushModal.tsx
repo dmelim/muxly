@@ -6,7 +6,14 @@ import { Dropdown } from "./Dropdown";
 import { CloseIcon } from "./icons";
 
 type Snapshot = {
-  state: { root: string; branch: string; ahead: number; behind: number };
+  state: {
+    root: string;
+    branch: string;
+    ahead: number;
+    behind: number;
+    upstreamRemote: string | null;
+    upstreamBranch: string | null;
+  };
   changes: { path: string; status: string; staged: boolean }[];
   remotes: string[];
   token: string;
@@ -99,7 +106,13 @@ export function GitPushModal({ cwd, onClose, onComplete }: Props) {
 
   const unavailable = busy || loading || !snapshot || !!snapshot.blocked;
   const canCommit = !unavailable && !!message.trim() && !!snapshot?.changes.some((change) => scope === "all" || change.staged);
-  const canPush = !unavailable && !!remote;
+  const hasPushTarget = !unavailable && !!remote;
+  const selectedRemoteIsUpToDate = hasPushTarget
+    && snapshot?.state.upstreamRemote === remote
+    && snapshot.state.upstreamBranch === snapshot.state.branch
+    && snapshot.state.ahead === 0
+    && snapshot.state.behind === 0;
+  const canPush = hasPushTarget && !selectedRemoteIsUpToDate;
 
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-5" onClick={() => { if (!running.current) onClose(); }}>
@@ -183,7 +196,7 @@ export function GitPushModal({ cwd, onClose, onComplete }: Props) {
                 </div>
               </div>
             </fieldset>
-            <p className="text-[11px] text-zinc-500">{scope === "all" ? "All changes stages modified, deleted, and untracked files across this repository. " : "Only staged changes are included in a commit. "}{remote ? `Push sends committed changes to ${remote}/${snapshot.state.branch} and sets it as the upstream branch.` : "Add a remote in your editor or terminal to enable pushing."}</p>
+            <p className="text-[11px] text-zinc-500">{scope === "all" ? "All changes stages modified, deleted, and untracked files across this repository. " : "Only staged changes are included in a commit. "}{selectedRemoteIsUpToDate ? `${remote}/${snapshot.state.branch} is up to date as of the last fetch.` : remote ? `Push sends committed changes to ${remote}/${snapshot.state.branch} and sets it as the upstream branch.` : "Add a remote in your editor or terminal to enable pushing."}</p>
             {snapshot.blocked ? <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{snapshot.blocked}</p> : null}
           </> : loading ? <p className="text-xs text-zinc-400">Loading changes…</p> : <Button onClick={() => { setError(null); void load(); }}>Retry</Button>}
           {result ? <p role="status" className="rounded-md bg-cyan-400/10 px-3 py-2 text-xs text-cyan-300">{result}</p> : null}
@@ -193,7 +206,7 @@ export function GitPushModal({ cwd, onClose, onComplete }: Props) {
           {busy ? <span role="status" className="mr-auto text-xs text-cyan-300">Running Git…</span> : null}
           <Button disabled={!canCommit} onClick={() => void execute("commit")}>Commit</Button>
           <Button disabled={!canPush} onClick={() => void execute("push")}>Push</Button>
-          <Button variant="primary" disabled={!canCommit || !canPush} onClick={() => void execute("commit-push")}>Commit & push</Button>
+          <Button variant="primary" disabled={!canCommit || !hasPushTarget} onClick={() => void execute("commit-push")}>Commit & push</Button>
         </footer>
       </div>
     </div>, document.body

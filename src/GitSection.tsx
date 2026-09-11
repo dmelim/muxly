@@ -15,16 +15,20 @@ type GitState = {
   dirty: boolean;
   ahead: number;
   behind: number;
+  upstreamRemote: string | null;
+  upstreamBranch: string | null;
 };
 
 type GitOverview = {
   state: GitState | null;
   branches: string[];
+  remotes: string[];
 };
 
 export function GitSection({ service, privateMode }: { service: ServiceConfig; privateMode: boolean }) {
   const [state, setState] = useState<GitState | null | undefined>(undefined);
   const [branches, setBranches] = useState<string[]>([]);
+  const [remotes, setRemotes] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,12 +61,14 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
         if (requestIdRef.current !== requestId || currentCwdRef.current !== cwd) return;
         setState(overview.state);
         setBranches(overview.branches);
+        setRemotes(overview.remotes);
         setMessage(null);
       })
       .catch((error) => {
         if (requestIdRef.current !== requestId || currentCwdRef.current !== cwd) return;
         setState(null);
         setBranches([]);
+        setRemotes([]);
         setMessage(error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
@@ -80,6 +86,7 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
     setState(undefined);
     setPushOpen(false);
     setBranches([]);
+    setRemotes([]);
     setMessage(null);
     setBusy(false);
     setRefreshing(false);
@@ -109,6 +116,12 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
 
   const branchLabel = privateMode ? "Private branch" : state.branch;
   const rootLabel = privateMode ? "Private repository" : state.root;
+  const pushIsUpToDate = !state.dirty
+    && state.ahead === 0
+    && state.behind === 0
+    && state.upstreamBranch === state.branch
+    && remotes.length === 1
+    && remotes[0] === state.upstreamRemote;
   const refreshButton = (
     <Tooltip label={refreshing ? "Refreshing repository" : "Refresh repository"} side="top">
       <Button
@@ -168,10 +181,10 @@ export function GitSection({ service, privateMode }: { service: ServiceConfig; p
           variant="secondary"
           size="sm"
           className="w-full"
-          disabled={busy || refreshing || privateMode || state.detached}
+          disabled={busy || refreshing || privateMode || state.detached || pushIsUpToDate}
           onClick={() => setPushOpen(true)}
         >
-          Push{state.ahead > 0 ? ` ↑${state.ahead}` : ""}…
+          {pushIsUpToDate ? "Up to date (last fetched)" : `Push${state.ahead > 0 ? ` ↑${state.ahead}` : ""}…`}
         </Button>
         {privateMode ? <p className="text-[11px] text-zinc-500">Turn off Stream mode to review and publish repository changes.</p> : null}
         {state.detached ? <p className="text-[11px] text-zinc-500">Check out a branch to commit or push.</p> : null}

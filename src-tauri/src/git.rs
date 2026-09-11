@@ -27,6 +27,8 @@ pub struct GitState {
     pub dirty: bool,
     pub ahead: u32,
     pub behind: u32,
+    pub upstream_remote: Option<String>,
+    pub upstream_branch: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,6 +36,7 @@ pub struct GitState {
 pub struct GitOverview {
     pub state: Option<GitState>,
     pub branches: Vec<String>,
+    pub remotes: Vec<String>,
 }
 
 #[derive(Default)]
@@ -48,12 +51,16 @@ pub fn git_overview(app: AppHandle, cwd: String) -> Result<GitOverview, AppError
         return Ok(GitOverview {
             state: None,
             branches: Vec::new(),
+            remotes: Vec::new(),
         });
     };
-    let branches = local_branches(&app, Path::new(&state.root))?;
+    let root = Path::new(&state.root);
+    let branches = local_branches(&app, root)?;
+    let remotes = remotes(&app, root)?;
     Ok(GitOverview {
         state: Some(state),
         branches,
+        remotes,
     })
 }
 
@@ -135,6 +142,39 @@ fn local_branches(app: &AppHandle, root: &Path) -> Result<Vec<String>, AppError>
         .collect())
 }
 
+fn remotes(app: &AppHandle, root: &Path) -> Result<Vec<String>, AppError> {
+    Ok(run_git(app, root, &["remote"])?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+fn upstream(app: &AppHandle, root: &Path, branch: &str) -> Result<(Option<String>, Option<String>), AppError> {
+    let branch_ref = format!("refs/heads/{branch}");
+    let output = run_git(
+        app,
+        root,
+        &[
+            "for-each-ref",
+            "--count=1",
+            "--format=%(upstream:remotename)%00%(upstream:remoteref)",
+            "--",
+            &branch_ref,
+        ],
+    )?;
+    let Some((remote, reference)) = output.trim_end().split_once('\0') else {
+        return Ok((None, None));
+    };
+    let remote = (!remote.is_empty()).then(|| remote.to_string());
+    let branch = reference
+        .strip_prefix("refs/heads/")
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    Ok((remote, branch))
+}
+
 fn inspect(app: &AppHandle, cwd: &Path) -> Result<Option<GitState>, AppError> {
     let root_output = git_command(app, cwd)
         .args(["rev-parse", "--show-toplevel"])
@@ -161,6 +201,11 @@ fn inspect(app: &AppHandle, cwd: &Path) -> Result<Option<GitState>, AppError> {
         let short = run_git(app, Path::new(&root), &["rev-parse", "--short", "HEAD"])?;
         branch = format!("detached @ {}", short.trim());
     }
+    let (upstream_remote, upstream_branch) = if detached {
+        (None, None)
+    } else {
+        upstream(app, root_path, &branch)?
+    };
     Ok(Some(GitState {
         root,
         branch,
@@ -168,6 +213,8 @@ fn inspect(app: &AppHandle, cwd: &Path) -> Result<Option<GitState>, AppError> {
         dirty,
         ahead,
         behind,
+        upstream_remote,
+        upstream_branch,
     }))
 }
 

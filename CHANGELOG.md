@@ -53,6 +53,8 @@ design fixes and manual verification are complete.
 
 ### Changed
 
+- Push actions are now disabled when the selected upstream branch is already synchronized with its last-fetched state, while unpublished branches and alternate remotes remain available.
+
 - Project headers now use one state-aware group control, showing Start when all services are stopped and Stop while any service is active.
 
 - The Details sidebar is now a transparent inset panel, with editor, folder, browser, and icon-only Edit actions grouped in its header and no header separator.
