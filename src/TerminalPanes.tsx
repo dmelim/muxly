@@ -1007,7 +1007,7 @@ function PaneView({
           {running ? (
             <PaneIconButton
               label={status === "stopping" ? "Stopping…" : "Stop"}
-              accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+              accent="text-zinc-200 hover:bg-white/10 hover:text-white"
               disabled={status === "stopping"}
               onClick={onStop}
             >
@@ -1016,7 +1016,7 @@ function PaneView({
           ) : status === "failed" || status === "exited" ? (
             <PaneIconButton
               label="Restart"
-              accent="text-amber-400 hover:bg-amber-500/15 hover:text-amber-300"
+              accent="text-amber-300 hover:bg-amber-500/15 hover:text-amber-200"
               onClick={onStart}
             >
               <RestartIcon className="size-3.5" />
@@ -1024,7 +1024,7 @@ function PaneView({
           ) : (
             <PaneIconButton
               label="Start"
-              accent="text-cyan-400 hover:bg-cyan-500/15 hover:text-cyan-300"
+              accent="text-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-200"
               disabled={status === "running" || status === "starting" || status === "restarting"}
               onClick={onStart}
             >
@@ -1035,8 +1035,8 @@ function PaneView({
             label={`Find in pane (${MOD_KEY}+F)`}
             accent={
               searchOpen
-                ? "text-cyan-400 bg-cyan-500/15 hover:bg-cyan-500/20"
-                : "text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+                ? "text-cyan-300 bg-cyan-500/15 hover:bg-cyan-500/20"
+                : "text-zinc-200 hover:bg-white/10 hover:text-white"
             }
             disabled={concealed}
             onClick={searchOpen ? onCloseSearch : onOpenSearch}
@@ -1045,7 +1045,7 @@ function PaneView({
           </PaneIconButton>
           <PaneIconButton
             label="Clear log"
-            accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+            accent="text-zinc-200 hover:bg-white/10 hover:text-white"
             onClick={onClear}
           >
             <ClearIcon className="size-3.5 rotate-12" />
@@ -1055,7 +1055,7 @@ function PaneView({
               <span className="mx-0.5 h-4 w-px bg-white/10" />
               <PaneIconButton
                 label={`Close (${MOD_KEY}+W)`}
-                accent="text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+                accent="text-zinc-200 hover:bg-white/10 hover:text-white"
                 onClick={onClose}
               >
                 <CloseIcon className="size-3.5" />
@@ -1114,7 +1114,11 @@ function PaneView({
         </span> : <span />}
         {paneActions}
       </div> : null}
-      {!showIdentity ? <div className="absolute right-3 top-2 z-10">{paneActions}</div> : null}
+      {!showIdentity ? (
+        <div className="absolute right-3 top-2 z-10 rounded-md bg-[var(--muxly-bg-surface)]/10 p-1 backdrop-blur-[2px]">
+          {paneActions}
+        </div>
+      ) : null}
       {blocker ? (
         <PortBlockerBanner
           pid={blocker.pid}

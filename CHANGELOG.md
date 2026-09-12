@@ -61,7 +61,7 @@ design fixes and manual verification are complete.
 
 - The Details sidebar now names the inspected tab in its header, with editor, folder, browser, and icon-only Edit actions grouped beside it and no header separator.
 
-- Terminal actions float without a surrounding card inside the panel's top-right corner. Narrower tabs use the full row width with a custom square, arrowless 5px accent-coloured scrollbar overlaid just inside the panel below the tab border on hover or keyboard focus, leaving no gap above the terminal and remaining independent of system scrollbar appearance.
+- Terminal actions float on a borderless, 10%-opaque themed background with a gentle 2px backdrop blur and compact padding inside the panel's top-right corner, letting terminal output remain recognizable behind brighter neutral, cyan, and amber icons. Narrower tabs use the full row width with a custom square, arrowless 5px accent-coloured scrollbar overlaid just inside the panel below the tab border on hover or keyboard focus, leaving no gap above the terminal and remaining independent of system scrollbar appearance.
 
 - The central toolbar now sits in an inset panel instead of above a full-width divider, and the left service-list panel has a fixed Services heading.
 

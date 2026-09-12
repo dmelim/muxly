@@ -207,7 +207,10 @@ scrolling. Drag dividers are a 1.5px hairline (`white/10`) that lights to
 Workspace panels and tabs are separate levels. A panel is one grid cell in the
 terminal layout and owns an ordered tab strip. Only its active tab is visible,
 but inactive terminals remain mounted. Tab-mode terminal controls float inside
-the panel's top-right corner without a surrounding card. Tabs occupy the full row width with a custom
+the panel's top-right corner on a 10%-opaque surface background with a 2px
+backdrop blur, rounded corners, and `p-1` padding, with no outer border. Bright
+neutral icons and stronger cyan/amber accents stay readable over terminal output.
+Tabs occupy the full row width with a custom
 square, arrowless scrollbar revealed on hover or keyboard focus on Windows and macOS.
 The 5px accent-coloured scrollbar overlays the inside of the terminal panel just below the tab-row border, without reserving space between tabs and terminal.
 Tabs use a compact fixed width and truncate
