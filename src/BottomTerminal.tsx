@@ -10,7 +10,7 @@ import { PTY_CLOSED } from "./events";
 import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
 import { TerminalPrivacy } from "./TerminalPrivacy";
-import { setTerminalConcealed } from "./streamPrivacy";
+import { pasteIntoRedactedTerminal, setTerminalConcealed } from "./streamPrivacy";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -27,8 +27,21 @@ const TERMINAL_OPTIONS = {
   scrollback: 5000
 } as const;
 
+function terminalBufferText(terminal: Terminal): string {
+  const buffer = terminal.buffer.active;
+  let text = "";
+  for (let index = 0; index < buffer.length; index += 1) {
+    const line = buffer.getLine(index);
+    if (!line) continue;
+    if (index > 0 && !line.isWrapped) text += "\n";
+    text += line.translateToString(true);
+  }
+  return text;
+}
+
 type BottomTerminalProps = {
   streamMode: boolean;
+  redactStreamOutput: (text: string) => string;
   /** Visible flag — the parent controls open/close so the height transitions
    * happen alongside other layout state, but the terminal mounts only when
    * open so we don't spawn a shell the user never asked for. */
@@ -49,11 +62,12 @@ type BottomTerminalProps = {
  * close/reopen we can buffer output later — for now "close" really means
  * "end this session", matching VS Code's terminal panel behaviour.
  */
-export function BottomTerminal({ open, height, theme, streamMode, onClose, onResizeStart }: BottomTerminalProps) {
+export function BottomTerminal({ open, height, theme, streamMode, redactStreamOutput, onClose, onResizeStart }: BottomTerminalProps) {
   const [shellId, setShellId] = useState("default");
   const [shells, setShells] = useState<Array<{ id: string; label: string }>>([]);
   const [pendingShell, setPendingShell] = useState<string | null>(null);
   const [shellError, setShellError] = useState<string | null>(null);
+  const [streamSnapshot, setStreamSnapshot] = useState("");
   useEffect(() => {
     if (!open) { setPendingShell(null); return; }
     let cancelled = false;
@@ -68,12 +82,20 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const ptyIdRef = useRef<string | null>(null);
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  const redactStreamOutputRef = useRef(redactStreamOutput);
+  redactStreamOutputRef.current = redactStreamOutput;
 
   useLayoutEffect(() => {
-    if (terminalRef.current) setTerminalConcealed(terminalRef.current, streamMode);
-  }, [streamMode, open]);
+    if (terminalRef.current) {
+      setTerminalConcealed(terminalRef.current, streamMode);
+      if (streamMode) {
+        setStreamSnapshot(redactStreamOutput(terminalBufferText(terminalRef.current)));
+      }
+    }
+  }, [redactStreamOutput, streamMode, open]);
 
   useEffect(() => {
     if (terminalRef.current) terminalRef.current.options.theme = xtermTheme(theme);
@@ -92,6 +114,7 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
     // A short random id keeps the backend session keyed independently of any
     // user-facing identifier. Multiple shells could share this code later.
     const ptyId = `shell-${Math.random().toString(36).slice(2, 10)}`;
+    ptyIdRef.current = ptyId;
 
     const terminal = new Terminal({ ...TERMINAL_OPTIONS, theme: xtermTheme(themeRef.current), disableStdin: concealedRef.current });
     terminalRef.current = terminal;
@@ -107,6 +130,11 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
         void invoke("open_url", { url: uri }).catch(() => {});
       })
     );
+    const writeParsedDisposable = terminal.onWriteParsed(() => {
+      if (concealedRef.current) {
+        setStreamSnapshot(redactStreamOutputRef.current(terminalBufferText(terminal)));
+      }
+    });
 
     let disposed = false;
     let resizeObserver: ResizeObserver | null = null;
@@ -208,6 +236,7 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
       resizeObserver?.disconnect();
       closeListener?.();
       onDataCleanup.dispose();
+      writeParsedDisposable.dispose();
       // Wait for the open IPC to settle before closing. Without this chain,
       // a fast open→close toggle can land pty_close on the backend before
       // pty_open has inserted the session — leaving an orphan shell that
@@ -215,6 +244,7 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
       void openPromise.finally(() => invoke("pty_close", { ptyId }).catch(() => {}));
       terminal.dispose();
       terminalRef.current = null;
+      ptyIdRef.current = null;
     };
   }, [open, shellId]);
 
@@ -265,9 +295,23 @@ export function BottomTerminal({ open, height, theme, streamMode, onClose, onRes
         </Tooltip>
         </div>
       </div>
-      {shellError ? <p role="status" className="px-3 pt-2 text-xs text-amber-300">{shellError}</p> : null}
+      {shellError ? <p role="status" className="px-3 pt-2 text-xs text-amber-300">{redactStreamOutput(shellError)}</p> : null}
       <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden p-3">
-        <TerminalPrivacy concealed={streamMode}>
+        <TerminalPrivacy
+          redacted={streamMode}
+          content={streamSnapshot}
+          interactive
+          ariaLabel="Redacted shell output"
+          onData={(data) => {
+            const ptyId = ptyIdRef.current;
+            if (!ptyId) return;
+            void invoke("pty_write", { ptyId, data }).catch(() => {});
+          }}
+          onPaste={(text) => {
+            const terminal = terminalRef.current;
+            if (terminal) pasteIntoRedactedTerminal(terminal, text);
+          }}
+        >
           <div ref={hostRef} className="h-full w-full overflow-hidden" />
         </TerminalPrivacy>
       </div>

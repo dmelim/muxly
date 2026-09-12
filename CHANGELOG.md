@@ -85,7 +85,7 @@ design fixes and manual verification are complete.
 
 - The editor toolbar control now separates launching the configured editor from opening the editor menu, with a visible divider and independent click targets.
 
-- **Stream mode conceals sensitive terminal output and the bottom shell.** Sensitive logs are excluded from global search, and concealed terminals cannot receive keyboard input or copy selections. Sessions keep processing their original output without resets, preventing split or cursor-positioned PTY output from leaking private paths.
+- **Stream mode now preserves the normal working view through redacted terminal mirrors.** Service logs and the bottom shell remain visible, selectable, globally searchable, and interactive while parsed output masks paths, email addresses, external URLs, and configured sensitive identities. Raw xterm sessions keep their scrollback and process state, so leaving Stream mode restores the untouched terminal without a restart or replay.
 
 - Editor controls use product logos and list the default first without an extra badge; Details pairs icon/status and hides absent repositories.
 
@@ -120,7 +120,7 @@ design fixes and manual verification are complete.
 - **Global log search skips unchanged buffers.** Per-service revisions invalidate cached text and matches only when output or privacy settings change, reducing idle search work and repeated text preparation.
 - **Loading project aliases can no longer erase saved profiles and preferences.** Alias synchronization waits for persisted settings to load instead of writing empty startup defaults when services load first.
 - **Panel tab labels now use their full visual height as a click target.** The spacing below a service name is part of the tab button instead of an inert wrapper area.
-- **Stream mode keeps web addresses usable without exposing sensitive identifiers.** Generic path masking skips HTTP and WebSocket URL spans, while sensitive project and service names are still redacted inside URL paths, queries, and fragments.
+- **Stream mode masks external web addresses while keeping local origins recognizable.** External HTTP and WebSocket URLs are replaced, while localhost origins may remain visible with private paths, queries, and fragments removed.
 - **Stream mode path redaction remains compatible with older macOS WebViews.** Absolute-path masking no longer depends on `Array.prototype.at`, which older WKWebView versions may not provide.
 - **Newly sensitive services now redact open terminal panes immediately.** Changing a service's sensitivity invalidates its rendered privacy snapshot so the banner, working directory, command, and existing scrollback cannot remain visible in Stream mode.
 - **Sensitive project and service toggles now respond immediately.** Privacy curation checkboxes and counts update while their changes are persisted, then reconcile with the saved state when the operation finishes.

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 ﻿import type { AppSettings, ServiceConfig, ServiceHistory, ServiceStatus } from "./types";
 import type { EditTarget } from "./appTypes";
 import type { EditorCandidate } from "./types";
-import { displayServiceName, formatCommand, redactSensitive } from "./types";
+import { displayServiceName, formatCommand } from "./types";
 import { Button } from "./Button";
 import { Detail } from "./Detail";
 import { ImportPanel } from "./ImportPanel";
@@ -25,11 +25,9 @@ type Props = {
   // The active profile id (or null) — used to pre-select the profile for a new
   // service created while a profile is active.
   activeProfile: string | null;
-  // When true, sensitive services have their paths/names redacted in this panel
-  // (stream mode), the same as the terminal logs.
+  // When true, this panel follows the same Stream mode policy as terminal logs.
   streamMode: boolean;
-  // Project group name → stable alias, used for the redaction above.
-  projectNameAliases: Record<string, string>;
+  redactStreamOutput: (text: string) => string;
   statuses: Record<string, ServiceStatus>;
   pids: Record<string, number>;
   // The port a running service actually bound to. For an auto-port service this
@@ -58,7 +56,7 @@ export function DetailsSidebar({
   settings,
   activeProfile,
   streamMode,
-  projectNameAliases,
+  redactStreamOutput,
   statuses,
   pids,
   actualPorts,
@@ -114,12 +112,10 @@ export function DetailsSidebar({
     );
   }
 
-  // Redact sensitive paths/names in the read-only detail rows while stream mode
-  // is on, matching the terminal logs. No-op unless the selected service is
-  // flagged sensitive.
-  const alias = selected ? projectNameAliases[groupKey(selected)] ?? "" : "";
-  const redact = (text: string) =>
-    selected ? redactSensitive(text, selected, alias, streamMode) : text;
+  // Match the Stream mode terminal mirror in read-only detail rows. Generic
+  // personal details are redacted for every service; configured sensitive
+  // identities receive the project's private alias as well.
+  const redact = redactStreamOutput;
   const selectedPort = selected ? actualPorts[selected.id] ?? selected.port : null;
   const hasValidPort =
     typeof selectedPort === "number" && Number.isInteger(selectedPort) && selectedPort > 0 && selectedPort <= 65535;
@@ -211,9 +207,7 @@ export function DetailsSidebar({
               </Detail>
               <Detail label="Group">
                 {selected.group
-                  ? streamMode && selected.sensitive && alias
-                    ? alias
-                    : displayProjectName(groupKey(selected))
+                  ? redact(displayProjectName(groupKey(selected)))
                   : "None"}
               </Detail>
               <Detail label="Profile">

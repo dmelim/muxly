@@ -3,7 +3,7 @@ import type { AppSettings, Profile, ServiceConfig, ServiceStatus } from "./types
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import type { EditTarget } from "./appTypes";
-import { formatCommand, redactSensitive } from "./types";
+import { formatCommand } from "./types";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import { ServiceIconBadge } from "./ServiceIconBadge";
@@ -43,6 +43,7 @@ type Props = {
   settings: AppSettings;
   streamMode: boolean;
   projectNameAliases: Record<string, string>;
+  redactStreamOutput: (text: string) => string;
   // Managed profiles + the active selection. The switcher filters the list to
   // the active profile (plus unassigned services); null = "All profiles".
   profiles: Profile[];
@@ -108,6 +109,7 @@ export function ServicesSidebar({
   settings,
   streamMode,
   projectNameAliases,
+  redactStreamOutput,
   profiles,
   activeProfile,
   setActiveProfile,
@@ -648,12 +650,7 @@ export function ServicesSidebar({
                           ) : null}
                         </span>
                         <span className="mt-1 block truncate pl-10 pr-8 font-mono text-xs text-zinc-500">
-                          {redactSensitive(
-                            formatCommand(service),
-                            service,
-                            projectNameAliases[service.group?.trim() || "Ungrouped"] ?? "",
-                            streamMode
-                          )}
+                          {redactStreamOutput(formatCommand(service))}
                         </span>
                         {showConflict ? (
                           <span className="mt-1 block pl-10 pr-8 text-[11px] text-amber-300">

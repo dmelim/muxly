@@ -55,7 +55,7 @@ The file is a **JSON array** of service objects:
 | `usePty`      | boolean               | no       | Spawn the service attached to a pseudo-terminal instead of pipes. Required for dev servers (Vite, WXT, Next, Astro, …) whose hot-reload loop depends on a real TTY. Defaults to `false`. |
 | `preRun`      | string \| null        | no       | Shell prelude run in the *same shell* immediately before the command (`<preRun> && <program> <args…>`), so its env changes carry over — e.g. `nvm use 24.4.0`, `source .venv/bin/activate`. Empty/absent spawns directly. |
 | `profile`     | string \| null        | no       | Id of the profile this service belongs to (see [Settings](#settings) → `profiles`). Absent/empty = unassigned, which shows under every profile. A deleted profile id is treated as unassigned. |
-| `sensitive`   | boolean               | no       | Mask this service's name in the UI while "stream mode" is active, so the window is safe to screen-share. Defaults to `false`. |
+| `sensitive`   | boolean               | no       | Mask this service's identity while Stream mode is active. Its logs remain visible through a redacted mirror. Defaults to `false`. |
 
 Invalid configs (duplicate `id`, empty required fields, `port: 0`) are
 rejected with an error — the previous good config keeps running. All fields

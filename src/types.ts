@@ -38,8 +38,8 @@ export type ServiceConfig = {
   // env changes carry over (e.g. "nvm use 20", "source .venv/bin/activate").
   // Empty/absent = spawn directly. See process::shell on the backend.
   preRun?: string | null;
-  // When true, this service's name is masked while "stream mode" is on (a
-  // Command-palette toggle) so the window is safe to screen-share.
+  // When true, this service's identity is masked while Stream mode is on.
+  // Terminal logs remain visible through the redacted Stream mode mirror.
   sensitive?: boolean;
 };
 
@@ -198,21 +198,13 @@ export function formatCommand(service: ServiceConfig) {
   return [service.program, ...service.args].join(" ");
 }
 
-// How many trailing characters of a sensitive name stay visible while masked,
-// and the cap on how many bullets stand in for the hidden portion (so a very
-// long name doesn't produce an unwieldy run of dots).
-const VISIBLE_SUFFIX = 3;
+// Keep masked names compact without retaining any characters from the private
+// identity. Length is capped so a long name cannot distort tabs or cards.
 const MAX_MASK_BULLETS = 8;
 
-// Mask a sensitive service name, keeping only its last few characters so panes
-// and cards stay distinguishable while the bulk of the name is hidden. Names
-// short enough that the suffix would reveal everything are fully bulleted.
+// Mask a sensitive service name without retaining a reversible suffix.
 export function maskSensitiveName(name: string): string {
-  if (name.length <= VISIBLE_SUFFIX) {
-    return "•".repeat(Math.max(name.length, 1));
-  }
-  const hidden = Math.min(name.length - VISIBLE_SUFFIX, MAX_MASK_BULLETS);
-  return "•".repeat(hidden) + name.slice(-VISIBLE_SUFFIX);
+  return "•".repeat(Math.max(3, Math.min(name.length, MAX_MASK_BULLETS)));
 }
 
 // The name to display for a service given the current stream-mode state. Masks
@@ -245,59 +237,100 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Web URLs are operational output and must stay usable in Stream mode. Generic
-// absolute-path detection runs only outside URL spans so it cannot corrupt an
-// address. Explicit sensitive-name replacement still runs across the complete
-// string, including URL paths, queries, and fragments.
-function transformOutsideWebUrls(
-  text: string,
-  transform: (plainText: string) => string
-): string {
-  const webUrl = /\b(?:https?|wss?):\/\/[^\s\x1b]+/gi;
-  let result = "";
-  let cursor = 0;
-
-  for (const match of text.matchAll(webUrl)) {
-    const index = match.index ?? cursor;
-    result += transform(text.slice(cursor, index));
-    result += match[0];
-    cursor = index + match[0].length;
+function replacePrivateIdentity(text: string, identity: string, replacement: string): string {
+  const name = identity.trim();
+  if (!name) return text;
+  if (name.length > 2) {
+    return text.replace(new RegExp(escapeRegExp(name), "gi"), () => replacement);
   }
-
-  return result + transform(text.slice(cursor));
+  const bounded = new RegExp(
+    `(^|[^\\p{L}\\p{N}_])${escapeRegExp(name)}(?=$|[^\\p{L}\\p{N}_])`,
+    "giu"
+  );
+  return text.replace(bounded, (_match, prefix) => `${prefix}${replacement}`);
 }
 
-// Names short enough that aliasing them risks matching unrelated substrings in
-// log output (e.g. a 2-letter project name inside ordinary words) are left
-// alone — the path redaction still covers their directory.
-const MIN_REDACTED_NAME = 3;
+function streamUrlLabel(raw: string): string {
+  try {
+    const url = new URL(raw);
+    const local = url.hostname === "localhost"
+      || url.hostname === "127.0.0.1"
+      || url.hostname === "::1"
+      || url.hostname === "[::1]";
+    if (!local) return "[external URL]";
+    const path = url.pathname !== "/" || url.search || url.hash ? "/[private path]" : "";
+    return `${url.protocol}//${url.host}${path}`;
+  } catch {
+    return "[URL]";
+  }
+}
 
-// Hide the host/user-identifying parts of text emitted by a sensitive service:
-//   • filesystem paths under its working directory collapse to the project
-//     alias, keeping only the drive/root (`C:\work\diethos\app` →
-//     `C:\alpha-tango-sierra-42\app`). Every path segment can identify the
-//     user, so the whole body between root and alias is hidden while a child
-//     path keeps its generic tail.
-//   • the project (group) and service names are replaced by the same alias, so
-//     a leak like `> diethos@0.1.0 dev` becomes `> alpha-tango-sierra-42@0.1.0`.
-// localhost, URLs, ports, and relative paths are never matched — they neither
-// start with the cwd nor equal a name.
-//
-// Applied at display time only (raw logs stay verbatim), mirroring how
-// `displayServiceName` masks names. Gated on stream mode and the `sensitive`
-// flag so it's a no-op in the common case.
+export function redactStreamText(text: string, streamMode: boolean): string {
+  if (!streamMode) return text;
+  return text
+    .replace(/\b(?:https?|wss?):\/\/[^\s\x1b]+/gi, streamUrlLabel)
+    .replace(/\bfile:\/\/[^\s\x1b]+/gi, "[private path]")
+    .replace(/([A-Za-z]:[\\/]Users[\\/])[^\\/\r\n]+(?=[\\/])/gi, "$1[private]")
+    .replace(/(\/(?:home|Users)\/)[^/\r\n]+(?=\/)/g, "$1[private]")
+    .replace(/(["'])(?:[A-Za-z]:[\\/][^"'\r\n]+|\\\\[^"'\r\n]+|\/[^"'\r\n]+)\1/g, "$1[private path]$1")
+    .replace(/\\\\[^\s\\/]+[\\/][^\s"'<>|]+/g, "[network path]")
+    .replace(/[A-Za-z]:[\\/][^\s"'<>|\x1b]+/g, "[private path]")
+    .replace(/(^|[\s=(])~[\\/][^\s"'<>|\x1b]+/gm, "$1[private path]")
+    .replace(/(^|[\s=(:>$])\/(?!\/)[^\s"'<>|\x1b]+/gm, "$1[private path]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email]")
+    .replace(/(^|\n)[A-Z0-9._-]+@[A-Z0-9._-]+(?=[:\s])/gi, "$1[local identity]");
+}
+
+/** Apply every configured private identity before the generic Stream filter. */
+export function redactStreamWorkspaceText(
+  text: string,
+  services: readonly ServiceConfig[],
+  projectNameAliases: Record<string, string>,
+  sensitiveProjectNames: Record<string, boolean>,
+  streamMode: boolean
+): string {
+  if (!streamMode) return text;
+
+  const replacements = new Map<string, string>();
+  for (const [groupName, sensitive] of Object.entries(sensitiveProjectNames)) {
+    if (sensitive) {
+      replacements.set(groupName.toLowerCase(), projectNameAliases[groupName]?.trim() || "private-project");
+    }
+  }
+  for (const service of services) {
+    if (!service.sensitive) continue;
+    const groupName = service.group?.trim() || "Ungrouped";
+    const replacement = projectNameAliases[groupName]?.trim() || "private-service";
+    replacements.set(service.name.toLowerCase(), replacement);
+    if (service.group?.trim()) replacements.set(service.group.trim().toLowerCase(), replacement);
+  }
+
+  let out = text;
+  const identities = [...replacements.entries()].sort((left, right) => right[0].length - left[0].length);
+  for (const [identity, replacement] of identities) {
+    out = replacePrivateIdentity(out, identity, replacement);
+  }
+  return redactStreamText(out, true);
+}
+
+// Stream mode is a display transform. Raw configuration, process data and log
+// buffers remain untouched. Generic personal identifiers are removed from all
+// services; configured group/service identities are additionally replaced
+// when that service is marked sensitive.
 export function redactSensitive(
   text: string,
   service: ServiceConfig,
   alias: string,
   streamMode: boolean
 ): string {
-  if (!streamMode || !service.sensitive) return text;
+  if (!streamMode) return text;
 
   // Privacy must not depend on alias generation having completed. A missing
   // alias can happen briefly while settings/services are loading, and showing
   // the raw value during that gap would make Stream mode fail open.
-  const safeAlias = alias.trim() || "private-project";
+  const safeAlias = service.sensitive
+    ? alias.trim() || "private-project"
+    : "private-path";
 
   const pairs: Array<{ needle: string; replacement: string }> = [];
 
@@ -319,15 +352,17 @@ export function redactSensitive(
     }
   }
 
-  // The real group and service names, deduped case-insensitively.
+  // The real group and service names, deduped case-insensitively. Short names
+  // use token boundaries so an identity such as "db" does not alter words.
   const seen = new Set<string>();
-  for (const raw of [service.group, service.name]) {
+  for (const raw of service.sensitive ? [service.group, service.name] : []) {
     const name = raw?.trim();
-    if (!name || name.length < MIN_REDACTED_NAME) continue;
+    if (!name) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    pairs.push({ needle: name, replacement: safeAlias });
+    if (name.length <= 2) text = replacePrivateIdentity(text, name, safeAlias);
+    else pairs.push({ needle: name, replacement: safeAlias });
   }
 
   // Longest needles first so a child path keeps its tail, a replaced prefix is
@@ -340,32 +375,5 @@ export function redactSensitive(
     out = out.replace(new RegExp(escapeRegExp(needle), "gi"), () => replacement);
   }
 
-  // Commands can live outside the service cwd (NVM, Homebrew, Python venvs,
-  // user-local package managers). Collapse every remaining absolute path to a
-  // stable private root while keeping the basename useful. Quoted paths are
-  // handled first so spaces stay inside the match; unquoted forms cover normal
-  // command output in both Windows separator styles and POSIX syntax.
-  const maskPath = (path: string) => {
-    const parsedPath = parseAbsolutePath(path);
-    if (!parsedPath || parsedPath.segments.length === 0) return path;
-    const separator = path.includes("\\") ? "\\" : "/";
-    // Indexed access keeps Stream mode working on older WKWebView versions
-    // that predate Array.prototype.at.
-    const basename = parsedPath.segments[parsedPath.segments.length - 1] ?? "";
-    const root = parsedPath.base ? `${parsedPath.base}${separator}` : separator;
-    return `${root}${safeAlias}${basename && basename !== safeAlias ? `${separator}${basename}` : ""}`;
-  };
-
-  // Match quoted and unquoted paths in one pass: a quoted filename may contain
-  // spaces, so processing the masked result again would split that filename.
-  out = transformOutsideWebUrls(out, (plainText) => plainText.replace(
-    /(["'])([A-Za-z]:[\\/][^"'\r\n]+|\/[^"'\r\n]+)\1|([A-Za-z]:[\\/][^\s"'<>|\x1b]+)|(^|[\s=(])(\/(?!\/)[^\s"'<>|\x1b]+)/gm,
-    (_match, quote, quotedPath, windowsPath, prefix, posixPath) => {
-      if (quotedPath) return `${quote}${maskPath(quotedPath)}${quote}`;
-      if (windowsPath) return maskPath(windowsPath);
-      return `${prefix}${maskPath(posixPath)}`;
-    }
-  ));
-
-  return out;
+  return redactStreamText(out, true);
 }

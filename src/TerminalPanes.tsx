@@ -18,7 +18,7 @@ import { xtermTheme } from "./theme";
 import { fuzzySearchPattern } from "./search";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { TerminalPrivacy } from "./TerminalPrivacy";
-import { isServiceOutputHidden, setTerminalConcealed } from "./streamPrivacy";
+import { pasteIntoRedactedTerminal, setTerminalConcealed } from "./streamPrivacy";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -57,15 +57,29 @@ const TERMINAL_OPTIONS = {
 
 const EMPTY_WORKSPACE_DROP_TARGET = "__empty_workspace__";
 
+function terminalBufferText(terminal: Terminal): string {
+  const buffer = terminal.buffer.active;
+  let text = "";
+  for (let index = 0; index < buffer.length; index += 1) {
+    const line = buffer.getLine(index);
+    if (!line) continue;
+    if (index > 0 && !line.isWrapped) text += "\n";
+    text += line.translateToString(true);
+  }
+  return text;
+}
+
 type TerminalPanesProps = {
   /** Services shown as panes, left-to-right. */
   paneServices: ServiceConfig[];
   /** The focused pane's service id — drives the toolbar/inspector. */
   focusedId: string | null;
-  /** Conceals sensitive output and masks service names. */
+  /** Shows redacted terminal mirrors and masks sensitive service names. */
   streamMode: boolean;
   /** Project group name → stable alias for masked UI labels. */
   projectNameAliases: Record<string, string>;
+  /** Current workspace-wide Stream mode display transform. */
+  redactStreamOutput: (text: string) => string;
   statuses: Record<string, ServiceStatus>;
   /** Live PIDs, keyed by service id — a present pid means the process runs. */
   pids: Record<string, number>;
@@ -126,6 +140,7 @@ export function TerminalPanes({
   focusedId,
   streamMode,
   projectNameAliases,
+  redactStreamOutput,
   statuses,
   pids,
   gridColumns,
@@ -479,6 +494,7 @@ export function TerminalPanes({
                 service={service}
                 streamMode={streamMode}
                 alias={projectNameAliases[groupKey(service)] ?? ""}
+                redactStreamOutput={redactStreamOutput}
                 status={statuses[service.id] ?? "stopped"}
                 running={pids[service.id] != null || adoptedPids[service.id] != null}
                 awaitingOutput={awaitingOutput[service.id] ?? false}
@@ -697,11 +713,11 @@ function StartHealthNotice({ startHealth }: { startHealth: StartHealth }) {
 
 type PaneViewProps = {
   service: ServiceConfig;
-  /** When true and the service is sensitive, its name is masked in the header. */
+  /** When true, output is mirrored with redaction and sensitive names are masked. */
   streamMode: boolean;
-  /** Stable alias for this service's project group — substituted for sensitive
-   * paths in the banner and replayed scrollback while stream mode is on. */
+  /** Stable alias for this service's project group, used by Stream mode. */
   alias: string;
+  redactStreamOutput: (text: string) => string;
   status: ServiceStatus;
   /** True while the process has a live PID — gates the Stop button. */
   running: boolean;
@@ -742,6 +758,7 @@ function PaneView({
   service,
   streamMode,
   alias,
+  redactStreamOutput,
   status,
   running,
   awaitingOutput,
@@ -774,7 +791,7 @@ function PaneView({
   // the flicker: if the observer watched the same element xterm draws into,
   // `fit()` would perturb that element's box and re-trigger the observer in a
   // self-sustaining loop.
-  const concealed = isServiceOutputHidden(service, streamMode);
+  const concealed = streamMode;
   const concealedRef = useRef(concealed);
   concealedRef.current = concealed;
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -782,13 +799,20 @@ function PaneView({
   // The SearchAddon is held in state (not just a ref) so the PaneSearchBar
   // re-renders once it becomes available after the deferred terminal open.
   const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
+  const [streamSnapshot, setStreamSnapshot] = useState("");
   // The deferred terminal setup reads current privacy state through refs.
   const streamModeRef = useRef(streamMode);
   streamModeRef.current = streamMode;
   // Keep the readiness key current during deferred setup.
   const aliasRef = useRef(alias);
   aliasRef.current = alias;
+  const redactStreamOutputRef = useRef(redactStreamOutput);
+  redactStreamOutputRef.current = redactStreamOutput;
   const renderedPrivacyRef = useRef<string | null>(null);
+
+  const updateStreamSnapshot = useCallback((terminal: Terminal) => {
+    setStreamSnapshot(redactStreamOutputRef.current(terminalBufferText(terminal)));
+  }, []);
 
   const renderSnapshot = useCallback(
     (terminal: Terminal, nextStreamMode: boolean, nextAlias: string) => {
@@ -805,13 +829,14 @@ function PaneView({
       ].join("");
 
       terminal.write(snapshot, () => {
+        if (streamModeRef.current) updateStreamSnapshot(terminal);
         if (renderedPrivacyRef.current === null) {
           renderedPrivacyRef.current = key;
           onPrivacyRendered(service.id, key);
         }
       });
     },
-    [logsRef, onPrivacyRendered, onPrivacySnapshotStart, service]
+    [logsRef, onPrivacyRendered, onPrivacySnapshotStart, service, updateStreamSnapshot]
   );
 
   // One terminal per pane, created once. The pane is keyed by service id in the
@@ -861,6 +886,9 @@ function PaneView({
     // already encoded with the right control sequences; the PTY echoes input
     // back through the normal output stream, so we don't echo locally.
     let dataDisposable: { dispose: () => void } | null = null;
+    const writeParsedDisposable = terminal.onWriteParsed(() => {
+      if (streamModeRef.current) updateStreamSnapshot(terminal);
+    });
     if (isPty) {
       terminal.attachCustomKeyEventHandler((event) => {
         if (concealedRef.current) return false;
@@ -952,6 +980,7 @@ function PaneView({
       cancelAnimationFrame(fitRaf);
       resizeObserver?.disconnect();
       dataDisposable?.dispose();
+      writeParsedDisposable.dispose();
       terminalsRef.current.delete(service.id);
       setSearchAddon(null);
       terminal.dispose();
@@ -959,18 +988,19 @@ function PaneView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Conceal in the React commit and revoke selection/input before paint.
-  // No reset or replay: ConPTY state and queued raw writes stay intact.
+  // Switch to the redacted mirror in the React commit before paint. No reset
+  // or replay: ConPTY state and queued raw writes stay intact underneath.
   useLayoutEffect(() => {
     const terminal = terminalsRef.current.get(service.id);
     if (!terminal) return;
     setTerminalConcealed(terminal, concealed);
+    if (streamMode) updateStreamSnapshot(terminal);
     const key = privacySnapshotKey(service, streamMode, alias);
     if (renderedPrivacyRef.current !== key) {
       renderedPrivacyRef.current = key;
       onPrivacyRendered(service.id, key);
     }
-  }, [alias, concealed, onPrivacyRendered, searchAddon, service, streamMode, terminalsRef]);
+  }, [alias, concealed, onPrivacyRendered, redactStreamOutput, searchAddon, service, streamMode, terminalsRef, updateStreamSnapshot]);
 
   const paneActions = (
 <span className="flex shrink-0 items-center gap-0.5">
@@ -1094,7 +1124,21 @@ function PaneView({
         />
       ) : null}
       <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3">
-        <TerminalPrivacy concealed={concealed}>
+        <TerminalPrivacy
+          redacted={concealed}
+          content={streamSnapshot}
+          interactive={Boolean(service.usePty)}
+          ariaLabel={`${displayServiceName(service, streamMode)} redacted terminal output`}
+          onData={(data) => {
+            void invoke("service_pty_write", { serviceId: service.id, data }).catch(() => {
+              /* stopped or session gone */
+            });
+          }}
+          onPaste={(text) => {
+            const terminal = terminalsRef.current.get(service.id);
+            if (terminal) pasteIntoRedactedTerminal(terminal, text);
+          }}
+        >
           <div ref={hostRef} className="h-full w-full overflow-hidden" />
         </TerminalPrivacy>
         {startHealth ? (

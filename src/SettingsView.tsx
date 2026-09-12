@@ -818,7 +818,7 @@ export function SettingsView({
           <Section
             title="Sensitive services"
             visible={sectionVisible("Sensitive services")}
-            description="Mark projects and services as sensitive. While Stream mode is on (command palette — Ctrl/Cmd+P), every sensitive project and service name is hidden; This list masks those names too while Stream mode is on — use the eye button to reveal them temporarily so you can keep editing."
+            description="Mark project and service identities as sensitive. Stream mode keeps logs visible while masking common personal details and these selected names. This list masks them too; use the eye button to reveal names temporarily while editing."
             searchQuery={settingsQuery}
             keywords={SETTINGS_SEARCH_METADATA["Sensitive services"]}
           >

@@ -6,12 +6,13 @@ import type { RuntimeRequirementReport } from "./types";
 
 type Props = {
   report: RuntimeRequirementReport;
+  redact: (text: string) => string;
   onActivate: (path: string) => Promise<void>;
   onRecheck: () => Promise<void>;
   onClose: () => void;
 };
 
-export function RuntimeRequirements({ report, onActivate, onRecheck, onClose }: Props) {
+export function RuntimeRequirements({ report, redact, onActivate, onRecheck, onClose }: Props) {
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [rechecking, setRechecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,11 +93,11 @@ export function RuntimeRequirements({ report, onActivate, onRecheck, onClose }: 
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-sm font-medium text-zinc-200">{issue.runtime}</h3>
                       <code className="rounded bg-black/25 px-1.5 py-0.5 text-[11px] text-zinc-400">
-                        {issue.executable}
+                        {redact(issue.executable)}
                       </code>
                     </div>
                     <p className="mt-1 text-xs leading-5 text-zinc-500">
-                      Required by {issue.serviceNames.join(", ")}
+                      Required by {redact(issue.serviceNames.join(", "))}
                     </p>
                   </div>
                   <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300">
@@ -138,7 +139,7 @@ export function RuntimeRequirements({ report, onActivate, onRecheck, onClose }: 
               <p className="text-[10px] uppercase tracking-[0.14em] text-cyan-300">Session fallbacks active</p>
               {report.activeFallbackPaths.map((path) => (
                 <code key={path} className="mt-1 block break-all text-[11px] text-zinc-400">
-                  {path}
+                  {redact(path)}
                 </code>
               ))}
             </div>
@@ -146,7 +147,7 @@ export function RuntimeRequirements({ report, onActivate, onRecheck, onClose }: 
 
           {error ? (
             <p className="mt-4 rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-              {error}
+              {redact(error)}
             </p>
           ) : null}
         </div>

@@ -233,6 +233,23 @@ Thin, dark, custom (`scrollbar-width: thin`, 10px webkit fallback). Track
 transparent; thumb `white/14`, `white/28` on hover. No arrow buttons. xterm's
 horizontal scrollbar is hidden — terminal output wraps.
 
+### Stream mode
+
+Stream mode is an in-place audience filter, not a separate workspace. The
+normal service layout, status, controls, logs, and bottom shell stay visible so
+the operator can continue working while sharing the Muxly window.
+
+Each terminal keeps its raw xterm instance mounted for ANSI parsing, cursor
+movement, process state, and scrollback. Before paint, Stream mode hides that raw
+surface and shows a selectable plain-text mirror built from xterm's parsed
+buffer. The mirror masks absolute and home-relative paths, email addresses,
+external URLs, and configured sensitive identities. PTY mirrors forward
+keyboard and paste input to the existing process. Turning Stream mode off
+reveals the untouched terminal again without restarting or replaying it.
+
+Sensitive service and project labels must fail closed while aliases load. Use a
+generic private label rather than briefly displaying the real identity.
+
 ## Motion
 
 Motion is minimal and fast. Colour/opacity transitions ~100–150ms. Tooltips

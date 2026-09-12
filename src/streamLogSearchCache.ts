@@ -1,26 +1,21 @@
 import type { ServiceConfig } from "./types";
-import { displayServiceName } from "./types";
 import { LogSearchCache, type ServiceHits } from "./logSearchCache";
-import { isServiceOutputHidden } from "./streamPrivacy";
 
-/** Privacy gate before the text cache: concealed logs are never indexed. */
+/** Search only the display-time representation while Stream mode is active. */
 export class StreamLogSearchCache {
   private cache = new LogSearchCache();
-  private visible = new Set<string>();
+  private redactor: ((text: string) => string) | null = null;
 
   retain(serviceIds: Set<string>) {
-    for (const id of this.visible) if (!serviceIds.has(id)) this.visible.delete(id);
-    this.cache.retain(this.visible);
+    this.cache.retain(serviceIds);
   }
 
   search(service: ServiceConfig, chunks: string[], revision: number, query: string,
-    alias: string, streamMode: boolean): ServiceHits {
-    if (isServiceOutputHidden(service, streamMode)) {
-      this.visible.delete(service.id);
-      this.cache.retain(this.visible);
-      return { serviceId: service.id, serviceName: displayServiceName(service, true), hits: [], total: 0 };
+    alias: string, streamMode: boolean, redactStreamOutput: (text: string) => string): ServiceHits {
+    if (this.redactor !== redactStreamOutput) {
+      this.cache = new LogSearchCache();
+      this.redactor = redactStreamOutput;
     }
-    this.visible.add(service.id);
-    return this.cache.search(service, chunks, revision, query, alias, streamMode);
+    return this.cache.search(service, chunks, revision, query, alias, streamMode, redactStreamOutput);
   }
 }

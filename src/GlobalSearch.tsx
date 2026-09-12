@@ -11,9 +11,10 @@ type Props = {
   /** Snapshot of per-service log chunks (logsRef.current). */
   logs: Record<string, string[]>;
   logRevisions: Record<string, number>;
-  /** When true, sensitive services show a masked name (stream mode). */
+  /** When true, results use the workspace Stream mode display transform. */
   streamMode: boolean;
   projectNameAliases: Record<string, string>;
+  redactStreamOutput: (text: string) => string;
   onJump: (serviceId: string, query: string) => void;
   onClose: () => void;
 };
@@ -28,6 +29,7 @@ export function GlobalSearch({
   logRevisions,
   streamMode,
   projectNameAliases,
+  redactStreamOutput,
   onJump,
   onClose
 }: Props) {
@@ -72,11 +74,11 @@ export function GlobalSearch({
     for (const service of services) {
       const result = cacheRef.current.search(service, logs[service.id] ?? [],
         logRevisions[service.id] ?? 0, needle,
-        projectNameAliases[groupKey(service)] ?? "", streamMode);
+        projectNameAliases[groupKey(service)] ?? "", streamMode, redactStreamOutput);
       if (result.total > 0) out.push(result);
     }
     return out;
-  }, [query, services, logs, logRevisions, tick, streamMode, projectNameAliases]);
+  }, [query, services, logs, logRevisions, tick, streamMode, projectNameAliases, redactStreamOutput]);
 
   const totalMatches = results.reduce((sum, result) => sum + result.total, 0);
   const trimmed = query.trim();
@@ -105,8 +107,8 @@ export function GlobalSearch({
                   results.length
                 } service${results.length === 1 ? "" : "s"}`}
           </p>
-          {streamMode && services.some((service) => service.sensitive) ? (
-            <p className="mt-1.5 px-1 text-[11px] text-zinc-500">Sensitive service logs are excluded in Stream mode.</p>
+          {streamMode ? (
+            <p className="mt-1.5 px-1 text-[11px] text-zinc-500">Results use privacy-filtered stored logs; pane highlighting is unavailable in Stream mode.</p>
           ) : null}
         </div>
 

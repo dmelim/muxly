@@ -18,7 +18,7 @@ import type {
   WorkspacePanel
 } from "./types";
 import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } from "./events";
-import { formatCommand, displayServiceName, redactSensitive } from "./types";
+import { formatCommand, displayServiceName, redactStreamWorkspaceText } from "./types";
 import { CommandPalette } from "./CommandPalette";
 import type { Command } from "./CommandPalette";
 import { ProfilePrompt } from "./ProfilePrompt";
@@ -276,9 +276,9 @@ export function App() {
   // Command palette (Ctrl/Cmd+P). A lightweight registry of named actions.
   const [commandOpen, setCommandOpen] = useState(false);
   const [profilePromptOpen, setProfilePromptOpen] = useState(false);
-  // Stream mode: when on, services flagged `sensitive` have their names masked
-  // across the UI so the window is safe to screen-share. Ephemeral (session
-  // only) — toggled from the command palette, restored when you toggle it off.
+  // Stream mode keeps the normal workspace usable while replacing personal
+  // details in labels and terminal output. Ephemeral (session only), toggled
+  // from the command palette and restored immediately when turned off.
   const [streamMode, setStreamMode] = useState(false);
   // Drag-to-reorder state. `dragId` is the service currently being dragged;
   // `dropIndicator` is where the cyan "drop here" line / highlight is shown.
@@ -380,17 +380,27 @@ export function App() {
     () => ensureProjectAliases(groupNames, settings),
     [groupNames, settings]
   );
+  const redactWorkspaceText = useCallback(
+    (text: string) => redactStreamWorkspaceText(
+      text,
+      services,
+      projectNameAliases,
+      settings.sensitiveProjectNames,
+      streamMode
+    ),
+    [projectNameAliases, services, settings.sensitiveProjectNames, streamMode]
+  );
   const searchedServices = useMemo(() => {
     const query = serviceQuery.trim();
     if (!query) return visibleServices;
     return visibleServices.filter((service) => {
       const alias = projectNameAliases[groupKey(service)] ?? "";
-      const values = streamMode && service.sensitive
-        ? [displayServiceName(service, true), alias, redactSensitive(formatCommand(service), service, alias, true)]
+      const values = streamMode
+        ? [displayServiceName(service, true), alias, redactWorkspaceText(formatCommand(service))]
         : [service.name, service.id, service.group ?? "", service.program, ...service.args];
       return fuzzySearchMatches(query, values);
     });
-  }, [projectNameAliases, serviceQuery, streamMode, visibleServices]);
+  }, [projectNameAliases, redactWorkspaceText, serviceQuery, streamMode, visibleServices]);
   const groupedServices = useMemo(
     () =>
       groupServices(searchedServices).sort(
@@ -413,7 +423,7 @@ export function App() {
     (groupName: string) =>
       settings.hiddenProjectNames[groupName] ||
       (streamMode && settings.sensitiveProjectNames[groupName])
-        ? projectNameAliases[groupName] ?? groupName
+        ? projectNameAliases[groupName] ?? "Private project"
         : groupName,
     [projectNameAliases, settings.hiddenProjectNames, settings.sensitiveProjectNames, streamMode]
   );
@@ -1624,7 +1634,8 @@ export function App() {
     logsRef.current[serviceId] = chunks;
     logRevisionsRef.current[serviceId] = (logRevisionsRef.current[serviceId] ?? 0) + 1;
     // Preserve the terminal protocol, including split escapes and cursor positions.
-    // Stream mode conceals sensitive hosts instead of editing individual writes.
+    // Stream mode derives its redacted mirror from xterm's parsed buffer instead
+    // of editing individual writes.
     // Buffer the live write and flush it next frame (see pendingWritesRef).
     // Only buffer when a pane is actually showing this service; otherwise the
     // pane-mount replay from logsRef already covers it, and buffering here
@@ -2308,7 +2319,7 @@ export function App() {
     const next = !streamModeRef.current;
 
     // Keep queued raw writes intact: privacy changes must not lose output or
-    // split terminal control sequences. The host is concealed before paint.
+    // split terminal control sequences. The raw host is hidden before paint.
     streamModeRef.current = next;
     setStreamMode(next);
   }, []);
@@ -2455,7 +2466,7 @@ export function App() {
     }
   }, [closePane, movePanelTab, setActiveProfile, toggleGroupCollapsed]);
 
-  // Display name for a service, masked when stream mode is on and the service
+  // Display name for a service, masked when Stream mode is on and the service
   // is flagged sensitive. Used everywhere a service name is shown as UI chrome.
   const maskName = useCallback(
     (service: ServiceConfig) => displayServiceName(service, streamMode),
@@ -2463,8 +2474,8 @@ export function App() {
   );
 
   // Registry backing the command palette. Small and declarative; the headline
-  // action is stream-mode (mask sensitive names for screen-sharing), with a few
-  // common toggles alongside so the palette is useful on its own.
+  // action is Stream mode, with a few common toggles alongside so the palette
+  // is useful on its own.
   const sensitiveCount = useMemo(
     () => services.filter((service) => service.sensitive).length,
     [services]
@@ -2473,13 +2484,11 @@ export function App() {
     () => [
       {
         id: "stream-mode",
-        title: streamMode
-          ? "Stream mode: show sensitive output"
-          : "Stream mode: hide sensitive output",
+        title: streamMode ? "Turn off Stream mode" : "Turn on Stream mode",
         subtitle:
           sensitiveCount === 0
-            ? "Hides the shell. Mark services sensitive to hide their output too."
-            : `Hides output for ${sensitiveCount} sensitive service${sensitiveCount === 1 ? "" : "s"} and the shell`,
+            ? "Keep logs usable while masking paths, emails, and external URLs"
+            : `Keep logs usable while masking personal details and ${sensitiveCount} sensitive service name${sensitiveCount === 1 ? "" : "s"}`,
         badge: streamMode ? "On" : "Off",
         keywords: "stream privacy mask hide sensitive screen share present demo record",
         run: toggleStreamMode
@@ -2810,7 +2819,7 @@ export function App() {
     >
       <ServicesSidebar
         open={effectiveLeftSidebarOpen}
-        managerMessage={managerMessage}
+        managerMessage={redactWorkspaceText(managerMessage)}
         compact={compactSidebar}
         modKey={modKey}
         groupedServices={groupedServices}
@@ -2820,6 +2829,7 @@ export function App() {
         settings={settings}
         streamMode={streamMode}
         projectNameAliases={projectNameAliases}
+        redactStreamOutput={redactWorkspaceText}
         profiles={settings.profiles}
         activeProfile={activeProfile}
         setActiveProfile={setActiveProfile}
@@ -2972,6 +2982,7 @@ export function App() {
             focusedId={selected?.id ?? null}
             streamMode={streamMode}
             projectNameAliases={projectNameAliases}
+            redactStreamOutput={redactWorkspaceText}
             statuses={statuses}
             pids={pids}
             gridColumns={settings.paneGridColumns}
@@ -3023,6 +3034,7 @@ export function App() {
           />
           <BottomTerminal
             streamMode={streamMode}
+            redactStreamOutput={redactWorkspaceText}
             open={terminalOpen}
             height={terminalHeight}
             theme={resolvedTheme}
@@ -3061,7 +3073,7 @@ export function App() {
           settings={settings}
           activeProfile={activeProfile}
           streamMode={streamMode}
-          projectNameAliases={projectNameAliases}
+          redactStreamOutput={redactWorkspaceText}
           statuses={statuses}
           pids={pids}
           actualPorts={actualPorts}
@@ -3113,6 +3125,7 @@ export function App() {
         logRevisions={logRevisionsRef.current}
         streamMode={streamMode}
         projectNameAliases={projectNameAliases}
+        redactStreamOutput={redactWorkspaceText}
         onJump={jumpToSearchResult}
         onClose={() => setSearchOpen(false)}
       />
@@ -3130,6 +3143,7 @@ export function App() {
     {runtimeWarningOpen && runtimeReport && runtimeReport.issues.length > 0 ? (
       <RuntimeRequirements
         report={runtimeReport}
+        redact={redactWorkspaceText}
         onActivate={activateRuntimeFallback}
         onRecheck={() => scanRuntimeRequirements(servicesRef.current).then(() => undefined)}
         onClose={() => setRuntimeWarningOpen(false)}

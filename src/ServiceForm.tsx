@@ -272,7 +272,7 @@ export function ServiceForm({
             onChange={(e) => setDraft({ ...draft, sensitive: e.target.checked })}
             className="mt-0.5"
           /><span className="text-xs font-medium uppercase tracking-wider text-zinc-400">Sensitive name</span></label>
-<FieldHelp label="Sensitive name" hint="Hide the service identity and terminal output while Stream mode is on. Enable Stream mode from the command palette before sharing your screen." />
+<FieldHelp label="Sensitive name" hint="Mask this service's identity while Stream mode is on. Logs stay visible and usable, with private paths and personal details redacted." />
 </div>
 
         {suggestPty ? (

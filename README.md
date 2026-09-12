@@ -37,9 +37,10 @@ Developed by [Diethos](https://diethos.com).
 - **Run history** — total runs, failures, and timing, persisted in SQLite.
 - **Global log search** — search every service's log buffer at once, plus
   in-pane search (`Ctrl/Cmd + F`) within a single terminal's scrollback.
-- **Command palette** — `Ctrl/Cmd + P` runs named actions, including **stream
-  mode**, which masks services flagged sensitive so the window is safe to
-  screen-share or stream.
+- **Command palette** — `Ctrl/Cmd + P` runs named actions, including **Stream
+  mode**, which keeps the normal workspace and logs usable while masking common
+  personal details such as paths, email addresses, external URLs, and services
+  explicitly marked sensitive.
 - **Pseudo-terminal mode** — opt-in `usePty` spawn attaches a service to a real
   PTY so TTY-dependent dev servers (Vite, WXT, Next, …) survive HMR reloads.
 - **Pre-run prelude** — an optional `preRun` command runs in the same shell
