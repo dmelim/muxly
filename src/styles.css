@@ -113,7 +113,10 @@ button {
    strip. */
 .xterm .xterm-viewport {
   background-color: var(--muxly-terminal-bg);
-  overflow-x: hidden;
+  /* xterm 6 retains this legacy viewport with overflow-y: scroll, but its
+     ScrollableElement now owns scrolling. Suppress the empty native track
+     and its Windows arrow buttons without hiding xterm's actual slider. */
+  overflow: hidden;
   border-radius: 6px;
 }
 

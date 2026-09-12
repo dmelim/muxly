@@ -103,6 +103,8 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Suppressed the unused native scrollbar in xterm's legacy viewport, which left stray arrow buttons in terminal corners while xterm's separate scrollbar handled scrolling.
+
 - Restored visible hover feedback for Push and other secondary buttons whose background was overridden by the theme styles.
 
 - Both startup loading stages now display the actual Muxly app logo instead of a simplified placeholder drawing.
