@@ -191,7 +191,7 @@ export function TerminalPrivacy({
           onKeyDown={handleMirrorKeyDown}
           onPaste={handleMirrorPaste}
           data-terminal-mirror
-          className="absolute inset-0 overflow-auto overscroll-contain rounded-md border border-white/10 bg-[var(--muxly-terminal-bg)] p-3 font-mono text-[13px] leading-[1.45] text-zinc-300 outline-none select-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"
+          className="absolute inset-0 overflow-auto overscroll-contain bg-[var(--muxly-terminal-bg)] p-3 font-mono text-[13px] leading-[1.45] text-zinc-300 outline-none select-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"
         >
           {content}
         </pre>

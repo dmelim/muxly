@@ -246,6 +246,8 @@ buffer. The mirror masks absolute and home-relative paths, email addresses,
 external URLs, and configured sensitive identities. PTY mirrors forward
 keyboard and paste input to the existing process. Turning Stream mode off
 reveals the untouched terminal again without restarting or replaying it.
+The mirror inherits the workspace panel boundary and does not draw a second
+inner border or rounded card inside the terminal.
 
 Sensitive service and project labels must fail closed while aliases load. Use a
 generic private label rather than briefly displaying the real identity.

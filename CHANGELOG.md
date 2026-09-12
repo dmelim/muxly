@@ -53,6 +53,8 @@ design fixes and manual verification are complete.
 
 ### Changed
 
+- Stream-mode terminal mirrors now inherit the workspace panel outline instead of drawing a second inner card border.
+
 - Push actions are now disabled when the selected upstream branch is already synchronized with its last-fetched state, while unpublished branches and alternate remotes remain available.
 
 - Project headers now use one state-aware group control, showing Start when all services are stopped and Stop while any service is active.
