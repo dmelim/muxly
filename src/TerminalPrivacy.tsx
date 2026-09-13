@@ -119,7 +119,7 @@ export function TerminalPrivacy({
   }
 
   function handleMirrorKeyDown(event: KeyboardEvent<HTMLPreElement>) {
-    if (!interactive || !onData || event.isComposing) {
+    if (!interactive || !onData || event.nativeEvent.isComposing) {
       return;
     }
 

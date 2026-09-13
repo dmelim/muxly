@@ -103,6 +103,8 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Fixed the terminal mirror's composition-event check so TypeScript builds succeed and composing text is not forwarded prematurely.
+
 - Suppressed the unused native scrollbar in xterm's legacy viewport, which left stray arrow buttons in terminal corners while xterm's separate scrollbar handled scrolling.
 
 - Restored visible hover feedback for Push and other secondary buttons whose background was overridden by the theme styles.
