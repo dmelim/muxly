@@ -1003,7 +1003,12 @@ function PaneView({
   }, [alias, concealed, onPrivacyRendered, redactStreamOutput, searchAddon, service, streamMode, terminalsRef, updateStreamSnapshot]);
 
   const paneActions = (
-<span className="flex shrink-0 items-center gap-0.5">
+        <span
+          className="flex shrink-0 items-center gap-0.5"
+          // Toolbar actions must not count as selecting the service. Start
+          // and restart preserve search expansion through their own handlers.
+          onMouseDown={(event) => event.stopPropagation()}
+        >
           {running ? (
             <PaneIconButton
               label={status === "stopping" ? "Stopping…" : "Stop"}

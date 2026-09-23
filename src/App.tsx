@@ -218,7 +218,12 @@ export function App() {
   >({});
   const [history, setHistory] = useState<Record<string, ServiceHistory>>({});
   const [searchOpen, setSearchOpen] = useState(false);
-  const [serviceQuery, setServiceQuery] = useState("");
+  const [serviceQuery, updateServiceQuery] = useState("");
+  const [searchCollapsedGroups, setSearchCollapsedGroups] = useState<Record<string, boolean>>({});
+  const setServiceQuery = useCallback((query: string) => {
+    updateServiceQuery(query);
+    setSearchCollapsedGroups({});
+  }, []);
   // Service id whose in-pane find bar is currently shown — null when closed.
   // Only one pane shows the bar at a time; switching focus or closing the
   // pane clears it.
@@ -267,7 +272,6 @@ export function App() {
   const [iconImages, setIconImages] = useState<Record<string, string | null>>({});
   // Project collapse state is persisted in settings (see `collapsedProjectNames`)
   // so a minimized project stays minimized across restarts.
-  const collapsedGroups = settings.collapsedProjectNames;
   // The bottom shell drawer. Hidden by default — opened from the header button
   // or with Ctrl/Cmd+↓. Height is user-draggable from a handle on the drawer's
   // top edge; state lives here so it survives toggle/remount of the drawer.
@@ -410,6 +414,16 @@ export function App() {
       ),
     [searchedServices, settings.pinnedProjectNames]
   );
+  // Search expansion is an overlay: clearing it reveals the saved group state.
+  const collapsedGroups = useMemo(() => {
+    if (!serviceQuery.trim()) return settings.collapsedProjectNames;
+    const next = { ...settings.collapsedProjectNames };
+    for (const [groupName] of groupedServices) {
+      next[groupName] = searchCollapsedGroups[groupName] ?? false;
+    }
+    return next;
+  }, [groupedServices, searchCollapsedGroups, serviceQuery, settings.collapsedProjectNames]);
+
   // Mirror into refs so the once-mounted output closure can redact paths with
   // the current values without re-subscribing on every toggle (same pattern as
   // PaneView's streamModeRef).
@@ -441,7 +455,64 @@ export function App() {
   // Below this sidebar width, switch space-hungry controls to compact icons.
   const compactSidebar = leftWidth < 264;
 
+  const persistSettings = useCallback(
+    async (nextSettings: AppSettings) => {
+      const previousSettings = settingsRef.current;
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
+
+      const save = settingsWriteQueueRef.current
+        .catch(() => {
+          /* a failed write must not prevent the next queued save */
+        })
+        .then(() => invoke<AppSettings>("save_settings", { settings: nextSettings }));
+
+      const tracked = save.then(
+        (saved) => {
+          // A later queued update already contains this change. Do not replace
+          // that optimistic state with an older backend response.
+          if (settingsRef.current === nextSettings) {
+            settingsRef.current = saved;
+            setSettings(saved);
+          }
+          return saved;
+        },
+        (error) => {
+          if (settingsRef.current === nextSettings) {
+            settingsRef.current = previousSettings;
+            setSettings(previousSettings);
+          }
+          throw error;
+        }
+      );
+
+      settingsWriteQueueRef.current = tracked.then(
+        () => undefined,
+        () => undefined
+      );
+      return tracked;
+    },
+    []
+  );
+
+
+  const keepSearchGroupOpen = useCallback((serviceId: string) => {
+    if (!serviceQuery.trim()) return;
+    const service = servicesRef.current.find((candidate) => candidate.id === serviceId);
+    if (!service) return;
+    const groupName = groupKey(service);
+    const current = settingsRef.current;
+    if (!current.collapsedProjectNames[groupName]) return;
+    void persistSettings({
+      ...current,
+      collapsedProjectNames: { ...current.collapsedProjectNames, [groupName]: false }
+    }).catch((error) => {
+      console.warn("Failed to keep search project expanded:", errorMessage(error));
+    });
+  }, [persistSettings, serviceQuery]);
+
   const focusPanelTab = useCallback((panelId: string, serviceId: string) => {
+    keepSearchGroupOpen(serviceId);
     setWorkspacePanels((current) =>
       current.map((panel) =>
         panel.id === panelId ? { ...panel, activeTabId: serviceId } : panel
@@ -449,7 +520,7 @@ export function App() {
     );
     setFocusedPanelId(panelId);
     setSelectedId(serviceId);
-  }, []);
+  }, [keepSearchGroupOpen]);
 
   const movePanelTab = useCallback(
     (serviceId: string, targetPanelId: string, requestedTargetIndex: number) => {
@@ -511,6 +582,7 @@ export function App() {
   // Explicit jump actions use the same focused-panel tab behavior as a normal
   // service click rather than destroying the rest of the workspace.
   const openService = useCallback((serviceId: string) => {
+    keepSearchGroupOpen(serviceId);
     if (focusExistingTab(serviceId)) return;
     const panelId = focusedPanelId ?? workspacePanels[0]?.id ?? crypto.randomUUID();
     setWorkspacePanels((current) => {
@@ -531,12 +603,13 @@ export function App() {
     });
     setFocusedPanelId(panelId);
     setSelectedId(serviceId);
-  }, [focusExistingTab, focusedPanelId, workspacePanels]);
+  }, [keepSearchGroupOpen, focusExistingTab, focusedPanelId, workspacePanels]);
 
   // A service dragged from the sidebar opens in the panel it was dropped on.
   // A drop explicitly places the service in the destination panel. Move its
   // existing tab when necessary, preserving the single live xterm instance.
   const openServiceInPanel = useCallback((serviceId: string, targetPanelId: string | null) => {
+    keepSearchGroupOpen(serviceId);
     const existingTarget = targetPanelId
       ? workspacePanelsRef.current.find((panel) => panel.id === targetPanelId)
       : null;
@@ -546,11 +619,12 @@ export function App() {
     setWorkspacePanels(next);
     setFocusedPanelId(panelId);
     setSelectedId(serviceId);
-  }, []);
+  }, [keepSearchGroupOpen]);
 
   // Ctrl/Cmd-click creates a panel. Existing tabs are focused rather than
   // duplicated because one live xterm instance belongs to each service.
   const openInSplit = useCallback((serviceId: string) => {
+    keepSearchGroupOpen(serviceId);
     if (focusExistingTab(serviceId)) return;
     const panelId = crypto.randomUUID();
     setWorkspacePanels((current) => [
@@ -559,9 +633,10 @@ export function App() {
     ]);
     setFocusedPanelId(panelId);
     setSelectedId(serviceId);
-  }, [focusExistingTab]);
+  }, [keepSearchGroupOpen, focusExistingTab]);
 
   const openInExplicitTab = useCallback((serviceId: string) => {
+    keepSearchGroupOpen(serviceId);
     if (focusExistingTab(serviceId)) return;
     const current = workspacePanelsRef.current;
     const panelId = focusedPanelIdRef.current ?? current[0]?.id ?? crypto.randomUUID();
@@ -574,9 +649,10 @@ export function App() {
     setWorkspacePanels(next);
     setFocusedPanelId(panelId);
     setSelectedId(serviceId);
-  }, [focusExistingTab]);
+  }, [keepSearchGroupOpen, focusExistingTab]);
 
   const replaceCurrentTab = useCallback((serviceId: string) => {
+    keepSearchGroupOpen(serviceId);
     if (focusExistingTab(serviceId)) return;
     const current = workspacePanelsRef.current;
     const panelId = focusedPanelIdRef.current ?? current[0]?.id;
@@ -585,16 +661,17 @@ export function App() {
     workspacePanelsRef.current = next;
     setWorkspacePanels(next);
     setSelectedId(serviceId);
-  }, [focusExistingTab, openInExplicitTab]);
+  }, [keepSearchGroupOpen, focusExistingTab, openInExplicitTab]);
 
   const moveToCurrentPanel = useCallback((serviceId: string) => {
+    keepSearchGroupOpen(serviceId);
     const current = workspacePanelsRef.current;
     const targetId = focusedPanelIdRef.current;
     const source = current.find((panel) => panel.tabIds.includes(serviceId));
     if (!source || !targetId) return;
     if (source.id === targetId) return focusPanelTab(targetId, serviceId);
     movePanelTab(serviceId, targetId, current.find((panel) => panel.id === targetId)?.tabIds.length ?? 0);
-  }, [focusPanelTab, movePanelTab]);
+  }, [keepSearchGroupOpen, focusPanelTab, movePanelTab]);
 
   // Auto-clear the flash so the CSS animation can re-fire on the next jump
   // (re-adding the same class to an element doesn't restart its animation).
@@ -713,45 +790,6 @@ export function App() {
     settingsRef.current = settings;
   }, [settings]);
 
-  const persistSettings = useCallback(
-    async (nextSettings: AppSettings) => {
-      const previousSettings = settingsRef.current;
-      settingsRef.current = nextSettings;
-      setSettings(nextSettings);
-
-      const save = settingsWriteQueueRef.current
-        .catch(() => {
-          /* a failed write must not prevent the next queued save */
-        })
-        .then(() => invoke<AppSettings>("save_settings", { settings: nextSettings }));
-
-      const tracked = save.then(
-        (saved) => {
-          // A later queued update already contains this change. Do not replace
-          // that optimistic state with an older backend response.
-          if (settingsRef.current === nextSettings) {
-            settingsRef.current = saved;
-            setSettings(saved);
-          }
-          return saved;
-        },
-        (error) => {
-          if (settingsRef.current === nextSettings) {
-            settingsRef.current = previousSettings;
-            setSettings(previousSettings);
-          }
-          throw error;
-        }
-      );
-
-      settingsWriteQueueRef.current = tracked.then(
-        () => undefined,
-        () => undefined
-      );
-      return tracked;
-    },
-    []
-  );
 
   useEffect(() => {
     // Services can finish loading before settings. Never persist aliases from
@@ -1749,11 +1787,12 @@ export function App() {
   // start as user-initiated so the one-shot "waiting for output…" hint shows.
   const manualStart = useCallback(
     (service: ServiceConfig) => {
+      keepSearchGroupOpen(service.id);
       delete autoRestartRef.current[service.id];
       userStartedRef.current.add(service.id);
       return startService(service);
     },
-    [startService]
+    [keepSearchGroupOpen, startService]
   );
 
   // Kill the foreign process holding our port, then re-spawn the service.
@@ -1972,6 +2011,7 @@ export function App() {
   // to stop and start by hand.
   const restartService = useCallback(
     async (service: ServiceConfig) => {
+      keepSearchGroupOpen(service.id);
       if (pids[service.id] != null) {
         // User-initiated: the respawn happens via the exit handler (not
         // manualStart), so flag it here for the "waiting for output…" hint.
@@ -1987,7 +2027,7 @@ export function App() {
       }
       await manualStart(service);
     },
-    [pids, adoptedPids, stopService, manualStart]
+    [keepSearchGroupOpen, pids, adoptedPids, stopService, manualStart]
   );
 
   const startGroup = (groupName: string) => {
@@ -2207,6 +2247,12 @@ export function App() {
   };
 
   const toggleGroupCollapsed = useCallback((groupName: string) => {
+    if (serviceQuery.trim()) {
+      setSearchCollapsedGroups((current) => ({
+        ...current, [groupName]: !(current[groupName] ?? false)
+      }));
+      return;
+    }
     const collapsed = !settingsRef.current.collapsedProjectNames[groupName];
     const nextSettings = {
       ...settingsRef.current,
@@ -2219,7 +2265,7 @@ export function App() {
     void persistSettings(nextSettings).catch((error) => {
       console.warn("Failed to persist project collapse state:", errorMessage(error));
     });
-  }, [persistSettings]);
+  }, [persistSettings, serviceQuery]);
 
   // Drag-resize the bottom terminal drawer. Mirrors `startSidebarDrag`: window-
   // level listeners so the drag survives the cursor leaving the thin handle,
@@ -2452,7 +2498,13 @@ export function App() {
       setLeftSidebarOpen(true);
       setServiceQuery("");
       setActiveProfile(service.profile && settingsRef.current.profiles.some((profile) => profile.id === service.profile) ? service.profile : null);
-      if (settingsRef.current.collapsedProjectNames[groupKey(service)]) toggleGroupCollapsed(groupKey(service));
+      if (settingsRef.current.collapsedProjectNames[groupKey(service)]) {
+        const current = settingsRef.current;
+        void persistSettings({
+          ...current,
+          collapsedProjectNames: { ...current.collapsedProjectNames, [groupKey(service)]: false }
+        }).catch((error) => setManagerMessage(errorMessage(error)));
+      }
       setSelectedId(serviceId);
     } else if (action === "close") closePane(serviceId, panelId);
     else if (action === "close-others") {
@@ -2464,7 +2516,7 @@ export function App() {
       setFocusedPanelId(panelId);
       setSelectedId(serviceId);
     }
-  }, [closePane, movePanelTab, setActiveProfile, toggleGroupCollapsed]);
+  }, [closePane, movePanelTab, persistSettings, setActiveProfile, setServiceQuery]);
 
   // Display name for a service, masked when Stream mode is on and the service
   // is flagged sensitive. Used everywhere a service name is shown as UI chrome.

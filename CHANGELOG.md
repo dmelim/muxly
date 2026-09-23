@@ -55,6 +55,8 @@ design fixes and manual verification are complete.
 
 - Left and right sidebar panels now use a soft, shadow-like background tint instead of outer borders.
 
+- Service search temporarily expands matching project groups and restores their previous state when cleared, keeping groups open when a service is opened, started, or restarted during the search. Stopping or closing a pane does not preserve temporary expansion.
+
 - Stream-mode terminal mirrors now inherit the workspace panel outline instead of drawing a second inner card border.
 
 - Push actions are now disabled when the selected upstream branch is already synchronized with its last-fetched state, while unpublished branches and alternate remotes remain available.
