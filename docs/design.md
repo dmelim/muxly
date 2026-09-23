@@ -192,12 +192,12 @@ panel. The destination uses a dashed cyan outline and a short drop label.
 The left sidebar has two inset panels with `p-2` outer spacing and `gap-2`:
 a fixed controls/filter panel and a separately scrolling service-list panel.
 The service-list panel keeps a Services heading above its scrolling content.
-Both use transparent backgrounds and one-pixel neutral borders, letting the
-darker app background show through as well as around and between them.
+Both use a faint black tint (`bg-black/15`) without outer borders, creating
+a soft, shadow-like surface against the app background.
 The central toolbar is also an inset transparent panel with a neutral outline
 and `mx-2 my-2` spacing; it has no separate full-width divider beneath it.
-The Details sidebar uses a transparent inset panel with `m-2` and a neutral
-outline. Its header groups the editor, folder, browser, and Edit icon actions
+The Details sidebar uses the same borderless, softly darkened inset panel with
+`m-2` spacing. Its header groups the editor, folder, browser, and Edit icon actions
 beside the title without a separator below it.
 
 Terminal panes are clipping boxes (`overflow: hidden`) — xterm owns its own

@@ -209,7 +209,7 @@ export function ServicesSidebar({
         open ? "p-2" : "pointer-events-none invisible"
       }`}
     >
-      <div className="shrink-0 border border-white/10 bg-transparent p-3">
+      <div className="shrink-0 bg-black/15 p-3">
         <h1 className="text-xl font-semibold tracking-normal">Muxly</h1>
         <p className="mt-2 line-clamp-2 text-xs text-zinc-500" title={managerMessage}>
           {managerMessage}
@@ -299,7 +299,7 @@ export function ServicesSidebar({
         ) : null}
       </div>
 
-      <section aria-labelledby="services-panel-heading" className="flex min-h-0 flex-1 flex-col border border-white/10 bg-transparent">
+      <section aria-labelledby="services-panel-heading" className="flex min-h-0 flex-1 flex-col bg-black/15">
         <h2 id="services-panel-heading" className="shrink-0 px-3 pb-1 pt-3 text-sm font-semibold text-zinc-100">Services</h2>
       <div
         onDragEnter={(event) => {

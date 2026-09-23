@@ -3061,8 +3061,8 @@ export function App() {
       </section>
 
       <aside
-        className={`flex min-h-0 min-w-0 flex-col overflow-hidden bg-transparent ${
-          effectiveRightSidebarOpen ? "m-2 border border-white/10" : "pointer-events-none invisible"
+        className={`flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/15 ${
+          effectiveRightSidebarOpen ? "m-2" : "pointer-events-none invisible"
         }`}
         aria-hidden={!effectiveRightSidebarOpen}
       >
