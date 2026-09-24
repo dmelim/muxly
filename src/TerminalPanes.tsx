@@ -336,7 +336,7 @@ export function TerminalPanes({
       }}
     >
       <div
-        className={`grid h-full min-h-0 gap-1.5 p-1.5 ${privacyReady ? "" : "invisible"}`}
+        className={`grid h-full min-h-0 gap-2 px-1 pb-2 pt-2 ${privacyReady ? "" : "invisible"}`}
         style={{
           gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
           gridAutoRows: "minmax(0, 1fr)"
@@ -355,7 +355,7 @@ export function TerminalPanes({
             </div>
           ) : null}
           {tabMode ? (
-            <div className="flex min-w-0 shrink-0 items-end border-b border-white/10">
+            <div className="flex min-w-0 shrink-0 items-end">
             <TabsScrollArea role="tablist"
               aria-label="Panel tabs"
               onDragOver={(event) => {
@@ -384,7 +384,7 @@ export function TerminalPanes({
                       role="presentation"
                       className={`relative flex w-36 shrink-0 items-center gap-1 rounded-t-md border border-b-0 px-2 text-xs ${
                         service.id === panel.activeTabId
-                          ? "border-white/15 bg-white/10 text-zinc-100"
+                          ? `border-white/15 bg-[var(--muxly-terminal-bg)] ${service.id === focusedId ? "text-cyan-300" : "text-zinc-100"}`
                           : "border-transparent text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
                       } ${draggedTabId === service.id ? "opacity-50" : ""}`}
                     >
@@ -1073,9 +1073,7 @@ function PaneView({
   return (
     <div
       onMouseDown={onFocus}
-      className={`relative flex min-h-0 flex-1 flex-col ring-1 ring-inset ${
-        focused ? "ring-cyan-500/30" : "ring-[var(--muxly-border)]"
-      }`}
+      className="relative flex min-h-0 flex-1 flex-col bg-[var(--muxly-terminal-bg)]"
     >
       {showIdentity ? <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
         {showIdentity ? <span className="flex min-w-0 items-center gap-2">

@@ -19,6 +19,7 @@ import {
   PlayIcon,
   PinIcon,
   PlusIcon,
+  PanelLeftIcon,
   SplitIcon,
   StopIcon
   ,CloseIcon
@@ -33,6 +34,8 @@ type DropIndicator =
 
 type Props = {
   open: boolean;
+  visible: boolean;
+  onToggle: () => void;
   managerMessage: string;
   compact: boolean;
   modKey: string;
@@ -99,6 +102,8 @@ export type GroupMenuAction = "start" | "stop" | "add" | "pin" | "collapse" | "s
 
 export function ServicesSidebar({
   open,
+  visible,
+  onToggle,
   managerMessage,
   compact,
   modKey,
@@ -204,12 +209,22 @@ export function ServicesSidebar({
   };
   return (
     <aside
-      aria-hidden={!open}
-      className={`flex min-h-0 flex-col gap-2 overflow-hidden bg-[#101215] ${
-        open ? "p-2" : "pointer-events-none invisible"
+      aria-hidden={!visible}
+      className={`relative flex min-h-0 flex-col overflow-hidden bg-[#101215] ${
+        visible ? "py-2 pl-2 pr-1" : "pointer-events-none invisible"
       }`}
     >
-      <div className="shrink-0 bg-black/15 p-3">
+      {visible ? (
+        <div className={`absolute right-1 z-20 bg-[#15181d] p-0.5 ${open ? "top-[18px]" : (settings.openServicesInTabs ?? true) ? "top-[14px]" : "top-2"}`}>
+          <Tooltip label={`${open ? "Hide" : "Show"} services (${modKey}+←)`}>
+            <Button variant="ghost" size="icon" onClick={onToggle} aria-label={`${open ? "Hide" : "Show"} services sidebar`} aria-controls="services-sidebar-content" aria-expanded={open}>
+              <PanelLeftIcon className="size-4" />
+            </Button>
+          </Tooltip>
+        </div>
+      ) : null}
+      <div id="services-sidebar-content" className={`min-h-0 flex-1 flex-col overflow-hidden bg-[#15181d] ${open ? "flex" : "hidden"}`}>
+      <div className="shrink-0 px-3 pb-1 pt-3">
         <h1 className="text-xl font-semibold tracking-normal">Muxly</h1>
         <p className="mt-2 line-clamp-2 text-xs text-zinc-500" title={managerMessage}>
           {managerMessage}
@@ -299,7 +314,7 @@ export function ServicesSidebar({
         ) : null}
       </div>
 
-      <section aria-labelledby="services-panel-heading" className="flex min-h-0 flex-1 flex-col bg-black/15">
+      <section aria-labelledby="services-panel-heading" className="flex min-h-0 flex-1 flex-col">
         <h2 id="services-panel-heading" className="shrink-0 px-3 pb-1 pt-3 text-sm font-semibold text-zinc-100">Services</h2>
       <div
         onDragEnter={(event) => {
@@ -700,6 +715,7 @@ export function ServicesSidebar({
         })}
       </div>
       </section>
+      </div>
       {menu ? <ContextMenu {...menu} onClose={() => setMenu(null)} restoreFocusRef={menuTargetRef} /> : null}
       {deleteTarget ? (
         <ConfirmDialog

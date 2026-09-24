@@ -60,7 +60,6 @@ import {
 import {
   AlertTriangleIcon,
   CommandIcon,
-  PanelLeftIcon,
   PanelRightIcon,
   SearchIcon,
   SettingsIcon,
@@ -68,6 +67,7 @@ import {
 } from "./icons";
 
 const PTY_CARRIAGE_RETURN_SETTLE_MS = 75;
+const COLLAPSED_SIDEBAR_WIDTH = 44;
 
 // How long the one-shot "waiting for output…" hint stays up after a *user-
 // initiated* PTY start when no real output has arrived yet. It also clears the
@@ -2864,13 +2864,15 @@ export function App() {
     <main
       className="relative grid h-screen grid-rows-1 overflow-hidden bg-[#101215] text-zinc-100"
       style={{
-        gridTemplateColumns: `${effectiveLeftSidebarOpen ? `${leftWidth}px` : "0"} 1fr ${
-          effectiveRightSidebarOpen ? `${rightWidth}px` : "0"
+        gridTemplateColumns: `${settingsOpen ? "0" : `${effectiveLeftSidebarOpen ? leftWidth : COLLAPSED_SIDEBAR_WIDTH}px`} 1fr ${
+          settingsOpen ? "0" : `${effectiveRightSidebarOpen ? rightWidth : COLLAPSED_SIDEBAR_WIDTH}px`
         }`
       }}
     >
       <ServicesSidebar
         open={effectiveLeftSidebarOpen}
+        visible={!settingsOpen}
+        onToggle={() => setLeftSidebarOpen((open) => !open)}
         managerMessage={redactWorkspaceText(managerMessage)}
         compact={compactSidebar}
         modKey={modKey}
@@ -2920,105 +2922,9 @@ export function App() {
         onDeleteService={deleteServiceConfig}
       />
 
-      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
-        <header className="mx-2 my-2 flex h-12 shrink-0 items-center justify-between border border-white/10 bg-transparent px-3">
-          <Tooltip label={`${leftSidebarOpen ? "Hide" : "Show"} services (${modKey}+←)`}>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setLeftSidebarOpen((open) => !open)}
-              disabled={settingsOpen}
-              aria-label="Toggle services sidebar"
-            >
-              <PanelLeftIcon className="size-4" />
-            </Button>
-          </Tooltip>
-          <div className="flex items-center gap-2">
-            {runtimeReport && runtimeReport.issues.length > 0 ? (
-              <Tooltip label="Runtime requirements missing">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setRuntimeWarningOpen(true)}
-                  aria-label="Show missing runtime requirements"
-                  className="text-amber-300"
-                >
-                  <AlertTriangleIcon className="size-4" />
-                </Button>
-              </Tooltip>
-            ) : runtimeReport && runtimeReport.activeFallbackPaths.length > 0 ? (
-              <Tooltip label="Runtime fallback active for this session">
-                <span
-                  role="status"
-                  aria-label="Runtime fallback active"
-                  className="flex size-7 items-center justify-center text-cyan-400"
-                >
-                  <AlertTriangleIcon className="size-4" />
-                </span>
-              </Tooltip>
-            ) : null}
-            <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+↓)`}>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setTerminalOpen((open) => !open)}
-                aria-label="Toggle terminal"
-                aria-pressed={terminalOpen}
-                className={terminalOpen ? "text-cyan-400" : ""}
-              >
-                <TerminalIcon className="size-4" />
-              </Button>
-            </Tooltip>
-            <Tooltip label="Search all logs (Ctrl+Shift+F)">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setSearchOpen(true)}
-                aria-label="Search all logs"
-              >
-                <SearchIcon className="size-4" />
-              </Button>
-            </Tooltip>
-            <Tooltip label={`Command palette (${modKey}+P)`}>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setCommandOpen(true)}
-                aria-label="Open command palette"
-                className={streamMode ? "text-cyan-400" : ""}
-              >
-                <CommandIcon className="size-4" />
-              </Button>
-            </Tooltip>
-            <Tooltip label={settingsOpen ? "Close settings" : "Settings"}>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setSettingsOpen((open) => !open)}
-                aria-label="Toggle settings"
-                aria-pressed={settingsOpen}
-                className={settingsOpen ? "text-cyan-400" : ""}
-              >
-                <SettingsIcon className="size-4" />
-              </Button>
-            </Tooltip>
-            <Tooltip
-              label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+→)`}
-              side="bottom"
-            >
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setRightSidebarOpen((open) => !open)}
-                disabled={settingsOpen}
-                aria-label="Toggle details sidebar"
-              >
-                <PanelRightIcon className="size-4" />
-              </Button>
-            </Tooltip>
-          </div>
-        </header>
-
+      <section className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${
+        settingsOpen ? "pl-1" : ""
+      } ${settingsOpen ? "pr-1" : ""}`}>
         {/*
           Keep the terminal panes / bottom drawer mounted while Settings is
           open and just hide them — unmounting would dispose every xterm
@@ -3113,11 +3019,62 @@ export function App() {
       </section>
 
       <aside
-        className={`flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/15 ${
-          effectiveRightSidebarOpen ? "m-2" : "pointer-events-none invisible"
+        className={`relative flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden ${
+          settingsOpen ? "pointer-events-none invisible" : "my-2 ml-1 mr-2"
         }`}
-        aria-hidden={!effectiveRightSidebarOpen}
+        aria-hidden={settingsOpen}
       >
+        {!settingsOpen ? (
+          <div className={`flex shrink-0 bg-[#15181d] ${
+            effectiveRightSidebarOpen
+              ? "h-10 flex-row items-center justify-center gap-2 px-1"
+              : `${settings.openServicesInTabs ?? true ? "mt-1.5 " : ""}flex-col items-center gap-1 pb-1 pt-10`
+          }`}>
+            {runtimeReport && runtimeReport.issues.length > 0 ? (
+              <Tooltip label="Runtime requirements missing">
+                <Button variant="ghost" size="icon" onClick={() => setRuntimeWarningOpen(true)} aria-label="Show missing runtime requirements" className="text-amber-300">
+                  <AlertTriangleIcon className="size-4" />
+                </Button>
+              </Tooltip>
+            ) : runtimeReport && runtimeReport.activeFallbackPaths.length > 0 ? (
+              <Tooltip label="Runtime fallback active for this session">
+                <span role="status" aria-label="Runtime fallback active" className="flex size-7 items-center justify-center text-cyan-400">
+                  <AlertTriangleIcon className="size-4" />
+                </span>
+              </Tooltip>
+            ) : null}
+            <Tooltip label={`${terminalOpen ? "Hide" : "Show"} terminal (${modKey}+↓)`}>
+              <Button variant="ghost" size="icon" onClick={() => setTerminalOpen((open) => !open)} aria-label="Toggle terminal" aria-pressed={terminalOpen} className={terminalOpen ? "text-cyan-400" : ""}>
+                <TerminalIcon className="size-4" />
+              </Button>
+            </Tooltip>
+            <Tooltip label="Search all logs (Ctrl+Shift+F)">
+              <Button variant="ghost" size="icon" onClick={() => setSearchOpen(true)} aria-label="Search all logs">
+                <SearchIcon className="size-4" />
+              </Button>
+            </Tooltip>
+            <Tooltip label={`Command palette (${modKey}+P)`}>
+              <Button variant="ghost" size="icon" onClick={() => setCommandOpen(true)} aria-label="Open command palette" className={streamMode ? "text-cyan-400" : ""}>
+                <CommandIcon className="size-4" />
+              </Button>
+            </Tooltip>
+            <Tooltip label="Settings">
+              <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Open settings">
+                <SettingsIcon className="size-4" />
+              </Button>
+            </Tooltip>
+          </div>
+        ) : null}
+        {!settingsOpen ? (
+          <div className="absolute left-0 z-20 bg-[#15181d] p-0.5" style={{ top: effectiveRightSidebarOpen ? 4 : (settings.openServicesInTabs ?? true ? 6 : 0) }}>
+            <Tooltip label={`${rightSidebarOpen ? "Hide" : "Show"} details (${modKey}+→)`}>
+              <Button variant="ghost" size="icon" onClick={() => setRightSidebarOpen((open) => !open)} aria-label={`${rightSidebarOpen ? "Hide" : "Show"} details sidebar`} aria-controls="details-sidebar-content" aria-expanded={rightSidebarOpen}>
+                <PanelRightIcon className="size-4" />
+              </Button>
+            </Tooltip>
+          </div>
+        ) : null}
+        <div id="details-sidebar-content" className={`min-h-0 flex-1 flex-col overflow-hidden bg-[#15181d] ${effectiveRightSidebarOpen ? "flex" : "hidden"}`}>
         <DetailsSidebar
           editing={editing}
           services={services}
@@ -3143,6 +3100,7 @@ export function App() {
           onDeleteService={deleteServiceConfig}
           onEdit={setEditing}
         />
+        </div>
       </aside>
 
       {effectiveLeftSidebarOpen ? (

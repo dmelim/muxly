@@ -53,11 +53,15 @@ design fixes and manual verification are complete.
 
 ### Changed
 
-- Left and right sidebar panels now use a soft, shadow-like background tint instead of outer borders.
+- Sidebar toggle icons now sit at their inner edges, with Services beside its heading and Details in its action bar; collapsed sidebars leave an icon-only rail for reopening.
+
+- Main terminal bodies and rounded active tabs now share the lighter theme surface without an outer outline; the tab row stays transparent, and the focused tab carries the cyan focus cue.
+
+- Left and right sidebar panels now use a slightly lighter surface background without outer borders.
 
 - Service search temporarily expands matching project groups and restores their previous state when cleared, keeping groups open when a service is opened, started, or restarted during the search. Stopping or closing a pane does not preserve temporary expansion.
 
-- Stream-mode terminal mirrors now inherit the workspace panel outline instead of drawing a second inner card border.
+- Stream-mode terminal mirrors now inherit the workspace panel surface instead of drawing an inner card border.
 
 - Push actions are now disabled when the selected upstream branch is already synchronized with its last-fetched state, while unpublished branches and alternate remotes remain available.
 
@@ -65,11 +69,11 @@ design fixes and manual verification are complete.
 
 - The Details sidebar now names the inspected tab in its header, with editor, folder, browser, and icon-only Edit actions grouped beside it and no header separator.
 
-- Terminal actions float on a borderless, 10%-opaque themed background with a gentle 2px backdrop blur and compact padding inside the panel's top-right corner, letting terminal output remain recognizable behind brighter neutral, cyan, and amber icons. Narrower tabs use the full row width with a custom square, arrowless 5px accent-coloured scrollbar overlaid just inside the panel below the tab border on hover or keyboard focus, leaving no gap above the terminal and remaining independent of system scrollbar appearance.
+- Terminal actions float on a borderless, 10%-opaque themed background with a gentle 2px backdrop blur and compact padding inside the panel's top-right corner, letting terminal output remain recognizable behind brighter neutral, cyan, and amber icons. Narrower tabs use the full row width with a custom square, arrowless 3.5px accent-coloured scrollbar thumb shortened by 30% and overlaid just inside the panel below the tab row on hover or keyboard focus, leaving no gap above the terminal and remaining independent of system scrollbar appearance.
 
-- The central toolbar now sits in an inset panel instead of above a full-width divider, and the left service-list panel has a fixed Services heading.
+- Workspace action buttons and the Hide Details button now sit above the inspector; when it is collapsed, the actions stack vertically beneath the reopen button, freeing the terminal workspace from a top toolbar.
 
-- The left sidebar now has two transparent inset panels: controls and filters above a separately scrolling service list, with the darker app background showing through and borders and spacing matching the terminal panels.
+- The left sidebar now has one lighter inset panel containing fixed controls and filters above a separately scrolling service list with a fixed Services heading.
 
 - Settings and Import now use the shared Muxly checkbox styling. Numeric fields hide native spinner arrows, and textareas omit browser resize handles for consistent form chrome.
 
@@ -106,6 +110,10 @@ design fixes and manual verification are complete.
 - **Settings temporarily hides both sidebars.** Opening Settings preserves each sidebar's visibility and width and restores them when Settings closes.
 
 ### Fixed
+
+- Aligned the closed sidebar icon rails with the top of the terminal tabs.
+
+- Aligned the terminal workspace bottom edge and horizontal panel gaps with the 8px outer insets.
 
 - Fixed the terminal mirror's composition-event check so TypeScript builds succeed and composing text is not forwarded prematurely.
 

@@ -23,7 +23,7 @@ export function TabsScrollArea({ children, className = "", ...props }: Props) {
     return () => observer.disconnect();
   }, []);
   const max = Math.max(0, metrics.total - metrics.width);
-  const thumb = metrics.total ? Math.min(metrics.width, Math.max(24, metrics.width * metrics.width / metrics.total)) : 0;
+  const thumb = metrics.total ? Math.min(metrics.width, Math.max(24, metrics.width * metrics.width / metrics.total * 0.7)) : 0;
   const travel = metrics.width - thumb;
   const scrollTo = (left: number) => {
     if (viewport.current) viewport.current.scrollLeft = Math.max(0, Math.min(max, left));
@@ -62,6 +62,6 @@ export function TabsScrollArea({ children, className = "", ...props }: Props) {
       onPointerUp={(event) => { drag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
       onPointerCancel={() => { drag.current = null; }}
       onLostPointerCapture={() => { drag.current = null; }}
-    ><div className="absolute top-0 h-[5px] bg-cyan-400 hover:bg-cyan-300" style={{ width: thumb, transform: `translateX(${max ? metrics.left / max * travel : 0}px)` }} /></div> : null}
+    ><div className="absolute top-[1.25px] h-[3.5px] bg-cyan-400 hover:bg-cyan-300" style={{ width: thumb, transform: `translateX(${max ? metrics.left / max * travel : 0}px)` }} /></div> : null}
   </div>;
 }

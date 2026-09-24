@@ -25,8 +25,8 @@ borders rather than hard lines.
 
 | Token            | Value       | Use                                            |
 |------------------|-------------|------------------------------------------------|
-| `bg/app`         | `#101215`   | App background, terminal background            |
-| `bg/surface`     | `#15181d`   | Sidebars, detail inspector, panels             |
+| `bg/app`         | `#101215`   | App background                                 |
+| `bg/surface`     | `#15181d`   | Sidebars, inspector, panels, default terminals |
 | `bg/elevated`    | `#18181b`   | Tooltips, popovers (`zinc-900`)                |
 | `border`         | `white/10`  | All dividers and outlines                      |
 | `hover/subtle`   | `white/5`   | Row / card hover                               |
@@ -81,7 +81,7 @@ Process state is shown as a 2–2.5px filled dot. Each state has a distinct hue.
 
 | Slot         | Value     |
 |--------------|-----------|
-| Background   | `#101215` |
+| Background   | `#15181d` |
 | Foreground   | `#d4d4d8` |
 | Cursor       | `#22d3ee` (accent) |
 | Selection    | `#3f3f46` |
@@ -127,8 +127,12 @@ scrolls independently.
 └───────────┴──────────────────────────┴───────────────┘
 ```
 
-Both sidebars are collapsible and drag-resizable. Terminal panes are split
-horizontally with draggable dividers. Minimum window size is 1024×680.
+Both sidebars are collapsible to 44px icon rails and drag-resizable when open.
+Their toggle buttons sit at the inner edges: Services beside its heading and
+Details in the action bar above the inspector. A closed sidebar shows its
+reopen button. Terminal panes are split horizontally with draggable dividers.
+The terminal grid and both side panels
+share an 8px bottom inset. Minimum window size is 1024×680.
 
 Spacing follows Tailwind's 4px scale. Common rhythm: `p-3` (panes, cards),
 `px-5 py-4` (panel headers), `gap-2`/`gap-3` (control clusters).
@@ -189,16 +193,26 @@ panel. The destination uses a dashed cyan outline and a short drop label.
 
 ### Panels & dividers
 
-The left sidebar has two inset panels with `p-2` outer spacing and `gap-2`:
-a fixed controls/filter panel and a separately scrolling service-list panel.
-The service-list panel keeps a Services heading above its scrolling content.
-Both use a faint black tint (`bg-black/15`) without outer borders, creating
-a soft, shadow-like surface against the app background.
-The central toolbar is also an inset transparent panel with a neutral outline
-and `mx-2 my-2` spacing; it has no separate full-width divider beneath it.
-The Details sidebar uses the same borderless, softly darkened inset panel with
-`m-2` spacing. Its header groups the editor, folder, browser, and Edit icon actions
-beside the title without a separator below it.
+The left sidebar has one inset panel with 8px outer spacing and 4px spacing
+toward the workspace. Its controls and
+filters remain fixed above a separately scrolling service list with a fixed
+Services heading. The whole panel uses the slightly lighter surface background
+(`bg/surface`) without an outer border, creating soft separation from the app
+background.
+Workspace actions and the Hide Details button sit in a horizontal, borderless
+surface bar above the Details inspector, pushing the inspector down. When
+Details is collapsed, the actions stack vertically beneath its reopen button
+in the narrow icon rail. Closed sidebar controls begin at the same height as
+the terminal tabs, or the terminal body when tabs are disabled.
+The terminal workspace starts at the 8px top inset without a central toolbar.
+The Details sidebar uses the same borderless, slightly lighter inset panel with
+8px outer spacing and 4px spacing toward the workspace. Its header groups the
+editor, folder, browser, and Edit actions beside the title without a separator below.
+
+The terminal grid has 4px side insets and 8px between panels, so the gaps
+between both sidebars and the terminal panels match the 8px outer insets.
+When a sidebar is hidden, the workspace gains the missing 4px so its outer
+inset stays 8px.
 
 Terminal panes are clipping boxes (`overflow: hidden`) — xterm owns its own
 scrolling. Drag dividers are a 1.5px hairline (`white/10`) that lights to
@@ -212,7 +226,7 @@ backdrop blur, rounded corners, and `p-1` padding, with no outer border. Bright
 neutral icons and stronger cyan/amber accents stay readable over terminal output.
 Tabs occupy the full row width with a custom
 square, arrowless scrollbar revealed on hover or keyboard focus on Windows and macOS.
-The 5px accent-coloured scrollbar overlays the inside of the terminal panel just below the tab-row border, without reserving space between tabs and terminal.
+The 3.5px accent-coloured scrollbar thumb is 30% shorter than its proportional length and overlays the inside of the terminal panel just below the tab row, without reserving space between tabs and terminal.
 Tabs use a compact fixed width and truncate
 long labels; the active tab scrolls into view. A normal service click opens a tab in
 the focused panel; `Ctrl/Cmd`-click creates another panel with its own tabs.
@@ -220,12 +234,13 @@ Tabs can be reordered within a panel or dragged to another panel; an insertion
 preview shaped like a muted copy of the dragged tab shows the exact drop
 position in destination panels without duplicating the tab in its source panel,
 and an emptied source panel is removed.
-The service workspace below each tab strip has a one-pixel inset outline using
-the neutral border token when unfocused and the soft cyan accent when focused.
-The outline does not wrap or extend beside the tabs.
+The service workspace below each tab strip uses the lighter terminal surface
+without an outer outline. The rounded active tab uses the same background,
+while the rest of the tab row remains transparent. The focused tab uses cyan
+text to identify its panel.
 
 The bottom shell drawer is inset with `mx-2 mb-2`, a neutral one-pixel border,
-and a soft cyan focus border, matching the service terminal cards. Its header
+and a soft cyan focus border. Its header
 uses the shared Dropdown for installed shell profiles. Switching profiles ends
 the current session through an in-app confirmation; the choice survives drawer
 close/reopen for the current app session.
@@ -249,8 +264,8 @@ buffer. The mirror masks absolute and home-relative paths, email addresses,
 external URLs, and configured sensitive identities. PTY mirrors forward
 keyboard and paste input to the existing process. Turning Stream mode off
 reveals the untouched terminal again without restarting or replaying it.
-The mirror inherits the workspace panel boundary and does not draw a second
-inner border or rounded card inside the terminal.
+The mirror inherits the workspace panel surface and does not draw an inner
+border or rounded card inside the terminal.
 
 Sensitive service and project labels must fail closed while aliases load. Use a
 generic private label rather than briefly displaying the real identity.
@@ -287,7 +302,7 @@ so older and partially authored settings remain safe.
     "textPrimary": "#f4f4f5",
     "accent": "#22d3ee",
     "info": "#38bdf8",
-    "terminalBackground": "#101215",
+    "terminalBackground": "#15181d",
     "terminalForeground": "#d4d4d8"
   }
 }

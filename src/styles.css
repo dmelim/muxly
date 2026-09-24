@@ -8,7 +8,7 @@
   --muxly-border: #2a2d31;
   --muxly-hover-subtle: #1b1e23;
   --muxly-hover-strong: #25282d;
-  --muxly-terminal-bg: #101215;
+  --muxly-terminal-bg: #15181d;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--muxly-bg-app);

@@ -52,7 +52,7 @@ export const DEFAULT_THEME: MuxlyTheme = {
   warning: "#f59e0b",
   danger: "#f43f5e",
   info: "#38bdf8",
-  terminalBackground: "#101215",
+  terminalBackground: "#15181d",
   terminalForeground: "#d4d4d8",
   terminalCursor: "#22d3ee",
   terminalSelection: "#3f3f46"
@@ -70,7 +70,7 @@ export const THEME_PRESETS: Record<Exclude<ThemePresetId, "custom">, MuxlyTheme>
     accentSoft: "#93c5fd",
     accentContrast: "#172554",
     running: "#60a5fa",
-    terminalBackground: "#080d18",
+    terminalBackground: "#0d1422",
     terminalCursor: "#60a5fa",
     terminalSelection: "#26354f"
   },
@@ -86,7 +86,7 @@ export const THEME_PRESETS: Record<Exclude<ThemePresetId, "custom">, MuxlyTheme>
     accentStrong: "#22d3ee",
     accentSoft: "#a5f3fc",
     accentContrast: "#000000",
-    terminalBackground: "#050505",
+    terminalBackground: "#0d0d0d",
     terminalForeground: "#ffffff",
     terminalSelection: "#3f3f46"
   }
