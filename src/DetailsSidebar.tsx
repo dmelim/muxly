@@ -172,7 +172,7 @@ export function DetailsSidebar({
               ) : null}
             <Tooltip label="Edit service"><Button variant="ghost" size="icon" aria-label="Edit service" onClick={() => onEdit({ mode: "edit", service: selected })}><EditIcon className="size-4" /></Button></Tooltip></div>
 ) : null}</div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="muxly-sidebar-scroll min-h-0 flex-1 overflow-y-auto">
         {selected ? (
           <div className="space-y-5 p-3 text-sm">
             <dl className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,110px),1fr))] gap-x-4 gap-y-3">

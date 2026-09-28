@@ -328,7 +328,7 @@ export function ServicesSidebar({
           }
           if (dragIdRef.current || dragGroupRef.current) event.preventDefault();
         }}
-        className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
+        className="muxly-sidebar-scroll min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
       >
         {groupedServices.length === 0 && serviceQuery.trim() ? (
           <div className="px-3 py-8 text-center">

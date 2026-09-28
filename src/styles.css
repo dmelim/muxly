@@ -83,6 +83,26 @@
   background-clip: padding-box;
 }
 
+/* Keep the sidebar scrollbar width and hit area, but draw a square accent
+   thumb at 70% of its proportional height, like the tab scrollbar. */
+.muxly-sidebar-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+.muxly-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, transparent 15%, var(--color-cyan-400) 15% 85%, transparent 85%);
+  border-radius: 2px;
+}
+
+.muxly-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(to bottom, transparent 15%, var(--color-cyan-300) 15% 85%, transparent 85%);
+}
+
+.muxly-sidebar-scroll::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(to bottom, transparent 15%, var(--color-cyan-500) 15% 85%, transparent 85%);
+}
+
 /* Hide the dead corner where vertical and horizontal bars would meet. */
 ::-webkit-scrollbar-corner {
   background: transparent;
@@ -127,6 +147,12 @@ button {
    hide that scrollbar outright. Vertical scrolling is unaffected. */
 .xterm .xterm-scrollable-element > .scrollbar.horizontal {
   display: none !important;
+}
+
+/* Keep xterm's scroll track and thumb length, with a slightly slimmer thumb. */
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  left: 1px !important;
+  width: calc(100% - 2px) !important;
 }
 
 /* Drop xterm's VS Code scrollbar arrow controls — the slider alone is cleaner. */

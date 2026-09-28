@@ -53,6 +53,8 @@ design fixes and manual verification are complete.
 
 ### Changed
 
+- Terminal scrollbar thumbs now use the theme accent and are slightly slimmer; both sidebar scrollbars use the same accent with squarer thumbs that appear 30% shorter at their existing width.
+
 - Sidebar toggle icons now sit at their inner edges, with Services beside its heading and Details in its action bar; collapsed sidebars leave an icon-only rail for reopening.
 
 - Main terminal bodies and rounded active tabs now share the lighter theme surface without an outer outline; the tab row stays transparent, and the focused tab carries the cyan focus cue.
