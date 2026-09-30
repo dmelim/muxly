@@ -36,7 +36,7 @@ test("config reload retains removed running services until stopped", () => {
   assert.equal(isServiceActive("failed"), false);
 });
 
-const { redactSensitive } = await load("types");
+const { redactSensitive, redactStreamWorkspaceText, sensitiveCwdSegments } = await load("types");
 const { LogSearchCache } = await load("logSearchCache");
 const { DEFAULT_THEME, applyTheme, xtermTheme } = await load("theme");
 const { replaceActiveTab, moveTabToNewPanel, closeOtherTabs, placeServiceInPanel } = await load("workspaceContextOps");
@@ -80,25 +80,36 @@ test("context workspace operations preserve unique valid panel tabs", () => {
 const service = { id: "web", name: "SecretApp", group: "SecretGroup", cwd: "/work/project",
   program: "node", args: [], sensitive: true };
 
-test("POSIX redaction keeps basenames at different offsets and URL spans", () => {
+test("POSIX redaction masks whole paths at different offsets and keeps local origins", () => {
   for (const prefix of ["", "command: ", "path=", "("]) {
     assert.equal(redactSensitive(`${prefix}/opt/tools/node`, service, "masked", true),
-      `${prefix}/masked/node`);
+      `${prefix}[private path]`);
   }
-  const url = "http://localhost:3000/assets/icon.svg";
-  assert.equal(redactSensitive(url, service, "masked", true), url);
-  assert.equal(redactSensitive('/opt/tools/node', service, "", true), "/private-project/node");
+  assert.equal(redactSensitive("http://localhost:3000/assets/icon.svg", service, "masked", true),
+    "http://localhost:3000/[private path]");
+  assert.equal(redactSensitive("Local: http://localhost:5173", service, "masked", true),
+    "Local: http://localhost:5173");
+  assert.equal(redactSensitive("see https://example.com/x", service, "masked", true), "see [external URL]");
 });
 
-test("quoted and already-redacted paths retain complete filenames", () => {
-  assert.equal(redactSensitive('"/opt/private/my tool"', service, "masked", true),
-    '"/masked/my tool"');
-  assert.equal(redactSensitive('/masked/node', service, "masked", true), '/masked/node');
-  assert.equal(redactSensitive('/work/private/deep/node', service, "masked", true), '/masked/node');
-  assert.equal(redactSensitive('/work/project', service, "masked", true), '/masked');
-  assert.equal(redactSensitive('C:\\Users\\private\\node.exe', service, "masked", true),
-    'C:\\masked\\node.exe');
+test("quoted, Windows and cwd paths are masked whole", () => {
+  assert.equal(redactSensitive('"/opt/private/my tool"', service, "masked", true), '"[private path]"');
+  assert.equal(redactSensitive('/work/project', service, "masked", true), '[private path]');
+  assert.equal(redactSensitive('C:\\Users\\private\\node.exe', service, "masked", true), '[private path]');
   assert.equal(redactSensitive('/opt/tools/node', service, "masked", false), '/opt/tools/node');
+});
+
+test("sensitive cwd folders are masked outside absolute paths", () => {
+  const windows = { ...service, group: "Acme", cwd: "C:\\Users\\QASecret\\clients\\acme-portal" };
+  assert.deepEqual(sensitiveCwdSegments(windows.cwd), ["QASecret", "acme-portal"]);
+  assert.equal(redactSensitive("QASecret\\private\\file.txt", windows, "masked", true),
+    "masked\\private\\file.txt");
+  assert.equal(redactSensitive("built acme-portal", windows, "masked", true), "built masked");
+  assert.equal(redactSensitive("QASecret", { ...windows, sensitive: false }, "masked", true), "QASecret");
+  assert.equal(redactStreamWorkspaceText("QASecret in acme-portal", [windows], { Acme: "proj-a" }, {}, true),
+    "proj-a in proj-a");
+  // Short segments use token boundaries and cannot alter ordinary words.
+  assert.equal(redactSensitive("rapid", { ...windows, cwd: "/srv/api" }, "masked", true), "rapid");
 });
 
 test("search reuses results and prepared text until a bounded buffer changes", () => {
@@ -122,12 +133,13 @@ test("search invalidates cached sensitive text when privacy or aliases change", 
   const chunks = ["SecretApp /opt/tools/node\n"];
   assert.equal(cache.search(service, chunks, 1, "SecretApp", "masked", false).total, 1);
   assert.equal(cache.search(service, chunks, 1, "SecretApp", "masked", true).total, 0);
-  const privateResult = cache.search(service, chunks, 1, "node", "masked", true);
-  assert.equal(privateResult.hits[0].line, "masked /masked/node");
-  assert.equal(cache.search(service, chunks, 1, "node", "other", true).hits[0].line,
-    "other /other/node");
+  assert.equal(cache.search(service, chunks, 1, "node", "masked", true).total, 0);
+  const privateResult = cache.search(service, chunks, 1, "masked", "masked", true);
+  assert.equal(privateResult.hits[0].line, "masked [private path]");
+  assert.equal(cache.search(service, chunks, 1, "other", "other", true).hits[0].line,
+    "other [private path]");
   cache.retain(new Set());
-  assert.notEqual(cache.search(service, chunks, 1, "node", "masked", true), privateResult);
+  assert.notEqual(cache.search(service, chunks, 1, "masked", "masked", true), privateResult);
 });
 
 test("running status is independent of accent and terminals share the palette", () => {

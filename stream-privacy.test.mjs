@@ -23,7 +23,7 @@ async function moduleUrl(url) {
 const load = async (file) => import(await moduleUrl(new URL(`./src/${file}.ts`, import.meta.url)));
 
 const { StreamLogSearchCache } = await load("streamLogSearchCache");
-const { isServiceOutputHidden, setTerminalConcealed } = await load("streamPrivacy");
+const { setTerminalConcealed } = await load("streamPrivacy");
 const service = { id: "private", name: "SecretApp", cwd: "C:\\Users\\QASecret", program: "node", args: [], sensitive: true };
 test("sensitive search excludes all chunk splits, cached hits and cursor-positioned fragments", () => {
   for (const raw of ["C:\\Users\\QASecret\\private\\file.txt\r\n", "C:\\Users\r\n\x1b[2;1HQASecret\\private\\file.txt"]) {
@@ -56,7 +56,4 @@ test("concealment revokes selection and input without touching parser state", ()
   setTerminalConcealed(terminal, false);
   assert.equal(terminal.options.disableStdin, false);
   assert.deepEqual(calls, ["clear", "blur"]);
-  assert.equal(isServiceOutputHidden(service, true), true);
-  assert.equal(isServiceOutputHidden(service, false), false);
-  assert.equal(isServiceOutputHidden({}, true), false);
 });

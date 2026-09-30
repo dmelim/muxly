@@ -237,17 +237,45 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Folder names too common to identify a user or project. Masking them would
+// scramble ordinary output ("src", "Users") without hiding anything private.
+const GENERIC_PATH_SEGMENTS = new Set([
+  "users", "home", "root", "opt", "usr", "var", "tmp", "temp", "mnt", "srv", "volumes",
+  "documents", "desktop", "downloads", "appdata", "local", "roaming", "program files",
+  "program files (x86)", "programdata", "windows", "projects", "project", "repos", "repo",
+  "source", "src", "code", "dev", "work", "workspace", "workspaces", "git", "github",
+  "apps", "app", "packages", "services", "private", "public", "onedrive", "clients", "client"
+]);
+
+// Identifying folder names from a sensitive service's cwd (the user profile,
+// client or project folders). Tools print these outside full absolute paths —
+// relative paths, prompts, or a path split by a terminal line wrap — so they
+// are masked as identities rather than only as path prefixes.
+export function sensitiveCwdSegments(cwd: string | undefined): string[] {
+  const parsed = cwd?.trim() ? parseAbsolutePath(cwd.trim()) : null;
+  if (!parsed) return [];
+  return parsed.segments.filter(
+    (segment) => segment.length > 2 && !GENERIC_PATH_SEGMENTS.has(segment.toLowerCase())
+  );
+}
+
+// Path segments are delimited identities: match them only on token
+// boundaries so a folder such as "api" does not alter the word "rapid".
+function replaceBoundedIdentity(text: string, identity: string, replacement: string): string {
+  const bounded = new RegExp(
+    `(^|[^\\p{L}\\p{N}_])${escapeRegExp(identity)}(?=$|[^\\p{L}\\p{N}_])`,
+    "giu"
+  );
+  return text.replace(bounded, (_match, prefix) => `${prefix}${replacement}`);
+}
+
 function replacePrivateIdentity(text: string, identity: string, replacement: string): string {
   const name = identity.trim();
   if (!name) return text;
   if (name.length > 2) {
     return text.replace(new RegExp(escapeRegExp(name), "gi"), () => replacement);
   }
-  const bounded = new RegExp(
-    `(^|[^\\p{L}\\p{N}_])${escapeRegExp(name)}(?=$|[^\\p{L}\\p{N}_])`,
-    "giu"
-  );
-  return text.replace(bounded, (_match, prefix) => `${prefix}${replacement}`);
+  return replaceBoundedIdentity(text, name, replacement);
 }
 
 function streamUrlLabel(raw: string): string {
@@ -274,7 +302,10 @@ export function redactStreamText(text: string, streamMode: boolean): string {
     .replace(/(\/(?:home|Users)\/)[^/\r\n]+(?=\/)/g, "$1[private]")
     .replace(/(["'])(?:[A-Za-z]:[\\/][^"'\r\n]+|\\\\[^"'\r\n]+|\/[^"'\r\n]+)\1/g, "$1[private path]$1")
     .replace(/\\\\[^\s\\/]+[\\/][^\s"'<>|]+/g, "[network path]")
-    .replace(/[A-Za-z]:[\\/][^\s"'<>|\x1b]+/g, "[private path]")
+    // A drive letter must not follow another letter, or the "p:/" in a
+    // (possibly already relabelled) "http://" URL reads as a Windows path.
+    // No lookbehind: older macOS WebViews reject it.
+    .replace(/(^|[^A-Za-z])[A-Za-z]:[\\/][^\s"'<>|\x1b]+/g, "$1[private path]")
     .replace(/(^|[\s=(])~[\\/][^\s"'<>|\x1b]+/gm, "$1[private path]")
     .replace(/(^|[\s=(:>$])\/(?!\/)[^\s"'<>|\x1b]+/gm, "$1[private path]")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email]")
@@ -305,10 +336,25 @@ export function redactStreamWorkspaceText(
     if (service.group?.trim()) replacements.set(service.group.trim().toLowerCase(), replacement);
   }
 
+  const identities = [...replacements.entries()].map(([identity, replacement]) => ({
+    identity, replacement, bounded: false
+  }));
+  for (const service of services) {
+    if (!service.sensitive) continue;
+    const replacement = projectNameAliases[service.group?.trim() || "Ungrouped"]?.trim() || "private-service";
+    for (const segment of sensitiveCwdSegments(service.cwd)) {
+      identities.push({ identity: segment, replacement, bounded: true });
+    }
+  }
+  // Longest first so a folder such as "acme-portal" is consumed whole before
+  // the shorter group identity "acme" can leave "-portal" behind.
+  identities.sort((left, right) => right.identity.length - left.identity.length);
+
   let out = text;
-  const identities = [...replacements.entries()].sort((left, right) => right[0].length - left[0].length);
-  for (const [identity, replacement] of identities) {
-    out = replacePrivateIdentity(out, identity, replacement);
+  for (const { identity, replacement, bounded } of identities) {
+    out = bounded
+      ? replaceBoundedIdentity(out, identity, replacement)
+      : replacePrivateIdentity(out, identity, replacement);
   }
   return redactStreamText(out, true);
 }
@@ -332,7 +378,7 @@ export function redactSensitive(
     ? alias.trim() || "private-project"
     : "private-path";
 
-  const pairs: Array<{ needle: string; replacement: string }> = [];
+  const pairs: Array<{ needle: string; replacement: string; bounded?: boolean }> = [];
 
   // The cwd plus every ancestor directory, in both separator styles (tools
   // print "\" or "/" interchangeably on Windows). Matching is case-insensitive
@@ -364,6 +410,11 @@ export function redactSensitive(
     if (name.length <= 2) text = replacePrivateIdentity(text, name, safeAlias);
     else pairs.push({ needle: name, replacement: safeAlias });
   }
+  if (service.sensitive) {
+    for (const segment of sensitiveCwdSegments(cwd)) {
+      pairs.push({ needle: segment, replacement: safeAlias, bounded: true });
+    }
+  }
 
   // Longest needles first so a child path keeps its tail, a replaced prefix is
   // never re-matched by a shorter ancestor rule, and a name embedded in a path
@@ -371,8 +422,10 @@ export function redactSensitive(
   pairs.sort((a, b) => b.needle.length - a.needle.length);
 
   let out = text;
-  for (const { needle, replacement } of pairs) {
-    out = out.replace(new RegExp(escapeRegExp(needle), "gi"), () => replacement);
+  for (const { needle, replacement, bounded } of pairs) {
+    out = bounded
+      ? replaceBoundedIdentity(out, needle, replacement)
+      : out.replace(new RegExp(escapeRegExp(needle), "gi"), () => replacement);
   }
 
   return redactStreamText(out, true);
