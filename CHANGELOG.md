@@ -113,6 +113,8 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Muxly's development server now uses port 1421 to avoid the port 1420 conflict with Cromulons when both projects run locally.
+
 - Shutdown now seals service and shell launch gates before collecting children to stop, preventing background launches from escaping cleanup while the application exits.
 
 - Clicked terminal links now open only plain `http`/`https` URLs, and on Windows go through the system URL handler instead of `cmd.exe`, so an `&` or `|` in a link can no longer run as a command or truncate the URL.
