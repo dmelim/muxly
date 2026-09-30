@@ -21,6 +21,21 @@ async function moduleUrl(url) {
   return result;
 }
 const load = async (file) => import(await moduleUrl(new URL(`../src/${file}.ts`, import.meta.url)));
+const { reconcileServices, isServiceActive } = await load("serviceReload");
+
+test("config reload retains removed running services until stopped", () => {
+  const previous = [{ id: "running" }, { id: "stopped" }];
+  const retained = reconcileServices([], previous, new Set(["running"]));
+  assert.deepEqual(retained.services, [previous[0]]);
+  assert.deepEqual([...retained.retainedIds], ["running"]);
+  assert.deepEqual(reconcileServices([], retained.services, new Set()).services, []);
+  const restored = { id: "running", name: "repaired" };
+  assert.deepEqual(reconcileServices([restored], retained.services, new Set(["running"])).services, [restored]);
+  assert.equal(isServiceActive("starting"), true);
+  assert.equal(isServiceActive("stopping"), true);
+  assert.equal(isServiceActive("failed"), false);
+});
+
 const { redactSensitive } = await load("types");
 const { LogSearchCache } = await load("logSearchCache");
 const { DEFAULT_THEME, applyTheme, xtermTheme } = await load("theme");

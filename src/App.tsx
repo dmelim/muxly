@@ -18,6 +18,7 @@ import type {
   WorkspacePanel
 } from "./types";
 import { PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED, SERVICES_CHANGED } from "./events";
+import { isServiceActive, reconcileServices } from "./serviceReload";
 import { formatCommand, displayServiceName, redactStreamWorkspaceText } from "./types";
 import { CommandPalette } from "./CommandPalette";
 import type { Command } from "./CommandPalette";
@@ -169,6 +170,9 @@ export function App() {
   // Kept in sync with `services` so closures captured by the long-lived event
   // listeners (which only mount once) always see the latest config.
   const servicesRef = useRef<ServiceConfig[]>([]);
+  const retainedServiceIdsRef = useRef(new Set<string>());
+  const activeServiceIdsRef = useRef(new Set<string>());
+  activeServiceIdsRef.current = new Set(Object.entries(statuses).filter(([, status]) => isServiceActive(status)).map(([id]) => id));
   // Long-lived command handlers read the current privacy mode.
   const streamModeRef = useRef(false);
   // Per-service auto-restart bookkeeping: how many times we've re-spawned and
@@ -1017,8 +1021,13 @@ export function App() {
 
   const reloadServices = useCallback(async () => {
     try {
-      const { services: loaded, problems } =
+      const { services: configured, problems } =
         await invoke<LoadedServices>("load_services");
+      const activeIds = new Set([...activeServiceIdsRef.current, ...Object.keys(activeRunTokensRef.current)]);
+      const reconciled = reconcileServices(configured, servicesRef.current, activeIds);
+      const loaded = reconciled.services;
+      retainedServiceIdsRef.current = reconciled.retainedIds;
+      servicesRef.current = loaded;
       setServices(loaded);
       setStatuses((current) => {
         const next: Record<string, ServiceStatus> = {};
@@ -1027,7 +1036,9 @@ export function App() {
         }
         return next;
       });
-      if (problems.length > 0) {
+      if (reconciled.retainedIds.size > 0) {
+        setManagerMessage(`${reconciled.retainedIds.size} running service(s) were removed or invalidated in services.json. Kept visible until stopped; config saves are paused.${problems.length ? ` ${problems.join("; ")}` : ""}`);
+      } else if (problems.length > 0) {
         // Some entries were skipped (malformed/invalid/duplicate). Keep the
         // loaded ones working and surface what was dropped — the full list is
         // available on hover since the status line is clamped to two lines.
@@ -1043,6 +1054,19 @@ export function App() {
       setManagerMessage(errorMessage(error));
       throw error;
     }
+  }, []);
+
+  useEffect(() => {
+    if ([...retainedServiceIdsRef.current].some((id) => !isServiceActive(statuses[id]) && activeRunTokensRef.current[id] == null)) {
+      void reloadServices().catch(() => {});
+    }
+  }, [statuses, reloadServices]);
+
+  const persistServices = useCallback(async (next: ServiceConfig[]) => {
+    if (retainedServiceIdsRef.current.size > 0) {
+      throw new Error("Stop the services removed from services.json before saving configuration changes.");
+    }
+    await invoke("save_services", { services: next });
   }, []);
 
   useEffect(() => {
@@ -1359,6 +1383,12 @@ export function App() {
       scheduleRescan(serviceId);
 
       refreshHistory(serviceId);
+
+      if (retainedServiceIdsRef.current.has(serviceId)) {
+        pendingRestartRef.current.delete(serviceId);
+        delete autoRestartRef.current[serviceId];
+        return;
+      }
 
       if (pendingRestartRef.current.has(serviceId)) {
         // The user asked to restart a running service: we stopped it, and now
@@ -1707,6 +1737,16 @@ export function App() {
 
   const startService = useCallback(
     async (service: ServiceConfig) => {
+      if (retainedServiceIdsRef.current.has(service.id)) {
+        // A restart timer may already be queued when the config is removed.
+        // Settle that pending restart so the next reload can retire its tab.
+        if (activeRunTokensRef.current[service.id] == null) {
+          pendingRestartRef.current.delete(service.id);
+          setStatuses((current) => ({ ...current, [service.id]: "stopped" }));
+        }
+        return;
+      }
+      if (!servicesRef.current.some((current) => current.id === service.id)) return;
       const currentStatus = statuses[service.id];
       if (currentStatus === "running" || currentStatus === "starting") {
         return;
@@ -2044,7 +2084,7 @@ export function App() {
       ? services.map((service) => (service.id === editingId ? incoming : service))
       : [...services, incoming];
 
-    await invoke("save_services", { services: next });
+    await persistServices(next);
     const loaded = await reloadServices();
     setSelectedId(incoming.id);
     setEditing(null);
@@ -2054,7 +2094,7 @@ export function App() {
   const importServices = async (incoming: ServiceConfig[]) => {
     if (incoming.length === 0) return;
     const next = [...services, ...incoming];
-    await invoke("save_services", { services: next });
+    await persistServices(next);
     await reloadServices();
     setSelectedId(incoming[0].id);
     setEditing(null);
@@ -2066,7 +2106,7 @@ export function App() {
       throw new Error("Stop the service before deleting it");
     }
     const next = services.filter((service) => service.id !== target.id);
-    await invoke("save_services", { services: next });
+    await persistServices(next);
     await reloadServices();
     setSelectedId(next[0]?.id ?? null);
     setEditing(null);
@@ -2084,10 +2124,10 @@ export function App() {
       const next = services.map((service) =>
         ids.has(service.id) ? { ...service, sensitive } : service
       );
-      await invoke("save_services", { services: next });
+      await persistServices(next);
       await reloadServices();
     },
-    [services, reloadServices]
+    [services, reloadServices, persistServices]
   );
 
   const markFocusedProjectSensitive = useCallback(
@@ -2125,7 +2165,7 @@ export function App() {
         const next = servicesRef.current.map((service) =>
           service.profile === profileId ? { ...service, profile: null } : service
         );
-        await invoke("save_services", { services: next });
+        await persistServices(next);
         await reloadServices();
       }
       const current = settingsRef.current;
@@ -2135,7 +2175,7 @@ export function App() {
         activeProfile: current.activeProfile === profileId ? null : current.activeProfile
       });
     },
-    [persistSettings, reloadServices]
+    [persistSettings, reloadServices, persistServices]
   );
 
   // Reorder a service via drag-and-drop. Mutates the flat services array (the
@@ -2185,13 +2225,13 @@ export function App() {
       if (sameServiceOrder(services, next)) return;
 
       try {
-        await invoke("save_services", { services: next });
+        await persistServices(next);
         await reloadServices();
       } catch (error) {
         setManagerMessage(errorMessage(error));
       }
     },
-    [services, reloadServices]
+    [services, reloadServices, persistServices]
   );
 
   // Reorder whole groups. Group order is derived from the order services first
@@ -2229,13 +2269,13 @@ export function App() {
       if (sameServiceOrder(services, next)) return;
 
       try {
-        await invoke("save_services", { services: next });
+        await persistServices(next);
         await reloadServices();
       } catch (error) {
         setManagerMessage(errorMessage(error));
       }
     },
-    [services, reloadServices]
+    [services, reloadServices, persistServices]
   );
 
   const stopGroup = (groupName: string) => {
@@ -2405,7 +2445,7 @@ export function App() {
   const updateServicePlacement = useCallback(async (service: ServiceConfig, field: "group" | "profile", value: string | null) => {
     const task = servicePlacementQueueRef.current.catch(() => undefined).then(async () => {
       const next = servicesRef.current.map((candidate) => candidate.id === service.id ? { ...candidate, [field]: value } : candidate);
-      await invoke("save_services", { services: next });
+      await persistServices(next);
       const loaded = await reloadServices();
       servicesRef.current = loaded;
     });
