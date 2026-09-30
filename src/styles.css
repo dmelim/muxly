@@ -84,15 +84,21 @@
 }
 
 /* Keep the sidebar scrollbar width and hit area, but draw a square accent
-   thumb at 70% of its proportional height, like the tab scrollbar. */
+   thumb at 70% of its proportional height, like the tab scrollbar. The thumb
+   only shows while the sidebar is hovered; the track keeps its width so
+   content doesn't shift when it appears. */
 .muxly-sidebar-scroll {
   scrollbar-width: auto;
   scrollbar-color: auto;
 }
 
 .muxly-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom, transparent 15%, var(--color-cyan-400) 15% 85%, transparent 85%);
+  background: transparent;
   border-radius: 2px;
+}
+
+.muxly-sidebar-scroll:hover::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, transparent 15%, var(--color-cyan-400) 15% 85%, transparent 85%);
 }
 
 .muxly-sidebar-scroll::-webkit-scrollbar-thumb:hover {

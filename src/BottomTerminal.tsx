@@ -254,12 +254,11 @@ export function BottomTerminal({ open, height, theme, streamMode, redactStreamOu
 
   return (
     <div
-      className="relative mx-2 mb-2 flex shrink-0 flex-col border border-white/10 bg-[#101215] focus-within:border-cyan-400/40"
+      className="relative mx-1 mb-2 flex shrink-0 flex-col bg-[var(--muxly-terminal-bg)]"
       style={{ height: `${height}px` }}
     >
-      {/* Drag handle: a thin invisible strip overlapping the top border, with
-          a hover-revealed accent line. The existing sidebar handles use the
-          same pattern. */}
+      {/* Drag handle: a thin invisible strip across the top edge, with a
+          hover-revealed accent line matching the sidebar handles. */}
       <div
         role="separator"
         aria-orientation="horizontal"
@@ -269,7 +268,7 @@ export function BottomTerminal({ open, height, theme, streamMode, redactStreamOu
       >
         <span className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-transparent transition-colors group-hover/th:bg-cyan-500/60" />
       </div>
-      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-white/10 py-1 pl-3 pr-2">
+      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 py-1 pl-3 pr-2">
         <span className="flex items-center gap-2 text-xs font-medium text-zinc-300">
           <TerminalIcon className="size-3.5 text-cyan-400" />
           Shell

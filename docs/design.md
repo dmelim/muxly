@@ -205,6 +205,7 @@ Details is collapsed, the actions stack vertically beneath its reopen button
 in the narrow icon rail. Closed sidebar controls begin at the same height as
 the terminal tabs, or the terminal body when tabs are disabled.
 The terminal workspace starts at the 8px top inset without a central toolbar.
+Its tabs start at that inset, aligned with the Details action bar.
 The Details sidebar uses the same borderless, slightly lighter inset panel with
 8px outer spacing and 4px spacing toward the workspace. Its header groups the
 editor, folder, browser, and Edit actions beside the title without a separator below.
@@ -239,9 +240,10 @@ without an outer outline. The rounded active tab uses the same background,
 while the rest of the tab row remains transparent. The focused tab uses cyan
 text to identify its panel.
 
-The bottom shell drawer is inset with `mx-2 mb-2`, a neutral one-pixel border,
-and a soft cyan focus border. Its header
-uses the shared Dropdown for installed shell profiles. Switching profiles ends
+The bottom shell drawer is inset with `mx-1 mb-2`, aligning its sides with the
+4px terminal-grid insets and the 8px gaps beside the sidebars. It uses the same
+lighter, borderless terminal surface as the workspace panels, without a header divider.
+Its header uses the shared Dropdown for installed shell profiles. Switching profiles ends
 the current session through an in-app confirmation; the choice survives drawer
 close/reopen for the current app session.
 

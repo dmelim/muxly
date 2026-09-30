@@ -57,6 +57,15 @@ const TERMINAL_OPTIONS = {
 
 const EMPTY_WORKSPACE_DROP_TARGET = "__empty_workspace__";
 
+// xterm 6 defers renderer resizes while a terminal is off-screen, but its
+// scrollbar still syncs against the stale (e.g. one-row) canvas height and
+// never re-syncs once visible — leaving a thumb with nothing to scroll.
+// There's no public API for this, so reach for the viewport directly.
+function resyncScrollbar(terminal: Terminal) {
+  (terminal as unknown as { _core?: { _viewport?: { queueSync?: () => void } } })
+    ._core?._viewport?.queueSync?.();
+}
+
 function terminalBufferText(terminal: Terminal): string {
   const buffer = terminal.buffer.active;
   let text = "";
@@ -372,7 +381,7 @@ export function TerminalPanes({
               onWheel={(event) => {
                 if (event.deltaY && !event.deltaX && !event.ctrlKey) event.currentTarget.scrollLeft += event.deltaY;
               }}
-              className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-1.5 pt-1.5"
+              className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-1.5"
             >
               {panel.tabIds.map((serviceId, tabIndex) => {
                 const service = serviceById.get(serviceId);
@@ -878,6 +887,7 @@ function PaneView({
     );
 
     let resizeObserver: ResizeObserver | null = null;
+    let visibilityObserver: IntersectionObserver | null = null;
     let disposed = false;
     let setupRaf = 0;
     let fitRaf = 0;
@@ -917,6 +927,7 @@ function PaneView({
       } catch {
         /* element not measurable yet */
       }
+      resyncScrollbar(terminal);
     };
 
     // Tell the PTY its new dimensions so tools that probe COLUMNS/LINES and
@@ -966,6 +977,13 @@ function PaneView({
         });
       });
       resizeObserver.observe(wrap);
+
+      // Created after xterm's own observer, so it runs once xterm has resumed
+      // rendering and flushed any resize deferred while hidden.
+      visibilityObserver = new IntersectionObserver((entries) => {
+        if (entries[entries.length - 1]?.isIntersecting) resyncScrollbar(terminal);
+      });
+      visibilityObserver.observe(host);
     });
 
     return () => {
@@ -973,6 +991,7 @@ function PaneView({
       cancelAnimationFrame(setupRaf);
       cancelAnimationFrame(fitRaf);
       resizeObserver?.disconnect();
+      visibilityObserver?.disconnect();
       dataDisposable?.dispose();
       writeParsedDisposable.dispose();
       terminalsRef.current.delete(service.id);
