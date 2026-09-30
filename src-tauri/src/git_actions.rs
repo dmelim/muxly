@@ -42,6 +42,55 @@ fn unavailable(message: &str) -> AppError {
     AppError::ConfigUnavailable(message.into())
 }
 
+fn hash_untracked(root: &Path, path: &str, hasher: &mut impl Hasher) -> std::io::Result<()> {
+    use std::io::Read;
+    let full_path = root.join(path);
+    let metadata = std::fs::symlink_metadata(&full_path)?;
+    path.hash(hasher);
+    if metadata.file_type().is_symlink() {
+        std::fs::read_link(full_path)?.hash(hasher);
+    } else if metadata.is_file() {
+        let mut file = std::fs::File::open(full_path)?;
+        let mut buffer = [0u8; 65536];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 { break; }
+            hasher.write(&buffer[..count]);
+        }
+    } else if metadata.is_dir() {
+        // `--untracked-files=all` only lists a directory (as "dir/") when it is
+        // an embedded repository. Committing it records a gitlink, not its
+        // files, so its path alone identifies the reviewed change.
+    } else {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Cannot review an untracked special file; stage it in your editor first"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+
+    #[test]
+    fn untracked_rewrites_change_review_token_even_at_same_length() {
+        let root = std::env::temp_dir().join(format!("muxly-untracked-review-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("new-file.txt");
+        std::fs::write(&path, "before").unwrap();
+        let mut before = DefaultHasher::new();
+        hash_untracked(&root, "new-file.txt", &mut before).unwrap();
+        std::fs::write(&path, "after!").unwrap();
+        let mut after = DefaultHasher::new();
+        hash_untracked(&root, "new-file.txt", &mut after).unwrap();
+        assert_ne!(before.finish(), after.finish());
+        std::fs::remove_file(path).unwrap();
+        assert!(hash_untracked(&root, "new-file.txt", &mut after).is_err());
+        std::fs::create_dir(root.join("embedded")).unwrap();
+        assert!(hash_untracked(&root, "embedded/", &mut after).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 fn snapshot(app: &AppHandle, cwd: &Path) -> Result<Snapshot, AppError> {
     let state = inspect(app, cwd)?.ok_or_else(|| unavailable("Service is not inside a Git repository"))?;
     let root = Path::new(&state.root);
@@ -65,7 +114,11 @@ fn snapshot(app: &AppHandle, cwd: &Path) -> Result<Snapshot, AppError> {
     state.branch.hash(&mut hasher);
     status.hash(&mut hasher);
     // Include staged and unstaged content so edits made while the modal is open
-    // require a fresh review before a commit. Untracked files are listed by path.
+    // require a fresh review before a commit, including untracked contents.
+    for change in changes.iter().filter(|change| change.status == "??") {
+        hash_untracked(root, &change.path, &mut hasher)
+            .map_err(|error| unavailable(&format!("Could not review {}: {error}", change.path)))?;
+    }
     for args in [vec!["diff", "--no-ext-diff", "--no-textconv", "--binary"], vec!["diff", "--cached", "--no-ext-diff", "--no-textconv", "--binary"], vec!["rev-parse", "--verify", "--quiet", "HEAD"]] {
         let reading_head = args[0] == "rev-parse";
         let output = git_command(app, root).args(args).output()
