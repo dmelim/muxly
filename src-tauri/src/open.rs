@@ -70,18 +70,28 @@ pub fn open_in_file_manager(
 }
 
 /// Open a URL in the default browser.
-#[tauri::command]
+///
+/// URLs arrive from clickable terminal output, which is untrusted text, so
+/// only plain http(s) links are accepted and none reach a shell.
+#[tauri::command(async)]
 pub fn open_url(url: String) -> Result<(), AppError> {
-    let (program, args) = url_opener_command(&url);
-    Command::new(program)
-        .args(&args)
-        .spawn()
-        .map(|_| ())
-        .map_err(|source| AppError::ProcessStart {
-            program: program.to_string(),
-            cwd: PathBuf::from("."),
-            source,
-        })
+    if !is_web_url(&url) {
+        return Err(AppError::ConfigUnavailable(
+            "Only http and https links can be opened".into(),
+        ));
+    }
+    open_web_url(&url).map_err(|source| AppError::ProcessStart {
+        program: "default browser".to_string(),
+        cwd: PathBuf::from("."),
+        source,
+    })
+}
+
+fn is_web_url(url: &str) -> bool {
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://"))
+        && url.len() <= 8192
+        && !url.chars().any(|character| character.is_whitespace() || character.is_control())
 }
 
 fn resolve(cwd: &str, config_dir: &ServicesConfigDir) -> Result<PathBuf, AppError> {
@@ -155,23 +165,61 @@ fn file_manager_command(path: &Path) -> (&'static str, Vec<String>) {
 }
 
 #[cfg(windows)]
-fn url_opener_command(url: &str) -> (&'static str, Vec<String>) {
-    // `cmd /C start "" "url"` is the most reliable way to hand a URL to the
-    // default browser on Windows. The empty `""` is the window title argument
-    // that `start` requires when the first quoted token would otherwise be
-    // taken as the title.
-    (
-        "cmd",
-        vec!["/C".to_string(), "start".to_string(), "".to_string(), url.to_string()],
-    )
+fn open_web_url(url: &str) -> io::Result<()> {
+    // ShellExecuteW hands the URL to its registered handler directly. Routing
+    // it through `cmd /C start` let `&`, `|` and `^` in a clicked link run as
+    // shell syntax, because argument quoting cannot make text safe for cmd.exe.
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+
+    let wide = |value: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(value).encode_wide().chain(std::iter::once(0)).collect()
+    };
+    let operation = wide("open");
+    let file = wide(url);
+    // SAFETY: both strings are NUL-terminated and outlive the call; null
+    // window, parameters and directory are documented as optional.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // Values above 32 indicate success; lower values are error codes.
+    let code = result as isize;
+    if code > 32 {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("ShellExecuteW failed with code {code}")))
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn url_opener_command(url: &str) -> (&'static str, Vec<String>) {
-    ("open", vec![url.to_string()])
+fn open_web_url(url: &str) -> io::Result<()> {
+    Command::new("open").arg(url).spawn().map(|_| ())
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn url_opener_command(url: &str) -> (&'static str, Vec<String>) {
-    ("xdg-open", vec![url.to_string()])
+fn open_web_url(url: &str) -> io::Result<()> {
+    Command::new("xdg-open").arg(url).spawn().map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_web_url;
+
+    #[test]
+    fn only_plain_web_urls_can_be_opened() {
+        assert!(is_web_url("http://localhost:3000/?a=1&b=2"));
+        assert!(is_web_url("HTTPS://example.com/path"));
+        assert!(!is_web_url("file:///C:/Windows/System32/calc.exe"));
+        assert!(!is_web_url("javascript:alert(1)"));
+        assert!(!is_web_url("http://x/ & calc"));
+        assert!(!is_web_url("http://x/\ncalc"));
+        assert!(!is_web_url("htt"));
+    }
 }

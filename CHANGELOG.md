@@ -115,6 +115,8 @@ design fixes and manual verification are complete.
 
 - Shutdown now seals service and shell launch gates before collecting children to stop, preventing background launches from escaping cleanup while the application exits.
 
+- Clicked terminal links now open only plain `http`/`https` URLs, and on Windows go through the system URL handler instead of `cmd.exe`, so an `&` or `|` in a link can no longer run as a command or truncate the URL.
+
 - Starting services, opening the shell drawer, and saving services or settings no longer run on the UI thread, so a slow login-shell PATH lookup or disk write cannot freeze the window. Concurrent starts of the same service are rejected instead of spawning it twice.
 
 - Terminal scrollbars resynchronize when hidden tabs become visible, restoring scrolling after a deferred resize.
