@@ -198,6 +198,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
 
 #[tauri::command]
 pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSettings, AppError> {
+    let _write_guard = crate::config_write::CONFIG_WRITE_LOCK.lock();
     migrate_global_project_privacy(&mut settings);
     if settings.editor_command.trim().is_empty() {
         settings.editor_command = default_editor_command().to_string();
@@ -229,7 +230,7 @@ pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSet
         path: path.clone(),
         source,
     })?;
-    fs::write(&path, text).map_err(|source| AppError::IoPath {
+    crate::config_write::write_config(&path, text.as_bytes()).map_err(|source| AppError::IoPath {
         action: "write",
         path,
         source,

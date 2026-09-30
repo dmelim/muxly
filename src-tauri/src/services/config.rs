@@ -149,6 +149,11 @@ pub fn save_service_config(
     config_dir: &ServicesConfigDir,
     services: &[ServiceConfig],
 ) -> Result<(), AppError> {
+    let _write_guard = crate::config_write::CONFIG_WRITE_LOCK.lock();
+    // Check the actual source, including the development cwd fallback. Never
+    // turn a resilient partial load into a destructive full-list replacement.
+    let source_path = service_config_path(app)?;
+    ensure_saveable(&source_path)?;
     validate_services(services).map_err(|problems| AppError::ConfigInvalid {
         path: PathBuf::from("(unsaved)"),
         problems,
@@ -159,13 +164,29 @@ pub fn save_service_config(
         path: path.clone(),
         source,
     })?;
-    fs::write(&path, text).map_err(|source| AppError::IoPath {
+    crate::config_write::write_config(&path, text.as_bytes()).map_err(|source| AppError::IoPath {
         action: "write",
         path: path.clone(),
         source,
     })?;
 
     config_dir.set_from_path(&path);
+    Ok(())
+}
+
+fn ensure_saveable(path: &Path) -> Result<(), AppError> {
+    let text = fs::read_to_string(path).map_err(|source| AppError::IoPath {
+        action: "read before saving", path: path.to_path_buf(), source,
+    })?;
+    let loaded = parse_service_list(&text).map_err(|source| AppError::ConfigParse {
+        path: path.to_path_buf(), source,
+    })?;
+    if !loaded.problems.is_empty() {
+        return Err(AppError::ConfigUnavailable(format!(
+            "Repair the skipped entries in {} before saving: {}",
+            path.display(), loaded.problems.join("; ")
+        )));
+    }
     Ok(())
 }
 
@@ -269,6 +290,18 @@ pub fn resolve_cwd(cwd: &str, base_dir: Option<&Path>) -> Result<PathBuf, AppErr
 mod tests {
     use super::{parse_service_list, resolve_cwd};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn saving_rejects_partial_load_until_source_is_repaired() {
+        let path = std::env::temp_dir().join(format!("muxly-save-guard-{}.json", std::process::id()));
+        let invalid = r#"[{"id":"good","name":"Good","program":"node","cwd":"."},{"id":"bad","args":{}}]"#;
+        std::fs::write(&path, invalid).unwrap();
+        assert!(super::ensure_saveable(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
+        std::fs::write(&path, "[]").unwrap();
+        assert!(super::ensure_saveable(&path).is_ok());
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn parse_skips_malformed_entry_and_keeps_the_rest() {

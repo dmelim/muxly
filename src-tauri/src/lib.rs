@@ -1,4 +1,5 @@
 mod commands;
+mod config_write;
 mod editor;
 mod error;
 mod events;
