@@ -895,12 +895,6 @@ function PaneView({
         if (event.type !== "keydown" || event.key.toLowerCase() !== "c") {
           return true;
         }
-        if (event.ctrlKey && !event.metaKey && !event.shiftKey) {
-          void invoke("service_pty_write", { serviceId: service.id, data: "\x03" }).catch(() => {
-            /* stopped or session gone */
-          });
-          return false;
-        }
         if (event.ctrlKey && event.shiftKey && terminal.hasSelection()) {
           void navigator.clipboard.writeText(terminal.getSelection());
           return false;
@@ -1130,7 +1124,55 @@ function PaneView({
           onAdoptRunningInstance={onAdoptRunningInstance}
         />
       ) : null}
-      <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3">
+      <div
+        ref={wrapRef}
+        className="relative min-h-0 flex-1 overflow-hidden p-3"
+        onKeyDownCapture={(event) => {
+          // Copy selected text; otherwise send ^C to a PTY or stop a
+          // pipe-backed service, which has no terminal input channel.
+          const target = event.target as HTMLElement;
+          const surface = target.closest("[data-terminal-content], [data-terminal-mirror]");
+          const mirror = target.closest("[data-terminal-mirror]");
+          const selection = surface ? window.getSelection() : null;
+          const selectedDomText =
+            selection &&
+            !selection.isCollapsed &&
+            (surface?.contains(selection.anchorNode) || surface?.contains(selection.focusNode))
+              ? selection.toString()
+              : "";
+          if (
+            !event.ctrlKey ||
+            event.metaKey ||
+            event.altKey ||
+            event.shiftKey ||
+            event.key.toLowerCase() !== "c" ||
+            !surface
+          ) return;
+          if (mirror && selectedDomText) return;
+          const terminal = terminalsRef.current.get(service.id);
+          const selectedText = !mirror && terminal?.hasSelection()
+            ? terminal.getSelection()
+            : selectedDomText;
+          if (selectedText) {
+            event.preventDefault();
+            event.stopPropagation();
+            void navigator.clipboard.writeText(selectedText);
+            return;
+          }
+          if (!running) return;
+          event.preventDefault();
+          event.stopPropagation();
+          // A held Ctrl-C must not re-stop a pipe service on every key repeat.
+          if (event.repeat && !service.usePty) return;
+          if (service.usePty) {
+            void invoke("service_pty_write", { serviceId: service.id, data: "\x03" }).catch(() => {
+              /* stopped or session gone */
+            });
+          } else {
+            onStop();
+          }
+        }}
+      >
         <TerminalPrivacy
           redacted={concealed}
           content={streamSnapshot}
