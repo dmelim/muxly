@@ -214,6 +214,7 @@ pub fn spawn_service_pty(
         command.env("TERM", "xterm-256color");
     }
 
+    let _launch = registry.launch_gate.enter()?;
     let mut child = pair
         .slave
         .spawn_command(command)
@@ -225,23 +226,23 @@ pub fn spawn_service_pty(
 
     let pid = child.process_id().unwrap_or(0);
 
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|err| AppError::ProcessStop(format!("clone_reader failed: {err}")))?;
-    // Take the writer so the UI can send keystrokes to the child. Both
-    // `try_clone_reader` and `take_writer` borrow `&master`, so we do them
-    // before moving the master into the session registry below.
-    let writer =
-        Arc::new(Mutex::new(pair.master.take_writer().map_err(|err| {
-            AppError::ProcessStop(format!("take_writer failed: {err}"))
-        })?));
-
     let killer: PtyKillHandle = Arc::new(Mutex::new(child.clone_killer()));
-    // On Windows this also captures the child in a Job Object so stopping the
-    // service reaps any grandchildren it spawns; elsewhere it's just the
-    // killer. See `platform::pty_terminator`.
     let terminator = pty_terminator(killer, pid);
+    let handles = (|| -> Result<_, AppError> {
+        let reader = pair.master.try_clone_reader()
+            .map_err(|err| AppError::ProcessStop(format!("clone_reader failed: {err}")))?;
+        let writer = Arc::new(Mutex::new(pair.master.take_writer()
+            .map_err(|err| AppError::ProcessStop(format!("take_writer failed: {err}")))?));
+        Ok((reader, writer))
+    })();
+    let (reader, writer) = match handles {
+        Ok(handles) => handles,
+        Err(error) => {
+            let _ = terminator.terminate();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
 
     // One token for this run, shared by the registry entry, the PTY session,
     // and the waiter below. A fast restart reuses `service.id`, so cleanup

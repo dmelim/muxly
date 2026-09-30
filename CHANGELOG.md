@@ -113,6 +113,10 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Shutdown now seals service and shell launch gates before collecting children to stop, preventing background launches from escaping cleanup while the application exits.
+
+- Starting services, opening the shell drawer, and saving services or settings no longer run on the UI thread, so a slow login-shell PATH lookup or disk write cannot freeze the window. Concurrent starts of the same service are rejected instead of spawning it twice.
+
 - Terminal scrollbars resynchronize when hidden tabs become visible, restoring scrolling after a deferred resize.
 
 - Configuration saves refuse to discard invalid service entries and use atomic replacement with a previous-file `.json.bak` recovery copy for services and settings.

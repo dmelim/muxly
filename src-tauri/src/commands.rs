@@ -84,7 +84,7 @@ pub fn activate_runtime_fallback(
     activate_fallback(&path, &fallbacks)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn start_service(
     app: AppHandle,
     registry: State<'_, ProcessRegistry>,
@@ -92,10 +92,13 @@ pub fn start_service(
     service: ServiceConfig,
     on_output: Channel<ProcessOutputEvent>,
 ) -> Result<(), AppError> {
+    let Some(_reservation) = registry.reserve_start(&service.id) else {
+        return Err(AppError::AlreadyRunning { service_name: service.name });
+    };
     spawn_process(app, &registry, &config_dir, service, on_output)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_services(
     app: AppHandle,
     config_dir: State<'_, ServicesConfigDir>,
@@ -162,7 +165,7 @@ pub async fn stop_service(
 
 /// Open an interactive shell PTY. The frontend chooses `pty_id` so multiple
 /// shells can coexist without coordination round-trips.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_open(
     app: AppHandle,
     registry: State<'_, PtyRegistry>,

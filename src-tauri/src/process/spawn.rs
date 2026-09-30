@@ -83,6 +83,7 @@ pub fn spawn_process(
 
     configure_process_group(&mut command);
 
+    let _launch = registry.launch_gate.enter()?;
     let mut child = command.spawn().map_err(|source| AppError::ProcessStart {
         program: service.program.clone(),
         cwd: cwd.clone(),

@@ -6,6 +6,7 @@ mod events;
 mod git;
 mod history;
 mod import;
+mod launch_gate;
 mod net;
 mod open;
 mod process;
@@ -92,7 +93,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::CloseRequested { .. }) {
                 let registry = window.state::<ProcessRegistry>();
-                let terminators = registry.running_terminators();
+                let terminators = registry.shutdown_terminators();
 
                 // Kill any open interactive shells synchronously — they don't
                 // need the graceful-shutdown dance services get, and we don't
@@ -154,7 +155,7 @@ pub fn run() {
         if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
             app_handle.state::<PtyRegistry>().close_all();
 
-            let terminators = app_handle.state::<ProcessRegistry>().running_terminators();
+            let terminators = app_handle.state::<ProcessRegistry>().shutdown_terminators();
             terminate_with_timeout(terminators, Duration::from_secs(3));
         }
     });

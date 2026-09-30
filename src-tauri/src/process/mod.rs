@@ -6,7 +6,7 @@ mod spawn_pty;
 mod utf8;
 
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use platform::{configure_process_group, resolve_program, resume_child, ProcessTerminator};
@@ -35,9 +35,31 @@ pub struct RunningProcess {
 pub struct ProcessRegistry {
     processes: Mutex<HashMap<String, RunningProcess>>,
     next_token: AtomicU64,
+    starting: Mutex<HashSet<String>>,
+    pub(crate) launch_gate: crate::launch_gate::LaunchGate,
+}
+
+/// Prevent overlapping starts of the same service.
+pub struct StartReservation<'a> {
+    registry: &'a ProcessRegistry,
+    service_id: String,
+}
+
+impl Drop for StartReservation<'_> {
+    fn drop(&mut self) {
+        self.registry.starting.lock().remove(&self.service_id);
+    }
 }
 
 impl ProcessRegistry {
+    pub fn reserve_start(&self, service_id: &str) -> Option<StartReservation<'_>> {
+        let mut starting = self.starting.lock();
+        if self.is_running(service_id) || !starting.insert(service_id.to_string()) {
+            return None;
+        }
+        Some(StartReservation { registry: self, service_id: service_id.to_string() })
+    }
+
     /// Mint a fresh run token. Both spawn paths call this once per run and
     /// thread the value through the registry entry, the PTY session, and the
     /// waiter so all three agree on which run they belong to.
@@ -72,7 +94,8 @@ impl ProcessRegistry {
         }
     }
 
-    pub fn running_terminators(&self) -> Vec<ProcessTerminator> {
+    pub fn shutdown_terminators(&self) -> Vec<ProcessTerminator> {
+        self.launch_gate.close();
         self.processes()
             .values()
             .map(|process| process.terminator.clone())

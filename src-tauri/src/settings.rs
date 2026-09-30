@@ -196,7 +196,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, AppError> {
     Ok(settings)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<AppSettings, AppError> {
     let _write_guard = crate::config_write::CONFIG_WRITE_LOCK.lock();
     migrate_global_project_privacy(&mut settings);

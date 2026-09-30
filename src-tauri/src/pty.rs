@@ -33,6 +33,7 @@ struct PtySession {
 #[derive(Default)]
 pub struct PtyRegistry {
     sessions: Mutex<HashMap<String, Arc<PtySession>>>,
+    launch_gate: crate::launch_gate::LaunchGate,
 }
 
 impl PtyRegistry {
@@ -51,6 +52,7 @@ impl PtyRegistry {
     /// Kill every live session. Used on app shutdown so the OS doesn't get
     /// orphan shell processes when the window closes.
     pub fn close_all(&self) {
+        self.launch_gate.close();
         let sessions: Vec<_> = self.sessions.lock().drain().map(|(_, s)| s).collect();
         for session in sessions {
             let _ = session.killer.lock().kill();
@@ -103,6 +105,7 @@ pub fn open_pty(
     // Hint xterm-compatible escape handling for tools that probe TERM.
     command.env("TERM", "xterm-256color");
 
+    let _launch = registry.launch_gate.enter()?;
     let mut child = pair
         .slave
         .spawn_command(command)
@@ -115,14 +118,21 @@ pub fn open_pty(
     // Clone the reader and take the writer *before* the master moves into the
     // session struct — both methods take `&self` so the order is flexible, but
     // doing it here keeps ownership transitions obvious.
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|err| AppError::ProcessStop(format!("clone_reader failed: {err}")))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|err| AppError::ProcessStop(format!("take_writer failed: {err}")))?;
+    let handles = (|| -> Result<_, AppError> {
+        let reader = pair.master.try_clone_reader()
+            .map_err(|err| AppError::ProcessStop(format!("clone_reader failed: {err}")))?;
+        let writer = pair.master.take_writer()
+            .map_err(|err| AppError::ProcessStop(format!("take_writer failed: {err}")))?;
+        Ok((reader, writer))
+    })();
+    let (reader, writer) = match handles {
+        Ok(handles) => handles,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
     let killer = child.clone_killer();
 
     let session = PtySession {
