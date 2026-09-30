@@ -46,6 +46,8 @@ pub struct WorkspacePanel {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    #[serde(default)]
+    pub default_shell_id: Option<String>,
     #[serde(default = "default_editor_command_string")]
     pub editor_command: String,
     #[serde(default)]
@@ -107,6 +109,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            default_shell_id: None,
             editor_command: default_editor_command().to_string(),
             custom_editors: Vec::new(),
             hide_project_names: false,

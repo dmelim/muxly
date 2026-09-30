@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { AppSettings, EditorCandidate, ServiceConfig } from "./types";
 import { displayServiceName, maskSensitiveName } from "./types";
 import { groupServices } from "./appUtils";
@@ -48,12 +49,13 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: "privacy", label: "Privacy" }
 ];
 const SETTINGS_TAB_SECTIONS: Record<SettingsTab, string[]> = {
-  general: ["Editor", "Auto-restart", "Logs"],
+  general: ["Editor", "Shell", "Auto-restart", "Logs"],
   workspace: ["Layout", "Profiles"],
   appearance: ["Appearance"],
   privacy: ["Privacy", "Sensitive services"]
 };
 const SETTINGS_SEARCH_METADATA = {
+  Shell: "default shell terminal powershell pwsh command prompt cmd git bash zsh fish",
   Editor: "editor default command open in editor code code.cmd nvim subl installed detected scan rescan custom executable path add remove",
   "Auto-restart": "auto restart crash max attempts re-spawn window seconds budget",
   Logs: "logs output buffer max log chunks prepend timestamps hh:mm:ss",
@@ -64,6 +66,7 @@ const SETTINGS_SEARCH_METADATA = {
   "Sensitive services": "sensitive services projects privacy stream hidden reveal names"
 } as const;
 const UNTOUCHED_FIELDS = {
+  defaultShellId: false,
   editorCommand: false,
   customEditors: false,
   maxAttempts: false,
@@ -120,6 +123,16 @@ export function SettingsView({
   streamMode
 }: Props) {
   const [editorCommand, setEditorCommand] = useState(settings.editorCommand);
+  const [defaultShellId, setDefaultShellId] = useState(settings.defaultShellId ?? "default");
+  const [shellProfiles, setShellProfiles] = useState<Array<{ id: string; label: string }>>([]);
+  const [shellDiscoveryError, setShellDiscoveryError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<Array<{ id: string; label: string }>>("discover_shells")
+      .then((profiles) => { if (!cancelled) setShellProfiles(profiles); })
+      .catch(() => { if (!cancelled) setShellDiscoveryError("Could not discover installed shells."); });
+    return () => { cancelled = true; };
+  }, []);
   const [customEditors, setCustomEditors] = useState(
     () => normalizeCustomEditors(settings.customEditors)
   );
@@ -160,6 +173,7 @@ export function SettingsView({
   // Keep untouched form fields aligned with async settings loads, while still
   // preserving in-progress edits when other settings (like privacy) are saved.
   useEffect(() => {
+    if (!touchedFields.defaultShellId) setDefaultShellId(settings.defaultShellId ?? "default");
     if (!touchedFields.editorCommand) {
       setEditorCommand(settings.editorCommand);
     }
@@ -217,6 +231,7 @@ export function SettingsView({
 
     const next: AppSettings = {
       ...settings,
+      defaultShellId,
       editorCommand,
       customEditors,
       autoRestartMaxAttempts: clamp(parsedAttempts, 0, AUTO_RESTART_MAX_ATTEMPTS_LIMIT),
@@ -236,6 +251,7 @@ export function SettingsView({
       // Re-sync from the backend's view of the truth — backend clamps may
       // differ from what the user typed (e.g. "999" attempts → 20).
       setEditorCommand(saved.editorCommand);
+      setDefaultShellId(saved.defaultShellId ?? "default");
       setCustomEditors(normalizeCustomEditors(saved.customEditors));
       setMaxAttempts(String(saved.autoRestartMaxAttempts));
       setWindowSeconds(String(Math.round(saved.autoRestartWindowMs / 1000)));
@@ -410,6 +426,7 @@ export function SettingsView({
   // Detect form dirtiness so the Save button can disable cleanly when the
   // visible values match the persisted ones.
   const formDirty =
+    (touchedFields.defaultShellId && defaultShellId !== (settings.defaultShellId ?? "default")) ||
     (touchedFields.editorCommand && editorCommand.trim() !== settings.editorCommand) ||
     (touchedFields.customEditors && !sameCustomEditors(customEditors, settings.customEditors)) ||
     (touchedFields.maxAttempts && maxAttempts !== String(settings.autoRestartMaxAttempts)) ||
@@ -491,6 +508,33 @@ export function SettingsView({
               <button type="button" onClick={() => setSettingsQuery("")} className="mt-2 text-xs text-cyan-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40">Clear search</button>
             </div>
           ) : null}
+          <Section
+            title="Shell"
+            visible={sectionVisible("Shell")}
+            description="Choose the shell used when opening the built-in terminal."
+            searchQuery={settingsQuery}
+            keywords={SETTINGS_SEARCH_METADATA.Shell}
+          >
+            <FormRow label="Default shell" hint="Applies after Save to new sessions, including Open terminal from a service. Existing sessions keep their current shell.">
+              <Dropdown
+                value={defaultShellId}
+                ariaLabel="Default shell"
+                options={[
+                  { value: "default", label: "System default" },
+                  ...shellProfiles.map((shell) => ({ value: shell.id, label: shell.label })),
+                  ...(defaultShellId !== "default" && !shellProfiles.some((shell) => shell.id === defaultShellId)
+                    ? [{ value: defaultShellId, label: "Saved shell (unavailable)" }] : [])
+                ]}
+                onChange={(value) => {
+                  setDefaultShellId(value);
+                  setTouchedFields((current) => ({ ...current, defaultShellId: true }));
+                  setSaveMessage(null);
+                }}
+                className="w-full"
+              />
+              {shellDiscoveryError ? <p role="status" className="pt-2 text-xs text-amber-300">{shellDiscoveryError}</p> : null}
+            </FormRow>
+          </Section>
           <Section
             title="Editor"
             visible={sectionVisible("Editor")}

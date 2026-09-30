@@ -40,6 +40,8 @@ function terminalBufferText(terminal: Terminal): string {
 }
 
 type BottomTerminalProps = {
+  defaultShellId?: string;
+  cwd?: string | null;
   streamMode: boolean;
   redactStreamOutput: (text: string) => string;
   /** Visible flag — the parent controls open/close so the height transitions
@@ -62,8 +64,11 @@ type BottomTerminalProps = {
  * close/reopen we can buffer output later — for now "close" really means
  * "end this session", matching VS Code's terminal panel behaviour.
  */
-export function BottomTerminal({ open, height, theme, streamMode, redactStreamOutput, onClose, onResizeStart }: BottomTerminalProps) {
-  const [shellId, setShellId] = useState("default");
+export function BottomTerminal({ open, cwd = null, defaultShellId = "default", height, theme, streamMode, redactStreamOutput, onClose, onResizeStart }: BottomTerminalProps) {
+  const [shellId, setShellId] = useState(defaultShellId);
+  useEffect(() => {
+    if (!open) setShellId(defaultShellId);
+  }, [open, defaultShellId]);
   const [shells, setShells] = useState<Array<{ id: string; label: string }>>([]);
   const [pendingShell, setPendingShell] = useState<string | null>(null);
   const [shellError, setShellError] = useState<string | null>(null);
@@ -189,7 +194,7 @@ export function BottomTerminal({ open, height, theme, streamMode, redactStreamOu
         cols: terminal.cols || 80,
         rows: terminal.rows || 24,
         // `null` lets the backend pick the user home directory.
-        cwd: null,
+        cwd,
         shellId,
         onOutput
       }).catch((error) => {
@@ -246,7 +251,7 @@ export function BottomTerminal({ open, height, theme, streamMode, redactStreamOu
       terminalRef.current = null;
       ptyIdRef.current = null;
     };
-  }, [open, shellId]);
+  }, [open, shellId, cwd]);
 
   if (!open) {
     return null;

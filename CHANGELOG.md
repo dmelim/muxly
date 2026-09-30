@@ -35,6 +35,10 @@ design fixes and manual verification are complete.
 
 ### Added
 
+- Settings now lets you choose the default installed shell for new built-in terminal sessions, including terminals opened from a service.
+
+- Service output context menus now offer Open terminal in Muxly's built-in shell drawer in the service working directory, using the default shell, alongside copy and paste actions. Replacing an open shell session asks for confirmation.
+
 - The shell drawer now offers detected shell profiles, including Windows PowerShell, PowerShell 7, Command Prompt, and Git Bash when installed, with an explicit session-switch confirmation.
 
 - The repository inspector now offers a Push dialog with changed-file review, staged or all-change commits, remote selection, and separate Commit, Push, and Commit & push actions.

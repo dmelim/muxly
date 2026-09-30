@@ -1,7 +1,7 @@
 import { TabsScrollArea } from "./TabsScrollArea";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { DragEvent, MutableRefObject, ReactNode } from "react";
+import type { DragEvent, MouseEvent as ReactMouseEvent, MutableRefObject, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -10,7 +10,7 @@ import { Terminal } from "@xterm/xterm";
 import type { ServiceConfig, ServiceStatus, WorkspacePanel } from "./types";
 import type { StartHealth } from "./appTypes";
 import { displayServiceName, formatCommand } from "./types";
-import { groupKey, statusLabels } from "./appUtils";
+import { errorMessage, groupKey, statusLabels } from "./appUtils";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 import type { MuxlyTheme } from "./theme";
@@ -137,6 +137,7 @@ type TerminalPanesProps = {
   onStop: (service: ServiceConfig) => void;
   onClear: (serviceId: string) => void;
   onOpenSearch: (serviceId: string) => void;
+  onOpenTerminal: (service: ServiceConfig) => void;
   onCloseSearch: () => void;
   onStopBlockerAndRestart: (service: ServiceConfig) => void;
   onAdoptRunningInstance: (service: ServiceConfig) => void;
@@ -179,6 +180,7 @@ export function TerminalPanes({
   onStop,
   onClear,
   onOpenSearch,
+  onOpenTerminal,
   onCloseSearch,
   onStopBlockerAndRestart,
   onAdoptRunningInstance,
@@ -526,6 +528,7 @@ export function TerminalPanes({
                 onStop={() => onStop(service)}
                 onClear={() => onClear(service.id)}
                 onOpenSearch={() => onOpenSearch(service.id)}
+                onOpenTerminal={() => onOpenTerminal(service)}
                 onCloseSearch={onCloseSearch}
                 onStopBlockerAndRestart={() => onStopBlockerAndRestart(service)}
                 onAdoptRunningInstance={() => onAdoptRunningInstance(service)}
@@ -757,6 +760,7 @@ type PaneViewProps = {
   onStop: () => void;
   onClear: () => void;
   onOpenSearch: () => void;
+  onOpenTerminal: () => void;
   onCloseSearch: () => void;
   onStopBlockerAndRestart: () => void;
   onAdoptRunningInstance: () => void;
@@ -790,6 +794,7 @@ function PaneView({
   onStop,
   onClear,
   onOpenSearch,
+  onOpenTerminal,
   onCloseSearch,
   onStopBlockerAndRestart,
   onAdoptRunningInstance,
@@ -818,6 +823,42 @@ function PaneView({
   const redactStreamOutputRef = useRef(redactStreamOutput);
   redactStreamOutputRef.current = redactStreamOutput;
   const renderedPrivacyRef = useRef<string | null>(null);
+  const [paneMenu, setPaneMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [paneActionError, setPaneActionError] = useState<string | null>(null);
+  const menuFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => setPaneMenu(null), [service, streamMode, running]);
+
+  const showPaneMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    // Search fields retain their editing menu; xterm's hidden textarea uses this menu.
+    if ((event.target as HTMLElement).closest("input, [contenteditable='true']")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onFocus();
+    menuFocusRef.current = document.activeElement as HTMLElement | null;
+    const terminal = terminalsRef.current.get(service.id);
+    const selection = concealed
+      ? window.getSelection()?.toString() ?? ""
+      : terminal?.getSelection() ?? "";
+    const run = (action: () => Promise<unknown>) => {
+      setPaneActionError(null);
+      void action().catch((error) => setPaneActionError(errorMessage(error)));
+    };
+    setPaneMenu({ x: event.clientX, y: event.clientY, items: [
+      { id: "open-terminal", label: "Open terminal", action: onOpenTerminal },
+      { id: "clipboard", separator: true },
+      { id: "copy", label: "Copy", disabled: !selection, action: () => run(() => navigator.clipboard.writeText(selection)) },
+      { id: "paste", label: "Paste", disabled: !service.usePty || !running, reason: "Requires a running PTY service", action: () => run(async () => {
+        const text = await navigator.clipboard.readText();
+        const current = terminalsRef.current.get(service.id);
+        if (!current) return;
+        if (concealed) pasteIntoRedactedTerminal(current, text);
+        else current.paste(text);
+        current.focus();
+      }) },
+      { id: "select-all", label: "Select all", disabled: concealed, action: () => terminal?.selectAll() },
+      { id: "clear", label: "Clear output", action: onClear }
+    ] });
+  };
 
   const updateStreamSnapshot = useCallback((terminal: Terminal) => {
     setStreamSnapshot(redactStreamOutputRef.current(terminalBufferText(terminal)));
@@ -1086,8 +1127,17 @@ function PaneView({
   return (
     <div
       onMouseDown={onFocus}
+      onContextMenuCapture={showPaneMenu}
+      onKeyDownCapture={(event) => {
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: rect.left + 12, clientY: rect.top + 12 }));
+      }}
       className="relative flex min-h-0 flex-1 flex-col bg-[var(--muxly-terminal-bg)]"
     >
+      {paneMenu ? <ContextMenu {...paneMenu} onClose={() => setPaneMenu(null)} restoreFocusRef={menuFocusRef} /> : null}
+      {paneActionError ? <p role="alert" className="shrink-0 px-3 py-2 text-xs text-rose-300">{redactStreamOutput(paneActionError)}</p> : null}
       {showIdentity ? <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/10 pl-3 pr-1.5">
         {showIdentity ? <span className="flex min-w-0 items-center gap-2">
           {/* Adopted services show a cyan dot regardless of the underlying

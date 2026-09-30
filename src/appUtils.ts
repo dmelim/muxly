@@ -34,6 +34,7 @@ export const statusLabels: Record<ServiceStatus, string> = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  defaultShellId: "default",
   editorCommand: "code",
   customEditors: [],
   hiddenProjectNames: {},

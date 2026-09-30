@@ -29,6 +29,7 @@ import { Tooltip } from "./Tooltip";
 import { GlobalSearch } from "./GlobalSearch";
 import { TerminalPanes, type TabMenuAction } from "./TerminalPanes";
 import { BottomTerminal } from "./BottomTerminal";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { SettingsView } from "./SettingsView";
 import { DetailsSidebar } from "./DetailsSidebar";
 import { ServicesSidebar, type GroupMenuAction, type ServiceMenuAction } from "./ServicesSidebar";
@@ -280,6 +281,14 @@ export function App() {
   // or with Ctrl/Cmd+↓. Height is user-draggable from a handle on the drawer's
   // top edge; state lives here so it survives toggle/remount of the drawer.
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalCwd, setTerminalCwd] = useState<string | null>(null);
+  const [terminalSession, setTerminalSession] = useState(0);
+  const [pendingTerminalCwd, setPendingTerminalCwd] = useState<string | null>(null);
+  const openServiceTerminal = (cwd: string) => {
+    setTerminalCwd(cwd);
+    setTerminalSession((session) => session + 1);
+    setTerminalOpen(true);
+  };
   const [terminalHeight, setTerminalHeight] = useState(288);
   // Command palette (Ctrl/Cmd+P). A lightweight registry of named actions.
   const [commandOpen, setCommandOpen] = useState(false);
@@ -2976,6 +2985,10 @@ export function App() {
           }`}
         >
           <TerminalPanes
+            onOpenTerminal={(service) => {
+              if (terminalOpen) setPendingTerminalCwd(service.cwd);
+              else openServiceTerminal(service.cwd);
+            }}
             paneServices={paneServices}
             focusedId={selected?.id ?? null}
             streamMode={streamMode}
@@ -3031,6 +3044,9 @@ export function App() {
             }}
           />
           <BottomTerminal
+            defaultShellId={settings.defaultShellId ?? "default"}
+            key={terminalSession}
+            cwd={terminalCwd}
             streamMode={streamMode}
             redactStreamOutput={redactWorkspaceText}
             open={terminalOpen}
@@ -3168,6 +3184,18 @@ export function App() {
         </div>
       ) : null}
     </main>
+    {pendingTerminalCwd !== null ? (
+      <ConfirmDialog
+        title="Open service terminal"
+        message="End the current shell session and open the default shell in this service's folder? Any commands running in the current shell will stop."
+        confirmLabel="Open terminal"
+        onClose={() => setPendingTerminalCwd(null)}
+        onConfirm={() => {
+          openServiceTerminal(pendingTerminalCwd);
+          setPendingTerminalCwd(null);
+        }}
+      />
+    ) : null}
     {searchOpen ? (
       <GlobalSearch
         services={services}

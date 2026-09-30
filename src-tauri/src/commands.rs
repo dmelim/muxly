@@ -169,6 +169,7 @@ pub async fn stop_service(
 pub fn pty_open(
     app: AppHandle,
     registry: State<'_, PtyRegistry>,
+    config_dir: State<'_, ServicesConfigDir>,
     pty_id: String,
     rows: u16,
     cols: u16,
@@ -176,6 +177,10 @@ pub fn pty_open(
     shell_id: Option<String>,
     on_output: Channel<PtyOutputEvent>,
 ) -> Result<(), AppError> {
+    let cwd = cwd.filter(|value| !value.is_empty())
+        .map(|value| resolve_cwd(&value, config_dir.current().as_deref())
+            .map(|path| path.to_string_lossy().into_owned()))
+        .transpose()?;
     pty::open_pty(app, &registry, pty_id, rows, cols, cwd, shell_id, on_output)
 }
 

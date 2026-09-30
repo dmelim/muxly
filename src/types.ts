@@ -110,6 +110,7 @@ export type WorkspacePanel = {
 import type { MuxlyTheme, ThemePresetId } from "./theme";
 
 export type AppSettings = {
+  defaultShellId?: string;
   editorCommand: string;
   // Optional to keep settings.json written by older Muxly versions valid.
   customEditors?: CustomEditor[];
