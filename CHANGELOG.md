@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to Muxly are documented here.
 
@@ -53,7 +53,7 @@ design fixes and manual verification are complete.
 
 ### Changed
 
-- Terminal scrollbar thumbs now use the theme accent and are slightly slimmer; both sidebar scrollbars use the same accent with squarer thumbs that appear 30% shorter at their existing width.
+- Terminal scrollbar thumbs now use the theme accent and are slightly slimmer; both sidebar scrollbars use the same accent with squarer thumbs that appear 30% shorter at their existing width and stay hidden until the sidebar is hovered.
 
 - Sidebar toggle icons now sit at their inner edges, with Services beside its heading and Details in its action bar; collapsed sidebars leave an icon-only rail for reopening.
 
@@ -89,7 +89,7 @@ design fixes and manual verification are complete.
 
 - The terminal shell selector now uses a ghost button with a transparent background and subtle hover treatment.
 
-- The shell drawer now uses an inset bordered card and cyan focus outline matching the service terminal panels.
+- The shell drawer now uses the same lighter, borderless surface as the service terminals, with no header divider.
 
 - Resetting all appearance colours now restores and saves the default theme immediately, with an explicit button label and saved confirmation.
 
@@ -113,9 +113,25 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Terminal scrollbars resynchronize when hidden tabs become visible, restoring scrolling after a deferred resize.
+
+- Configuration saves refuse to discard invalid service entries and use atomic replacement with a previous-file `.json.bak` recovery copy for services and settings.
+
+- Live configuration reload keeps removed or invalidated running services visible until stopped, pauses configuration saves while they remain active, and prevents restarting those removed services.
+
+- Git commit review now detects content changes to untracked files before accepting a reviewed snapshot, and untracked embedded repositories no longer block the Push dialog.
+
+- Stream mode now masks a sensitive service's identifying working-directory folder names, such as the user profile or project folder, even when they appear outside a full path — in relative paths, prompts, or paths split across terminal lines.
+
+- Stream mode no longer mangles localhost URLs: the `p:/` in `http://` was read as a Windows drive path.
+
+- Ctrl-C in a service terminal now copies selected text; without a selection it interrupts PTY services or stops pipe-backed services that cannot receive terminal input.
+
+- Aligned workspace tabs with the Details action bar at the shared 8px top inset.
+
 - Aligned the closed sidebar icon rails with the top of the terminal tabs.
 
-- Aligned the terminal workspace bottom edge and horizontal panel gaps with the 8px outer insets.
+- Aligned the terminal workspace bottom edge and the workspace and shell-drawer gaps beside the sidebars with the 8px outer insets.
 
 - Fixed the terminal mirror's composition-event check so TypeScript builds succeed and composing text is not forwarded prematurely.
 
@@ -134,7 +150,7 @@ design fixes and manual verification are complete.
 - Tooltips flip away from window edges instead of being clipped.
 - **Startup diagnostics no longer block the main thread.** Port checks run with bounded concurrency and runtime discovery runs on a blocking worker after workspace restoration. Startup timings distinguish native setup, data loading, and optional diagnostics.
 - **Git errors respect Stream mode.** Repository and branch details in failure messages stay hidden while privacy masking is active.
-- **POSIX path masking preserves filenames.** Absolute paths no longer turn into numeric offsets, and already-masked paths are not processed again.
+- **POSIX path masking no longer produces numeric offsets.** Absolute paths are masked whole as `[private path]`, and already-masked paths are not processed again.
 - **Dragging tabs preserves the terminal instance.** Moving a tab between panels retains its mounted terminal, scrollback, selection, and search state.
 - **Theme previews update terminals and independent running-status colours.** Unsaved palettes reach existing service and drawer terminals, closing the preview restores saved colours, and accent changes no longer clear and replay terminal output.
 - **Global log search skips unchanged buffers.** Per-service revisions invalidate cached text and matches only when output or privacy settings change, reducing idle search work and repeated text preparation.
@@ -145,7 +161,6 @@ design fixes and manual verification are complete.
 - **Newly sensitive services now redact open terminal panes immediately.** Changing a service's sensitivity invalidates its rendered privacy snapshot so the banner, working directory, command, and existing scrollback cannot remain visible in Stream mode.
 - **Sensitive project and service toggles now respond immediately.** Privacy curation checkboxes and counts update while their changes are persisted, then reconcile with the saved state when the operation finishes.
 - **Stream mode now updates already-open panes and redacts external absolute paths.** Sensitive commands, cards, terminal scrollback, live output, Details, and global search use the same fail-closed display transform without remounting running PTYs. Pane contents stay covered until every privacy snapshot finishes.
-- **Ctrl+C now interrupts the focused PTY service.** Terminal selection no longer prevents the interrupt from reaching the child, while explicit platform copy shortcuts remain available.
 - **Service-card split actions no longer overlap command or port-conflict text.** Cards reserve action space at compact sidebar widths.
 - **Git status checks no longer flash console windows on Windows.** Repository discovery, refresh, and branch operations now launch Git without creating visible child terminals.
 - **Git discovery now works with Finder-launched macOS builds.** Git and branch-switch hooks inherit the recovered login-shell `PATH`, including Homebrew and version-manager locations, and an unavailable Git executable produces an explanatory error instead of being mistaken for a non-repository.
@@ -181,6 +196,8 @@ design fixes and manual verification are complete.
 - **Muxly now checks service runtime requirements when configuration loads.** Missing executables and dependency runtimes are grouped by affected service in a themed warning, with recheck controls and safe candidates discovered from NVM, Bun, Python, and global package-manager locations. A chosen fallback is applied to both PTY and pipe-based launches for the current session, including child-process `PATH` resolution.
 
 ### Fixed
+
+- Terminal scrollbars resynchronize when hidden tabs become visible, restoring scrolling after a deferred resize.
 
 - **Long service commands now wrap inside the details inspector.** Unbroken executable paths stay contained when the sidebar is resized to a narrow width.
 
@@ -221,6 +238,8 @@ design fixes and manual verification are complete.
   "Inspect element" stays available in `tauri dev`.
 
 ### Fixed
+
+- Terminal scrollbars resynchronize when hidden tabs become visible, restoring scrolling after a deferred resize.
 
 - **PTY services no longer leak an orphaned dev server that keeps holding the
   port.** On Windows, stopping or restarting a service running in a
@@ -480,6 +499,8 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
+- Terminal scrollbars resynchronize when hidden tabs become visible, restoring scrolling after a deferred resize.
+
 - **Buttons show the pointer cursor on hover again.** Tailwind v4's Preflight
   dropped the `cursor: pointer` rule v3 applied to buttons, leaving the default
   arrow on every control. A base style restores the pointer for enabled buttons
@@ -614,6 +635,8 @@ design fixes and manual verification are complete.
   global controls — sidebar toggles and log search.
 
 ### Fixed
+
+- Terminal scrollbars resynchronize when hidden tabs become visible, restoring scrolling after a deferred resize.
 
 - Duplicate tooltip on service cards — the card carried a native `title`
   attribute as well as the custom tooltip on its split-view button, so two
