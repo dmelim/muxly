@@ -73,6 +73,11 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
   const [pendingShell, setPendingShell] = useState<string | null>(null);
   const [shellError, setShellError] = useState<string | null>(null);
   const [streamSnapshot, setStreamSnapshot] = useState("");
+  const [shellReady, setShellReady] = useState(false);
+  useLayoutEffect(() => {
+    setShellReady(false);
+    setStreamSnapshot("");
+  }, [open, shellId, cwd]);
   useEffect(() => {
     if (!open) { setPendingShell(null); return; }
     let cancelled = false;
@@ -92,6 +97,10 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
   themeRef.current = theme;
   const redactStreamOutputRef = useRef(redactStreamOutput);
   redactStreamOutputRef.current = redactStreamOutput;
+
+  useLayoutEffect(() => {
+    if (shellReady && !streamMode) terminalRef.current?.focus();
+  }, [shellReady, streamMode]);
 
   useLayoutEffect(() => {
     if (terminalRef.current) {
@@ -135,7 +144,25 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
         void invoke("open_url", { url: uri }).catch(() => {});
       })
     );
+    let firstShellTextParsed = false;
     const writeParsedDisposable = terminal.onWriteParsed(() => {
+      // Keep xterm measurable and parsing startup control sequences, but reveal
+      // it only after actual shell text (or a startup error) is ready to paint.
+      if (!firstShellTextParsed && terminalBufferText(terminal).trim()) {
+        firstShellTextParsed = true;
+        const buffer = terminal.buffer.active;
+        const blankFirstRow = buffer.getLine(0)?.translateToString(true).trim() === "";
+        if (shellId === "git-bash" && buffer.baseY === 0 && buffer.cursorY > 0 && blankFirstRow) {
+          // Replace Git Bash's leading empty prompt row with the shell output.
+          // Save cursor/attributes, delete row zero, then restore the cursor
+          // one row higher so subsequent input stays beside the real prompt.
+          terminal.write("\x1b7\x1b[H\x1b[M\x1b8\x1b[1A", () => {
+            if (!disposed) setShellReady(true);
+          });
+        } else {
+          setShellReady(true);
+        }
+      }
       if (concealedRef.current) {
         setStreamSnapshot(redactStreamOutputRef.current(terminalBufferText(terminal)));
       }
@@ -300,7 +327,9 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
         </div>
       </div>
       {shellError ? <p role="status" className="px-3 pt-2 text-xs text-amber-300">{redactStreamOutput(shellError)}</p> : null}
-      <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden p-3">
+      <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3" aria-busy={!shellReady}>
+        {!shellReady ? <p role="status" className="absolute left-3 top-3 text-xs text-zinc-500">Starting shell…</p> : null}
+        <div className="h-full w-full" style={{ visibility: shellReady ? "visible" : "hidden" }} inert={!shellReady || undefined}>
         <TerminalPrivacy
           redacted={streamMode}
           content={streamSnapshot}
@@ -318,6 +347,7 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
         >
           <div ref={hostRef} className="h-full w-full overflow-hidden" />
         </TerminalPrivacy>
+        </div>
       </div>
       {pendingShell ? <ConfirmDialog
         title="Switch shell"
