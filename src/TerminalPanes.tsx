@@ -57,9 +57,15 @@ const TERMINAL_OPTIONS = {
 
 const EMPTY_WORKSPACE_DROP_TARGET = "__empty_workspace__";
 
-function serviceTerminalTheme(theme: MuxlyTheme, interactive: boolean) {
-  const colors = xtermTheme(theme);
-  return interactive ? colors : { ...colors, cursor: "transparent", cursorAccent: colors.foreground };
+function setServiceTerminalInput(terminal: Terminal, interactive: boolean, concealed: boolean) {
+  terminal.options.disableStdin = concealed || !interactive;
+  terminal.options.cursorBlink = interactive;
+  terminal.options.cursorInactiveStyle = interactive ? "outline" : "none";
+  // A transparent cursor is blended into an opaque background by xterm.
+  // Keep read-only terminals unfocused instead, so the renderer omits the
+  // cursor without painting over the underlying cell's ANSI colours.
+  if (!interactive || concealed) terminal.blur();
+  if (terminal.textarea) terminal.textarea.disabled = !interactive || concealed;
 }
 
 // xterm 6 defers renderer resizes while a terminal is off-screen, but its
@@ -848,13 +854,19 @@ function PaneView({
       { id: "open-terminal", label: "Open terminal", action: onOpenTerminal },
       { id: "clipboard", separator: true },
       { id: "copy", label: "Copy", disabled: !selection, action: () => run(() => navigator.clipboard.writeText(selection)) },
-      { id: "paste", label: "Paste", disabled: !service.usePty || !running, reason: "Requires a running PTY service", action: () => run(async () => {
+      { id: "paste", label: "Paste", disabled: !interactive, reason: "Requires a running managed PTY service", action: () => run(async () => {
         const text = await navigator.clipboard.readText();
         const current = terminalsRef.current.get(service.id);
-        if (!current) return;
-        if (concealed) pasteIntoRedactedTerminal(current, text);
-        else current.paste(text);
-        current.focus();
+        if (!current || !interactiveRef.current) return;
+        // Clipboard access is async: use the current privacy mode, and return
+        // focus to the visible input surface after the menu closes.
+        if (concealedRef.current) {
+          pasteIntoRedactedTerminal(current, text);
+          wrapRef.current?.querySelector<HTMLElement>("[data-terminal-mirror]")?.focus({ preventScroll: true });
+        } else {
+          current.paste(text);
+          current.focus();
+        }
       }) },
       { id: "select-all", label: "Select all", disabled: concealed, action: () => terminal?.selectAll() },
       { id: "clear", label: "Clear output", action: onClear }
@@ -907,7 +919,7 @@ function PaneView({
     const terminal = new Terminal({
       ...TERMINAL_OPTIONS,
       convertEol: !isPty,
-      theme: serviceTerminalTheme(theme, interactiveRef.current),
+      theme: xtermTheme(theme),
       cursorBlink: interactiveRef.current,
       cursorInactiveStyle: interactiveRef.current ? "outline" : "none",
       disableStdin: concealedRef.current || !interactiveRef.current
@@ -1001,7 +1013,7 @@ function PaneView({
       }
       terminal.open(host);
       setTerminalConcealed(terminal, concealedRef.current);
-      terminal.options.disableStdin = concealedRef.current || !interactiveRef.current;
+      setServiceTerminalInput(terminal, interactiveRef.current, concealedRef.current);
       safeFit();
       // Sync the freshly-measured size to the PTY (the backend spawns at a
       // default 120x30 until we know the pane's real dimensions).
@@ -1053,10 +1065,8 @@ function PaneView({
     const terminal = terminalsRef.current.get(service.id);
     if (!terminal) return;
     setTerminalConcealed(terminal, concealed);
-    terminal.options.disableStdin = concealed || !interactive;
-    terminal.options.cursorBlink = interactive;
-    terminal.options.cursorInactiveStyle = interactive ? "outline" : "none";
-    terminal.options.theme = serviceTerminalTheme(theme, interactive);
+    setServiceTerminalInput(terminal, interactive, concealed);
+    terminal.options.theme = xtermTheme(theme);
     if (streamMode) updateStreamSnapshot(terminal);
     const key = privacySnapshotKey(service, streamMode, alias);
     if (renderedPrivacyRef.current !== key) {
