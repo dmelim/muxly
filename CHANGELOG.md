@@ -30,12 +30,14 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
-Target release: `0.6.0`. This section is the release inventory until the planned
-design fixes and manual verification are complete.
-
 ### Fixed
 
+- Context-menu Paste now returns keyboard focus to the visible terminal in Stream mode and is disabled for adopted services.
+- Inactive service terminals hide their cursor without painting over ANSI-coloured output cells.
+
 - Stopped services, pipe-based services, and adopted external processes no longer show an input cursor or accept terminal input. Running Muxly-managed PTY services retain their interactive cursor.
+
+## [0.6.0] - 2026-10-01
 
 ### Added
 
