@@ -30,12 +30,6 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
-### Fixed
-
-- macOS app shortcuts now use Command, leaving Control combinations available for shell history, editing, and terminal commands instead of triggering service actions.
-- Redacted terminals now preserve macOS clipboard shortcuts and native Option, dead-key, and IME text input without changing the sanitized output display.
-- Explicit service PATH entries now take precedence over recovered shell runtimes in both pipe and PTY launches, with relative entries resolved against the service directory and matching runtime checks.
-
 ## [0.6.0] - 2026-10-01
 
 ### Added
@@ -121,6 +115,10 @@ section, and tag the commit `vX.Y.Z`.
 - **Settings temporarily hides both sidebars.** Opening Settings preserves each sidebar's visibility and width and restores them when Settings closes.
 
 ### Fixed
+
+- macOS app shortcuts now use Command, leaving Control combinations available for shell history, editing, and terminal commands instead of triggering service actions.
+- Redacted terminals now preserve macOS clipboard shortcuts and native Option, dead-key, and IME text input without changing the sanitized output display.
+- Explicit service PATH entries now take precedence over recovered shell runtimes in both pipe and PTY launches, with relative entries resolved against the service directory and matching runtime checks.
 
 - Context-menu Paste now returns keyboard focus to the visible terminal in Stream mode and is disabled for adopted services.
 - Inactive service terminals hide their cursor without painting over ANSI-coloured output cells.

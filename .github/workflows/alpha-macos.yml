@@ -1,0 +1,58 @@
+name: Build macOS alpha
+
+on:
+  push:
+    branches: [preview/roadmap]
+    paths: [.github/workflows/alpha-macos.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run native Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked --lib
+      - name: Build Apple Silicon DMG
+        run: npm run tauri build -- --target aarch64-apple-darwin --bundles dmg --ci
+      - name: Verify signature, architecture, and installed startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          mkdir -p "$RUNNER_TEMP/muxly-volume" "$RUNNER_TEMP/muxly-installed"
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$RUNNER_TEMP/muxly-volume"
+          cp -R "$RUNNER_TEMP/muxly-volume/Muxly.app" "$RUNNER_TEMP/muxly-installed/Muxly.app"
+          hdiutil detach "$RUNNER_TEMP/muxly-volume"
+          app="$RUNNER_TEMP/muxly-installed/Muxly.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          test "$(lipo -archs "$app/Contents/MacOS/muxly")" = arm64
+          "$app/Contents/MacOS/muxly" > "$RUNNER_TEMP/muxly-startup.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          sleep 15
+          kill -0 "$app_pid"
+          grep -q '\[startup\] window revealed' "$RUNNER_TEMP/muxly-startup.log"
+          kill "$app_pid"
+          wait "$app_pid" || true
+      - name: Upload installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: muxly-macos-alpha
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
