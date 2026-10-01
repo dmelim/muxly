@@ -19,9 +19,14 @@ export const PTY_RECYCLE_MAX = 4;
 // uses. Good enough for choosing between platform workarounds, and it avoids a
 // round trip to the backend before the first render.
 export const isWindows = navigator.userAgent.includes("Windows");
+export const isMac = navigator.userAgent.includes("Mac");
+
+export function isAppModifier(event: { ctrlKey: boolean; metaKey: boolean }): boolean {
+  return isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey || event.metaKey;
+}
 
 // Shorthand shown in shortcut tooltips. macOS uses Cmd, everything else Ctrl.
-export const modKey = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
+export const modKey = isMac ? "⌘" : "Ctrl";
 
 export const statusLabels: Record<ServiceStatus, string> = {
   stopped: "Stopped",

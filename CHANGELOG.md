@@ -30,6 +30,11 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- macOS app shortcuts now use Command, leaving Control combinations available for shell history, editing, and terminal commands instead of triggering service actions.
+- Redacted terminals now preserve macOS clipboard shortcuts and native Option, dead-key, and IME text input without changing the sanitized output display.
+
 ## [0.6.0] - 2026-10-01
 
 ### Added

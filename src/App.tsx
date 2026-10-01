@@ -54,6 +54,7 @@ import {
   groupServices,
   isServiceInProfile,
   isWindows,
+  isAppModifier,
   modKey,
   sameAliases,
   sameServiceOrder,
@@ -2690,7 +2691,7 @@ export function App() {
         return;
       }
 
-      const mod = event.ctrlKey || event.metaKey;
+      const mod = isAppModifier(event);
       if (!mod) {
         return;
       }

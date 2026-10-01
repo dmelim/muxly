@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
+import { isAppModifier, isMac } from "./appUtils";
 
 const TERMINAL_KEY_SEQUENCES: Readonly<Record<string, string>> = {
   Enter: "\r",
@@ -38,6 +39,10 @@ export type TerminalPrivacyProps = {
 
 function controlByte(key: string): string | null {
   const lower = key.toLowerCase();
+  if (key === " " || key === "@") return "\x00";
+  if (key.length === 1 && key >= "[" && key <= "_") {
+    return String.fromCharCode(key.charCodeAt(0) - 64);
+  }
   if (lower.length !== 1 || lower < "a" || lower > "z") {
     return null;
   }
@@ -76,6 +81,9 @@ export function TerminalPrivacy({
 }: TerminalPrivacyProps) {
   const isRedacted = redacted ?? concealed ?? false;
   const mirrorRef = useRef<HTMLPreElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const composingRef = useRef(false);
+  const compositionCommitRef = useRef<string | null>(null);
   const followsBottomRef = useRef(true);
   const wasRedactedRef = useRef(false);
 
@@ -108,7 +116,7 @@ export function TerminalPrivacy({
       mirror.scrollHeight - mirror.scrollTop - mirror.clientHeight <= MIRROR_BOTTOM_THRESHOLD;
   }
 
-  function forwardData(data: string, event: KeyboardEvent<HTMLPreElement> | ClipboardEvent<HTMLPreElement>) {
+  function forwardData(data: string, event: KeyboardEvent<HTMLElement> | ClipboardEvent<HTMLElement>) {
     if (!data || !onData) {
       return false;
     }
@@ -118,20 +126,30 @@ export function TerminalPrivacy({
     return true;
   }
 
-  function handleMirrorKeyDown(event: KeyboardEvent<HTMLPreElement>) {
-    if (!interactive || !onData || event.nativeEvent.isComposing) {
+  function handleMirrorKeyDown(event: KeyboardEvent<HTMLElement>) {
+    // Selection leaves focus on the output surface. Move subsequent typing
+    // back to native input, preserving copy and paste on the selected output.
+    if (interactive && event.currentTarget === mirrorRef.current && !event.ctrlKey && !event.metaKey) {
+      inputRef.current?.focus({ preventScroll: true });
+      if (!event.nativeEvent.isComposing && !event.altKey && event.key.length === 1) {
+        forwardData(event.key, event);
+        return;
+      }
+    }
+    if (!interactive || !onData || composingRef.current || event.nativeEvent.isComposing) {
       return;
     }
 
     const key = event.key;
+    compositionCommitRef.current = null;
     const hasCopySelection =
-      (event.ctrlKey || event.metaKey) && key.toLowerCase() === "c" && hasMirrorSelection(event.currentTarget);
+      isAppModifier(event) && key.toLowerCase() === "c" && mirrorRef.current !== null && hasMirrorSelection(mirrorRef.current);
     if (hasCopySelection) {
       // Leave the browser's native copy gesture intact for selected sanitized
       // text. Ctrl+C with no selection remains the terminal interrupt byte.
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "v") {
+    if (isAppModifier(event) && key.toLowerCase() === "v") {
       // Preserve the browser paste gesture so onPaste can route the text
       // through xterm's own paste encoder, including bracketed-paste mode.
       return;
@@ -141,8 +159,8 @@ export function TerminalPrivacy({
     if (event.ctrlKey && !event.metaKey && !event.altKey) {
       data = controlByte(key);
     } else if (!event.ctrlKey && !event.metaKey && !event.altKey) {
-      data = TERMINAL_KEY_SEQUENCES[key] ?? (key.length === 1 ? key : null);
-    } else if (event.altKey && !event.ctrlKey && !event.metaKey && key.length === 1) {
+      data = TERMINAL_KEY_SEQUENCES[key] ?? null;
+    } else if (!isMac && event.altKey && !event.ctrlKey && !event.metaKey && key.length === 1) {
       // Meta-prefixed printable input is the conventional terminal encoding
       // for Alt+key while leaving Cmd shortcuts to the host application.
       data = `\x1b${key}`;
@@ -153,7 +171,34 @@ export function TerminalPrivacy({
     }
   }
 
-  function handleMirrorPaste(event: ClipboardEvent<HTMLPreElement>) {
+  function focusInput() {
+    if (interactive && mirrorRef.current && !hasMirrorSelection(mirrorRef.current)) {
+      inputRef.current?.focus({ preventScroll: true });
+    }
+  }
+
+  function commitInput(input: HTMLTextAreaElement) {
+    if (composingRef.current) return;
+    const text = input.value;
+    input.value = "";
+    // WebKit can deliver a final input event after compositionend. The text
+    // was already forwarded there; never send the committed word twice.
+    if (text === compositionCommitRef.current) {
+      compositionCommitRef.current = null;
+      return;
+    }
+    compositionCommitRef.current = null;
+    if (interactive && text) onData?.(text);
+  }
+
+  function handleMirrorCopy(event: ClipboardEvent<HTMLElement>) {
+    if (mirrorRef.current && hasMirrorSelection(mirrorRef.current)) {
+      event.preventDefault();
+      event.clipboardData.setData("text/plain", window.getSelection()?.toString() ?? "");
+    }
+  }
+
+  function handleMirrorPaste(event: ClipboardEvent<HTMLElement>) {
     if (!interactive) {
       return;
     }
@@ -168,7 +213,7 @@ export function TerminalPrivacy({
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div className="group/terminal-input relative h-full w-full">
       <div
         className="h-full w-full"
         // Keep this style in the render path so the xterm surface is hidden in
@@ -180,7 +225,7 @@ export function TerminalPrivacy({
       >
         {children}
       </div>
-      {isRedacted ? (
+      {isRedacted ? (<>
         <pre
           ref={mirrorRef}
           tabIndex={0}
@@ -190,12 +235,44 @@ export function TerminalPrivacy({
           onScroll={handleMirrorScroll}
           onKeyDown={handleMirrorKeyDown}
           onPaste={handleMirrorPaste}
+          onCopy={handleMirrorCopy}
+          onFocus={focusInput}
+          onMouseUp={focusInput}
           data-terminal-mirror
-          className="absolute inset-0 overflow-auto overscroll-contain bg-[var(--muxly-terminal-bg)] p-3 font-mono text-[13px] leading-[1.45] text-zinc-300 outline-none select-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"
+          className="absolute inset-0 overflow-auto overscroll-contain bg-[var(--muxly-terminal-bg)] p-3 font-mono text-[13px] leading-[1.45] text-zinc-300 outline-none select-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40 group-focus-within/terminal-input:ring-2 group-focus-within/terminal-input:ring-inset group-focus-within/terminal-input:ring-cyan-400/40"
         >
           {content}
         </pre>
-      ) : null}
+        {interactive ? (
+          <textarea
+            ref={inputRef}
+            tabIndex={-1}
+            aria-label={`${ariaLabel} input`}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            autoComplete="off"
+            data-terminal-mirror
+            className="xterm-helper-textarea pointer-events-none absolute left-3 top-3 h-px w-px resize-none border-0 bg-transparent p-0 opacity-0 outline-none"
+            onKeyDown={handleMirrorKeyDown}
+            onCopy={handleMirrorCopy}
+            onPaste={handleMirrorPaste}
+            onInput={(event) => {
+              if (!(event.nativeEvent as InputEvent).isComposing) commitInput(event.currentTarget);
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+              compositionCommitRef.current = null;
+            }}
+            onCompositionEnd={(event) => {
+              composingRef.current = false;
+              const text = event.currentTarget.value;
+              commitInput(event.currentTarget);
+              compositionCommitRef.current = text || null;
+            }}
+          />
+        ) : null}
+      </>) : null}
     </div>
   );
 }

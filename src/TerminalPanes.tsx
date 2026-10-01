@@ -10,7 +10,7 @@ import { Terminal } from "@xterm/xterm";
 import type { ServiceConfig, ServiceStatus, WorkspacePanel } from "./types";
 import type { StartHealth } from "./appTypes";
 import { displayServiceName, formatCommand } from "./types";
-import { errorMessage, groupKey, statusLabels } from "./appUtils";
+import { errorMessage, groupKey, isMac, statusLabels } from "./appUtils";
 import { ClearIcon, CloseIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from "./icons";
 import { Tooltip } from "./Tooltip";
 import type { MuxlyTheme } from "./theme";
@@ -1236,12 +1236,12 @@ function PaneView({
             event.key.toLowerCase() !== "c" ||
             !surface
           ) return;
-          if (mirror && selectedDomText) return;
+          if (mirror && selectedDomText && !isMac) return;
           const terminal = terminalsRef.current.get(service.id);
           const selectedText = !mirror && terminal?.hasSelection()
             ? terminal.getSelection()
             : selectedDomText;
-          if (selectedText) {
+          if (selectedText && !isMac) {
             event.preventDefault();
             event.stopPropagation();
             void navigator.clipboard.writeText(selectedText);
