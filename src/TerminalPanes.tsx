@@ -57,6 +57,11 @@ const TERMINAL_OPTIONS = {
 
 const EMPTY_WORKSPACE_DROP_TARGET = "__empty_workspace__";
 
+function serviceTerminalTheme(theme: MuxlyTheme, interactive: boolean) {
+  const colors = xtermTheme(theme);
+  return interactive ? colors : { ...colors, cursor: "transparent", cursorAccent: colors.foreground };
+}
+
 // xterm 6 defers renderer resizes while a terminal is off-screen, but its
 // scrollbar still syncs against the stale (e.g. one-row) canvas height and
 // never re-syncs once visible — leaving a thumb with nothing to scroll.
@@ -251,13 +256,6 @@ export function TerminalPanes({
   useEffect(() => {
     if (!sidebarDragId) setSidebarDropTarget(null);
   }, [sidebarDragId]);
-
-  useEffect(() => {
-    const nextTheme = xtermTheme(theme);
-    for (const terminal of terminalsRef.current.values()) {
-      terminal.options.theme = nextTheme;
-    }
-  }, [terminalsRef, theme]);
 
   if (paneServices.length === 0) {
     return (
@@ -806,6 +804,9 @@ function PaneView({
   // `fit()` would perturb that element's box and re-trigger the observer in a
   // self-sustaining loop.
   const concealed = streamMode;
+  const interactive = Boolean(service.usePty && running && !adopted);
+  const interactiveRef = useRef(interactive);
+  interactiveRef.current = interactive;
   const concealedRef = useRef(concealed);
   concealedRef.current = concealed;
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -906,8 +907,10 @@ function PaneView({
     const terminal = new Terminal({
       ...TERMINAL_OPTIONS,
       convertEol: !isPty,
-      theme: xtermTheme(theme),
-      disableStdin: concealedRef.current
+      theme: serviceTerminalTheme(theme, interactiveRef.current),
+      cursorBlink: interactiveRef.current,
+      cursorInactiveStyle: interactiveRef.current ? "outline" : "none",
+      disableStdin: concealedRef.current || !interactiveRef.current
     });
     const fitAddon = new FitAddon();
     const search = new SearchAddon();
@@ -953,6 +956,7 @@ function PaneView({
         return true;
       });
       dataDisposable = terminal.onData((data) => {
+        if (!interactiveRef.current) return;
         void invoke("service_pty_write", { serviceId: service.id, data }).catch(() => {
           /* not running / session gone — nothing useful to surface */
         });
@@ -997,6 +1001,7 @@ function PaneView({
       }
       terminal.open(host);
       setTerminalConcealed(terminal, concealedRef.current);
+      terminal.options.disableStdin = concealedRef.current || !interactiveRef.current;
       safeFit();
       // Sync the freshly-measured size to the PTY (the backend spawns at a
       // default 120x30 until we know the pane's real dimensions).
@@ -1048,13 +1053,17 @@ function PaneView({
     const terminal = terminalsRef.current.get(service.id);
     if (!terminal) return;
     setTerminalConcealed(terminal, concealed);
+    terminal.options.disableStdin = concealed || !interactive;
+    terminal.options.cursorBlink = interactive;
+    terminal.options.cursorInactiveStyle = interactive ? "outline" : "none";
+    terminal.options.theme = serviceTerminalTheme(theme, interactive);
     if (streamMode) updateStreamSnapshot(terminal);
     const key = privacySnapshotKey(service, streamMode, alias);
     if (renderedPrivacyRef.current !== key) {
       renderedPrivacyRef.current = key;
       onPrivacyRendered(service.id, key);
     }
-  }, [alias, concealed, onPrivacyRendered, redactStreamOutput, searchAddon, service, streamMode, terminalsRef, updateStreamSnapshot]);
+  }, [alias, concealed, interactive, onPrivacyRendered, redactStreamOutput, searchAddon, service, streamMode, terminalsRef, theme, updateStreamSnapshot]);
 
   const paneActions = (
         <span
@@ -1245,14 +1254,16 @@ function PaneView({
         <TerminalPrivacy
           redacted={concealed}
           content={streamSnapshot}
-          interactive={Boolean(service.usePty)}
+          interactive={interactive}
           ariaLabel={`${displayServiceName(service, streamMode)} redacted terminal output`}
           onData={(data) => {
+            if (!interactiveRef.current) return;
             void invoke("service_pty_write", { serviceId: service.id, data }).catch(() => {
               /* stopped or session gone */
             });
           }}
           onPaste={(text) => {
+            if (!interactiveRef.current) return;
             const terminal = terminalsRef.current.get(service.id);
             if (terminal) pasteIntoRedactedTerminal(terminal, text);
           }}

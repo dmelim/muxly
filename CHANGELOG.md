@@ -33,6 +33,10 @@ section, and tag the commit `vX.Y.Z`.
 Target release: `0.6.0`. This section is the release inventory until the planned
 design fixes and manual verification are complete.
 
+### Fixed
+
+- Stopped services, pipe-based services, and adopted external processes no longer show an input cursor or accept terminal input. Running Muxly-managed PTY services retain their interactive cursor.
+
 ### Added
 
 - Settings now lets you choose the default installed shell for new built-in terminal sessions, including terminals opened from a service.
