@@ -30,13 +30,6 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
-### Fixed
-
-- Context-menu Paste now returns keyboard focus to the visible terminal in Stream mode and is disabled for adopted services.
-- Inactive service terminals hide their cursor without painting over ANSI-coloured output cells.
-
-- Stopped services, pipe-based services, and adopted external processes no longer show an input cursor or accept terminal input. Running Muxly-managed PTY services retain their interactive cursor.
-
 ## [0.6.0] - 2026-10-01
 
 ### Added
@@ -122,6 +115,10 @@ section, and tag the commit `vX.Y.Z`.
 - **Settings temporarily hides both sidebars.** Opening Settings preserves each sidebar's visibility and width and restores them when Settings closes.
 
 ### Fixed
+
+- Context-menu Paste now returns keyboard focus to the visible terminal in Stream mode and is disabled for adopted services.
+- Inactive service terminals hide their cursor without painting over ANSI-coloured output cells.
+- Stopped services, pipe-based services, and adopted external processes no longer show an input cursor or accept terminal input. Running Muxly-managed PTY services retain their interactive cursor.
 
 - The shell drawer now waits for parsed shell output before revealing and focusing the terminal, revealing it after two seconds even when a shell prints nothing so it stays usable. Startup messages and errors remain visible.
 
