@@ -117,7 +117,7 @@ design fixes and manual verification are complete.
 
 ### Fixed
 
-- The shell drawer now waits for parsed shell output before revealing and focusing the terminal, and removes Git Bash's initial empty prompt row so the shell starts on the first line. Startup messages and errors remain visible.
+- The shell drawer now waits for parsed shell output before revealing and focusing the terminal, revealing it after two seconds even when a shell prints nothing so it stays usable. Startup messages and errors remain visible.
 
 - Muxly's development server now uses port 1421 to avoid the port 1420 conflict with Cromulons when both projects run locally.
 

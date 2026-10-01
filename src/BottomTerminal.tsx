@@ -39,6 +39,9 @@ function terminalBufferText(terminal: Terminal): string {
   return text;
 }
 
+// Upper bound on hiding a new shell while it prints nothing.
+const SHELL_REVEAL_TIMEOUT_MS = 2000;
+
 type BottomTerminalProps = {
   defaultShellId?: string;
   cwd?: string | null;
@@ -145,23 +148,21 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
       })
     );
     let firstShellTextParsed = false;
+    // A shell with an empty prompt, or a startup script silently waiting for
+    // input, never paints text. Reveal it anyway so it stays usable.
+    const revealTimer = window.setTimeout(() => {
+      firstShellTextParsed = true;
+      setShellReady(true);
+    }, SHELL_REVEAL_TIMEOUT_MS);
     const writeParsedDisposable = terminal.onWriteParsed(() => {
       // Keep xterm measurable and parsing startup control sequences, but reveal
       // it only after actual shell text (or a startup error) is ready to paint.
+      // Output is never rewritten locally: injected control sequences could
+      // land inside a split escape sequence or diverge from ConPTY's screen.
       if (!firstShellTextParsed && terminalBufferText(terminal).trim()) {
         firstShellTextParsed = true;
-        const buffer = terminal.buffer.active;
-        const blankFirstRow = buffer.getLine(0)?.translateToString(true).trim() === "";
-        if (shellId === "git-bash" && buffer.baseY === 0 && buffer.cursorY > 0 && blankFirstRow) {
-          // Replace Git Bash's leading empty prompt row with the shell output.
-          // Save cursor/attributes, delete row zero, then restore the cursor
-          // one row higher so subsequent input stays beside the real prompt.
-          terminal.write("\x1b7\x1b[H\x1b[M\x1b8\x1b[1A", () => {
-            if (!disposed) setShellReady(true);
-          });
-        } else {
-          setShellReady(true);
-        }
+        window.clearTimeout(revealTimer);
+        setShellReady(true);
       }
       if (concealedRef.current) {
         setStreamSnapshot(redactStreamOutputRef.current(terminalBufferText(terminal)));
@@ -268,6 +269,7 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
       resizeObserver?.disconnect();
       closeListener?.();
       onDataCleanup.dispose();
+      window.clearTimeout(revealTimer);
       writeParsedDisposable.dispose();
       // Wait for the open IPC to settle before closing. Without this chain,
       // a fast open→close toggle can land pty_close on the backend before
