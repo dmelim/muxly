@@ -34,6 +34,7 @@ section, and tag the commit `vX.Y.Z`.
 
 - macOS app shortcuts now use Command, leaving Control combinations available for shell history, editing, and terminal commands instead of triggering service actions.
 - Redacted terminals now preserve macOS clipboard shortcuts and native Option, dead-key, and IME text input without changing the sanitized output display.
+- Explicit service PATH entries now take precedence over recovered shell runtimes in both pipe and PTY launches, with relative entries resolved against the service directory and matching runtime checks.
 
 ## [0.6.0] - 2026-10-01
 

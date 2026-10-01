@@ -23,7 +23,7 @@ use crate::{
     },
     history::HistoryDb,
     process::{ProcessRegistry, RunToken, RunningProcess},
-    runtime::{inject_fallback_path, resolve_from_fallbacks, search_paths},
+    runtime::{configure_service_path, resolve_service_program, search_paths},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
 use parking_lot::Mutex;
@@ -163,10 +163,10 @@ pub fn spawn_service_pty(
     // Same search scope as the pipe path: activated fallbacks plus the login
     // shell's PATH, which a GUI-launched app does not inherit (`shell_env`).
     let fallback_paths = search_paths(&app);
-    inject_fallback_path(&mut resolved.env, &fallback_paths);
 
     let base_dir = config_dir.current();
     let cwd: PathBuf = resolve_cwd(&service.cwd, base_dir.as_deref())?;
+    let program_paths = configure_service_path(&mut resolved.env, &fallback_paths, &cwd);
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -190,9 +190,14 @@ pub fn spawn_service_pty(
             super::shell::shell_prelude_command(prelude, &service.program, &resolved.args)
         }
         None => (
-            resolve_from_fallbacks(&service.program, &fallback_paths)
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_else(|| service.program.clone()),
+            resolve_service_program(&service.program, &program_paths, &cwd)
+                .map_err(|source| AppError::ProcessStart {
+                    program: service.program.clone(),
+                    cwd: cwd.clone(),
+                    source,
+                })?
+                .to_string_lossy()
+                .into_owned(),
             resolved.args.clone(),
         ),
     };
@@ -229,10 +234,14 @@ pub fn spawn_service_pty(
     let killer: PtyKillHandle = Arc::new(Mutex::new(child.clone_killer()));
     let terminator = pty_terminator(killer, pid);
     let handles = (|| -> Result<_, AppError> {
-        let reader = pair.master.try_clone_reader()
+        let reader = pair
+            .master
+            .try_clone_reader()
             .map_err(|err| AppError::ProcessStop(format!("clone_reader failed: {err}")))?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()
-            .map_err(|err| AppError::ProcessStop(format!("take_writer failed: {err}")))?));
+        let writer =
+            Arc::new(Mutex::new(pair.master.take_writer().map_err(|err| {
+                AppError::ProcessStop(format!("take_writer failed: {err}"))
+            })?));
         Ok((reader, writer))
     })();
     let (reader, writer) = match handles {

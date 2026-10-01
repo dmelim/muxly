@@ -323,40 +323,6 @@ pub fn configure_process_group(command: &mut Command) {
     command.creation_flags(CREATE_SUSPENDED);
 }
 
-/// Resolve a program name to something `Command::new` can actually spawn.
-///
-/// On Windows, `CreateProcessW` only appends `.exe`, so an extensionless name
-/// like `npm` (whose launcher is `npm.cmd`) fails to start. We search PATH for
-/// `<name>.cmd`, `.bat`, then `.exe` and return the first hit. Names that
-/// already contain a path separator or an extension — and every name on
-/// non-Windows platforms — are returned unchanged.
-#[cfg(windows)]
-pub fn resolve_program(program: &str) -> std::ffi::OsString {
-    use std::ffi::OsString;
-
-    if program.contains('/') || program.contains('\\') || program.contains('.') {
-        return OsString::from(program);
-    }
-
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            for ext in ["cmd", "bat", "exe"] {
-                let candidate = dir.join(format!("{program}.{ext}"));
-                if candidate.is_file() {
-                    return candidate.into_os_string();
-                }
-            }
-        }
-    }
-
-    OsString::from(program)
-}
-
-#[cfg(not(windows))]
-pub fn resolve_program(program: &str) -> std::ffi::OsString {
-    std::ffi::OsString::from(program)
-}
-
 #[cfg(not(windows))]
 pub fn configure_process_group(command: &mut Command) {
     #[cfg(unix)]

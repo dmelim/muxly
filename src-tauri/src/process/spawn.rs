@@ -7,10 +7,8 @@ use crate::{
         ProcessStartedEvent, PROCESS_EXITED, PROCESS_FAILED, PROCESS_STARTED,
     },
     history::HistoryDb,
-    process::{
-        configure_process_group, resolve_program, resume_child, ProcessRegistry, RunningProcess,
-    },
-    runtime::{inject_fallback_path, resolve_from_fallbacks, search_paths},
+    process::{configure_process_group, resume_child, ProcessRegistry, RunningProcess},
+    runtime::{configure_service_path, resolve_service_program, search_paths},
     services::{config::resolve_cwd, config::ServicesConfigDir, ServiceConfig},
 };
 use std::{
@@ -49,10 +47,10 @@ pub fn spawn_process(
     // Activated runtime fallbacks plus the login shell's PATH. The latter is
     // what makes a GUI-launched app able to find `npm` at all — see `shell_env`.
     let fallback_paths = search_paths(&app);
-    inject_fallback_path(&mut resolved.env, &fallback_paths);
 
     let base_dir = config_dir.current();
     let cwd = resolve_cwd(&service.cwd, base_dir.as_deref())?;
+    let program_paths = configure_service_path(&mut resolved.env, &fallback_paths, &cwd);
 
     // A non-empty `preRun` wraps the spawn in a shell so the prelude and the
     // command share one environment (see `process::shell`). Otherwise we spawn
@@ -65,9 +63,13 @@ pub fn spawn_process(
                 (std::ffi::OsString::from(sh), sh_args)
             }
             None => {
-                let program = resolve_from_fallbacks(&service.program, &fallback_paths)
-                    .map(|path| path.into_os_string())
-                    .unwrap_or_else(|| resolve_program(&service.program));
+                let program = resolve_service_program(&service.program, &program_paths, &cwd)
+                    .map_err(|source| AppError::ProcessStart {
+                        program: service.program.clone(),
+                        cwd: cwd.clone(),
+                        source,
+                    })?
+                    .into_os_string();
                 (program, resolved.args.clone())
             }
         };

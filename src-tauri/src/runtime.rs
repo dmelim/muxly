@@ -168,23 +168,84 @@ pub fn inject_fallback_path(env_map: &mut HashMap<String, String>, paths: &[Path
         return;
     }
 
-    let existing_key = env_map
-        .keys()
-        .find(|key| key.eq_ignore_ascii_case("PATH"))
-        .cloned();
+    let existing_key = path_key(env_map);
     let inherited = existing_key
         .as_ref()
         .and_then(|key| env_map.get(key).cloned())
         .or_else(|| env::var_os("PATH").map(|value| value.to_string_lossy().into_owned()))
         .unwrap_or_default();
 
-    let mut entries = paths.to_vec();
-    entries.extend(env::split_paths(&inherited));
+    let explicit: Vec<_> = env::split_paths(&inherited).collect();
+    let entries: Vec<_> = if existing_key.is_some() {
+        explicit.into_iter().chain(paths.iter().cloned()).collect()
+    } else {
+        paths.iter().cloned().chain(explicit).collect()
+    };
     if let Ok(joined) = env::join_paths(entries) {
         env_map.insert(
             existing_key.unwrap_or_else(|| "PATH".to_string()),
             joined.to_string_lossy().into_owned(),
         );
+    }
+}
+
+fn path_key(env_map: &HashMap<String, String>) -> Option<String> {
+    env_map
+        .keys()
+        .find(|key| {
+            if cfg!(windows) {
+                key.eq_ignore_ascii_case("PATH")
+            } else {
+                key.as_str() == "PATH"
+            }
+        })
+        .cloned()
+}
+
+/// Build the exact PATH used for both preflight lookup and service execution.
+/// Explicit project entries win, and relative entries belong to the service cwd.
+pub fn configure_service_path(
+    env_map: &mut HashMap<String, String>,
+    fallback_paths: &[PathBuf],
+    cwd: &Path,
+) -> Vec<PathBuf> {
+    inject_fallback_path(env_map, fallback_paths);
+    let key = path_key(env_map).unwrap_or_else(|| "PATH".to_string());
+    let value = env_map
+        .get(&key)
+        .map(std::ffi::OsString::from)
+        .or_else(|| env::var_os("PATH"))
+        .unwrap_or_default();
+    let entries: Vec<_> = env::split_paths(&value)
+        .map(|entry| {
+            if entry.is_absolute() {
+                entry
+            } else {
+                cwd.join(entry)
+            }
+        })
+        .collect();
+    if let Ok(value) = env::join_paths(&entries) {
+        env_map.insert(key, value.to_string_lossy().into_owned());
+    }
+    entries
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 
@@ -195,12 +256,32 @@ pub fn resolve_from_fallbacks(program: &str, paths: &[PathBuf]) -> Option<PathBu
     for dir in paths {
         for name in executable_variants(program) {
             let candidate = dir.join(name);
-            if candidate.is_file() {
+            if is_executable(&candidate) {
                 return Some(candidate);
             }
         }
     }
     None
+}
+
+pub fn resolve_service_program(
+    program: &str,
+    paths: &[PathBuf],
+    cwd: &Path,
+) -> std::io::Result<PathBuf> {
+    let path = PathBuf::from(program);
+    if path.is_absolute() {
+        return Ok(path);
+    }
+    if program.contains('/') || program.contains('\\') {
+        return Ok(cwd.join(path));
+    }
+    resolve_from_fallbacks(program, paths).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Executable {program} was not found in the service PATH"),
+        )
+    })
 }
 
 fn executable_available(
@@ -211,30 +292,18 @@ fn executable_available(
 ) -> bool {
     let path = PathBuf::from(executable);
     if path.is_absolute() {
-        return path.is_file();
+        return is_executable(&path);
     }
+    let Ok(cwd) = resolve_cwd(&service.cwd, config_base) else {
+        return false;
+    };
     if executable.contains('/') || executable.contains('\\') {
-        return resolve_cwd(&service.cwd, config_base)
-            .map(|cwd| cwd.join(path).is_file())
-            .unwrap_or(false);
+        return is_executable(&cwd.join(path));
     }
 
-    let mut search_paths = fallback_paths.to_vec();
-    let service_path = service
-        .env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
-        .map(|(_, value)| value.clone());
-    let inherited = service_path
-        .or_else(|| env::var("PATH").ok())
-        .unwrap_or_default();
-    search_paths.extend(env::split_paths(&inherited));
-
-    search_paths.into_iter().any(|dir| {
-        executable_variants(executable)
-            .iter()
-            .any(|name| dir.join(name).is_file())
-    })
+    let mut service_env = service.env.clone();
+    let paths = configure_service_path(&mut service_env, fallback_paths, &cwd);
+    resolve_from_fallbacks(executable, &paths).is_some()
 }
 
 fn executable_variants(executable: &str) -> Vec<String> {
@@ -613,6 +682,75 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
             .eq_ignore_ascii_case(&right.to_string_lossy())
     } else {
         left == right
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_service_path_wins_and_relative_entries_use_service_cwd() {
+        let cwd = env::temp_dir().join("muxly-path-project");
+        let global = env::temp_dir().join("muxly-path-global");
+        let mut service_env = HashMap::from([("PATH".into(), ".venv/bin".into())]);
+        let paths = configure_service_path(&mut service_env, &[global.clone()], &cwd);
+        assert_eq!(paths, vec![cwd.join(".venv/bin"), global]);
+        assert_eq!(
+            env::split_paths(&service_env["PATH"]).collect::<Vec<_>>(),
+            paths
+        );
+    }
+
+    #[test]
+    fn recovered_path_is_first_when_service_has_no_override() {
+        let fallback = env::temp_dir().join("muxly-recovered-runtime");
+        let mut service_env = HashMap::new();
+        let paths = configure_service_path(&mut service_env, &[fallback.clone()], &env::temp_dir());
+        assert_eq!(paths.first(), Some(&fallback));
+    }
+
+    #[test]
+    fn missing_program_never_falls_back_to_parent_path() {
+        let error = resolve_service_program("rustc", &[], &env::temp_dir()).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn relative_program_is_resolved_against_service_cwd() {
+        let cwd = env::temp_dir().join("muxly-path-project");
+        assert_eq!(
+            resolve_service_program("bin/runtime", &[], &cwd).unwrap(),
+            cwd.join("bin/runtime")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lookup_skips_non_executable_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = env::temp_dir().join(format!(
+            "muxly-exec-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        for (dir, mode) in [(&first, 0o600), (&second, 0o700)] {
+            let file = dir.join("runtime");
+            fs::write(&file, "#!/bin/sh\n").unwrap();
+            fs::set_permissions(file, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        assert_eq!(
+            resolve_from_fallbacks("runtime", &[first, second.clone()]),
+            Some(second.join("runtime"))
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }
 
