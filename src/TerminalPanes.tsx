@@ -1278,7 +1278,18 @@ function PaneView({
             if (terminal) pasteIntoRedactedTerminal(terminal, text);
           }}
         >
-          <div ref={hostRef} className="h-full w-full overflow-hidden" />
+          <div
+            ref={hostRef}
+            tabIndex={!interactive && !concealed ? 0 : undefined}
+            onMouseDownCapture={(event) => {
+              // Read-only xterm textareas are disabled to hide the cursor.
+              // Keep keyboard copy routed through this pane after selection.
+              if (!interactive && !concealed) {
+                event.currentTarget.focus({ preventScroll: true });
+              }
+            }}
+            className="h-full w-full overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"
+          />
         </TerminalPrivacy>
         {startHealth ? (
           <StartHealthNotice startHealth={startHealth} />

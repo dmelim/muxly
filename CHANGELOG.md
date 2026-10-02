@@ -116,6 +116,8 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- Restore Ctrl+C copying of selected output in stopped and read-only service terminals by keeping their output panes keyboard-focusable while terminal input is disabled.
+
 - macOS app shortcuts now use Command, leaving Control combinations available for shell history, editing, and terminal commands instead of triggering service actions.
 - Redacted terminals now preserve macOS clipboard shortcuts and native Option, dead-key, and IME text input without changing the sanitized output display.
 - Explicit service PATH entries now take precedence over recovered shell runtimes in both pipe and PTY launches, with relative entries resolved against the service directory and matching runtime checks.
