@@ -91,6 +91,9 @@ impl ProcessTerminator {
 impl PtyTerminator {
     #[cfg(windows)]
     fn terminate(&self) -> Result<(), AppError> {
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
         // First, walk and kill the whole live process tree by PID. `taskkill /T`
         // follows parent→child links (not Job Object membership), so it reaps a
         // grandchild that forked and escaped the job during the assignment race
@@ -105,6 +108,7 @@ impl PtyTerminator {
         if self.pid != 0 {
             let _ = Command::new("taskkill")
                 .args(["/PID", &self.pid.to_string(), "/F", "/T"])
+                .creation_flags(CREATE_NO_WINDOW)
                 .status();
         }
 
