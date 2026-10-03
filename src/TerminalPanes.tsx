@@ -976,7 +976,9 @@ function PaneView({
     }
 
     const safeFit = () => {
-      if (disposed) {
+      // Inactive tabs use display:none. Fitting them can collapse xterm to
+      // its minimum size, reflow scrollback and trigger destructive PTY redraws.
+      if (disposed || host.clientWidth === 0 || host.clientHeight === 0) {
         return;
       }
       try {
@@ -991,7 +993,7 @@ function PaneView({
     // redraw against the window stay aligned with the pane. No-op for pipe
     // services. Throttled to one call per frame by the rAF caller below.
     const pushSize = () => {
-      if (disposed || !isPty) {
+      if (disposed || !isPty || host.clientWidth === 0 || host.clientHeight === 0) {
         return;
       }
       const { cols, rows } = terminal;
@@ -1039,7 +1041,10 @@ function PaneView({
       // Created after xterm's own observer, so it runs once xterm has resumed
       // rendering and flushed any resize deferred while hidden.
       visibilityObserver = new IntersectionObserver((entries) => {
-        if (entries[entries.length - 1]?.isIntersecting) resyncScrollbar(terminal);
+        if (entries[entries.length - 1]?.isIntersecting) {
+          safeFit();
+          pushSize();
+        }
       });
       visibilityObserver.observe(host);
     });
@@ -1215,6 +1220,17 @@ function PaneView({
       <div
         ref={wrapRef}
         className="relative min-h-0 flex-1 overflow-hidden p-3"
+        onCopyCapture={(event) => {
+          const target = event.target as HTMLElement;
+          // The redacted mirror owns its native DOM selection. Never copy
+          // the underlying raw terminal while that privacy surface is active.
+          if (concealed || !target.closest("[data-terminal-content]")) return;
+          const terminal = terminalsRef.current.get(service.id);
+          if (!terminal?.hasSelection()) return;
+          event.clipboardData.setData("text/plain", terminal.getSelection());
+          event.preventDefault();
+          event.stopPropagation();
+        }}
         onKeyDownCapture={(event) => {
           // Copy selected text; otherwise send ^C to a PTY or stop a
           // pipe-backed service, which has no terminal input channel.
@@ -1242,9 +1258,10 @@ function PaneView({
             ? terminal.getSelection()
             : selectedDomText;
           if (selectedText && !isMac) {
-            event.preventDefault();
+            // Let the trusted keyboard gesture dispatch a native copy event.
+            // Cancelling it and using navigator.clipboard can silently fail
+            // in the desktop webview. Stop xterm from sending an interrupt.
             event.stopPropagation();
-            void navigator.clipboard.writeText(selectedText);
             return;
           }
           if (!running) return;
