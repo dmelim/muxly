@@ -116,6 +116,12 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- Hide Windows cleanup command windows when stopping services or closing Muxly while preserving full process-tree cleanup.
+
+- Copy selected service output through the native clipboard event so Ctrl+C does not depend on an asynchronous clipboard write in the desktop webview.
+
+- Preserve service terminal output when switching tabs by skipping terminal and PTY resizes while panes are hidden, then fitting them when visible again.
+
 - Restore Ctrl+C copying of selected output in stopped and read-only service terminals by keeping their output panes keyboard-focusable while terminal input is disabled.
 
 - macOS app shortcuts now use Command, leaving Control combinations available for shell history, editing, and terminal commands instead of triggering service actions.
