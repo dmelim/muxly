@@ -30,6 +30,15 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-04
+
+### Fixed
+
+- The Details sidebar uses a slim custom scrollbar whose visible thumb reaches both ends even when content barely overflows; Run history no longer adds a duplicate section gap.
+- Terminal action buttons stay above the scrollbar and remain clickable.
+- Service terminals and the shell drawer hide scrollbars and ignore ordinary wheel scrolling when their scrollback contains only blank padding, preserving real output history and full-screen application input.
+- Starting a PTY service no longer pushes the pane's existing lines into scrollback: the PTY opens at the pane's size, and resizes that don't change the size are skipped, so Windows ConPTY no longer repaints a screen of blank rows.
+
 ## [0.6.0] - 2026-10-01
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "muxly"
-version = "0.6.0"
+version = "0.6.1"
 description = "A local command center for development processes"
 authors = ["Diethos"]
 edition = "2021"
