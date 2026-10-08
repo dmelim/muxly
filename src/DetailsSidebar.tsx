@@ -5,6 +5,7 @@ import type { EditorCandidate } from "./types";
 import { displayServiceName, formatCommand } from "./types";
 import { Button } from "./Button";
 import { Detail } from "./Detail";
+import { SidebarScrollArea } from "./SidebarScrollArea";
 import { ImportPanel } from "./ImportPanel";
 import { ServiceForm } from "./ServiceForm";
 import { ServiceIconBadge } from "./ServiceIconBadge";
@@ -172,9 +173,9 @@ export function DetailsSidebar({
               ) : null}
             <Tooltip label="Edit service"><Button variant="ghost" size="icon" aria-label="Edit service" onClick={() => onEdit({ mode: "edit", service: selected })}><EditIcon className="size-4" /></Button></Tooltip></div>
 ) : null}</div>
-      <div className="muxly-sidebar-scroll min-h-0 flex-1 overflow-y-auto">
+      <SidebarScrollArea label="Service details">
         {selected ? (
-          <div className="space-y-5 p-3 text-sm">
+          <div className="p-3 text-sm">
             <dl className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,110px),1fr))] gap-x-4 gap-y-3">
               <Detail label="Icon">
                 <ServiceIconBadge
@@ -253,7 +254,7 @@ export function DetailsSidebar({
             No service selected. Use "+ New service" in the sidebar to create one.
           </p>
         )}
-      </div>
+      </SidebarScrollArea>
     </>
   );
 }
