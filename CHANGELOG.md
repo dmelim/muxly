@@ -34,6 +34,7 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- The Services sidebar now shares the custom scrollbar with Details, avoiding inconsistent native scrollbar visibility.
 - The Details sidebar uses a slim custom scrollbar whose visible thumb reaches both ends even when content barely overflows; Run history no longer adds a duplicate section gap.
 - Terminal action buttons stay above the scrollbar and remain clickable.
 - Service terminals and the shell drawer hide scrollbars and ignore ordinary wheel scrolling when their scrollback contains only blank padding, preserving real output history and full-screen application input.

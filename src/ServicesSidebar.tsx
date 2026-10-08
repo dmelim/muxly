@@ -5,6 +5,7 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import type { EditTarget } from "./appTypes";
 import { formatCommand } from "./types";
 import { Button } from "./Button";
+import { SidebarScrollArea } from "./SidebarScrollArea";
 import { Tooltip } from "./Tooltip";
 import { ServiceIconBadge } from "./ServiceIconBadge";
 import { ProfileSwitcher } from "./ProfileSwitcher";
@@ -316,6 +317,7 @@ export function ServicesSidebar({
 
       <section aria-labelledby="services-panel-heading" className="flex min-h-0 flex-1 flex-col">
         <h2 id="services-panel-heading" className="shrink-0 px-3 pb-1 pt-3 text-sm font-semibold text-zinc-100">Services</h2>
+      <SidebarScrollArea label="Services">
       <div
         onDragEnter={(event) => {
           if (isFiltering) return;
@@ -328,7 +330,7 @@ export function ServicesSidebar({
           }
           if (dragIdRef.current || dragGroupRef.current) event.preventDefault();
         }}
-        className="muxly-sidebar-scroll min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-3"
+        className="space-y-5 p-3"
       >
         {groupedServices.length === 0 && serviceQuery.trim() ? (
           <div className="px-3 py-8 text-center">
@@ -714,6 +716,7 @@ export function ServicesSidebar({
           );
         })}
       </div>
+      </SidebarScrollArea>
       </section>
       </div>
       {menu ? <ContextMenu {...menu} onClose={() => setMenu(null)} restoreFocusRef={menuTargetRef} /> : null}
