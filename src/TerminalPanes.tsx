@@ -19,6 +19,7 @@ import { fuzzySearchPattern } from "./search";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { TerminalPrivacy } from "./TerminalPrivacy";
 import { pasteIntoRedactedTerminal, setTerminalConcealed } from "./streamPrivacy";
+import { attachMeaningfulTerminalScroll } from "./terminalScroll";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -952,6 +953,7 @@ function PaneView({
     // already encoded with the right control sequences; the PTY echoes input
     // back through the normal output stream, so we don't echo locally.
     let dataDisposable: { dispose: () => void } | null = null;
+    let disposeScroll: (() => void) | null = null;
     const writeParsedDisposable = terminal.onWriteParsed(() => {
       if (streamModeRef.current) updateStreamSnapshot(terminal);
     });
@@ -1014,6 +1016,7 @@ function PaneView({
         return;
       }
       terminal.open(host);
+      disposeScroll = attachMeaningfulTerminalScroll(terminal);
       setTerminalConcealed(terminal, concealedRef.current);
       setServiceTerminalInput(terminal, interactiveRef.current, concealedRef.current);
       safeFit();
@@ -1056,6 +1059,7 @@ function PaneView({
       resizeObserver?.disconnect();
       visibilityObserver?.disconnect();
       dataDisposable?.dispose();
+      disposeScroll?.();
       writeParsedDisposable.dispose();
       terminalsRef.current.delete(service.id);
       setSearchAddon(null);

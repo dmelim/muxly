@@ -155,6 +155,12 @@ button {
   display: none !important;
 }
 
+/* Keep blank PTY padding from advertising additional logs. */
+.xterm.muxly-empty-scrollback .xterm-scrollable-element > .scrollbar.vertical {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 /* Keep xterm's scroll track and thumb length, with a slightly slimmer thumb. */
 .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
   left: 1px !important;

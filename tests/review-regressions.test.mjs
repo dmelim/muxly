@@ -22,6 +22,24 @@ async function moduleUrl(url) {
 }
 const load = async (file) => import(await moduleUrl(new URL(`../src/${file}.ts`, import.meta.url)));
 const { reconcileServices, isServiceActive } = await load("serviceReload");
+const { hasMeaningfulScrollback } = await load("terminalScroll");
+
+test("terminal scrollback distinguishes blank padding from text and styled output", () => {
+  const line = (text, styled = false) => ({
+    length: 2,
+    translateToString: () => text,
+    getCell: () => ({ isBgDefault: () => !styled, isInverse: () => 0,
+      isUnderline: () => 0, isStrikethrough: () => 0 })
+  });
+  const terminal = (lines, baseY, type = "normal") => ({ buffer: { active: {
+    type, baseY, getLine: (row) => lines[row]
+  } } });
+  assert.equal(hasMeaningfulScrollback(terminal([line(""), line("   "), line("prompt")], 2)), false);
+  assert.equal(hasMeaningfulScrollback(terminal([line("previous output"), line("prompt")], 1)), true);
+  assert.equal(hasMeaningfulScrollback(terminal([line("  ", true), line("prompt")], 1)), true);
+  assert.equal(hasMeaningfulScrollback(terminal([line("prompt")], 0)), false);
+  assert.equal(hasMeaningfulScrollback(terminal([line("full-screen output")], 1, "alternate")), false);
+});
 
 test("config reload retains removed running services until stopped", () => {
   const previous = [{ id: "running" }, { id: "stopped" }];

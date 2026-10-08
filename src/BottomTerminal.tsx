@@ -13,6 +13,7 @@ import { TerminalPrivacy } from "./TerminalPrivacy";
 import { pasteIntoRedactedTerminal, setTerminalConcealed } from "./streamPrivacy";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { attachMeaningfulTerminalScroll } from "./terminalScroll";
 
 type PtyOutputEvent = { ptyId: string; chunk: string };
 type PtyClosedEvent = { ptyId: string };
@@ -174,6 +175,7 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
     let setupRaf = 0;
     let fitRaf = 0;
     let closeListener: (() => void) | null = null;
+    let disposeScroll: (() => void) | null = null;
     // Holds the onData disposable from inside the rAF callback so the outer
     // cleanup can dispose it even though it's created later.
     const onDataCleanup: { dispose: () => void } = { dispose: () => {} };
@@ -209,6 +211,7 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
     setupRaf = requestAnimationFrame(() => {
       if (disposed) return;
       terminal.open(host);
+      disposeScroll = attachMeaningfulTerminalScroll(terminal);
       safeFit();
 
       const onOutput = new Channel<PtyOutputEvent>();
@@ -269,6 +272,7 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
       resizeObserver?.disconnect();
       closeListener?.();
       onDataCleanup.dispose();
+      disposeScroll?.();
       window.clearTimeout(revealTimer);
       writeParsedDisposable.dispose();
       // Wait for the open IPC to settle before closing. Without this chain,
