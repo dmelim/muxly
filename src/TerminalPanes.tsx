@@ -1219,7 +1219,7 @@ function PaneView({
       ) : null}
       <div
         ref={wrapRef}
-        className="relative min-h-0 flex-1 overflow-hidden p-3"
+        className="relative isolate z-0 min-h-0 flex-1 overflow-hidden p-3"
         onCopyCapture={(event) => {
           const target = event.target as HTMLElement;
           // The redacted mirror owns its native DOM selection. Never copy
