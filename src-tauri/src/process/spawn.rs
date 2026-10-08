@@ -24,12 +24,13 @@ pub fn spawn_process(
     config_dir: &ServicesConfigDir,
     service: ServiceConfig,
     on_output: Channel<ProcessOutputEvent>,
+    pty_size: Option<super::ServicePtySize>,
 ) -> Result<(), AppError> {
     // PTY-backed services go through a parallel spawn path so the child sees
     // a real TTY (see `spawn_pty.rs`). All other lifecycle handling — events,
     // registry, history, terminate-on-window-close — is shared.
     if service.use_pty {
-        return super::spawn_service_pty(app, registry, config_dir, service, on_output);
+        return super::spawn_service_pty(app, registry, config_dir, service, on_output, pty_size);
     }
 
     if registry.is_running(&service.id) {

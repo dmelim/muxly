@@ -4,6 +4,7 @@ use crate::{
     net::{find_port_holder_pid, is_port_available, kill_external_pid},
     process::{
         resize_service_pty, spawn_process, write_service_pty, ProcessRegistry, ServicePtyRegistry,
+        ServicePtySize,
     },
     pty::{self, PtyRegistry},
     runtime::{activate_fallback, check_requirements, RuntimeFallbacks, RuntimeRequirementReport},
@@ -91,11 +92,12 @@ pub fn start_service(
     config_dir: State<'_, ServicesConfigDir>,
     service: ServiceConfig,
     on_output: Channel<ProcessOutputEvent>,
+    pty_size: Option<ServicePtySize>,
 ) -> Result<(), AppError> {
     let Some(_reservation) = registry.reserve_start(&service.id) else {
         return Err(AppError::AlreadyRunning { service_name: service.name });
     };
-    spawn_process(app, &registry, &config_dir, service, on_output)
+    spawn_process(app, &registry, &config_dir, service, on_output, pty_size)
 }
 
 #[tauri::command(async)]

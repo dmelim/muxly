@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub use platform::{configure_process_group, resume_child, ProcessTerminator};
 pub use spawn::spawn_process;
 pub use spawn_pty::{
-    resize_service_pty, spawn_service_pty, write_service_pty, ServicePtyRegistry,
+    resize_service_pty, spawn_service_pty, write_service_pty, ServicePtyRegistry, ServicePtySize,
 };
 
 /// A monotonically increasing tag identifying a single run of a service.

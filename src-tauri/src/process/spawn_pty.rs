@@ -38,11 +38,21 @@ use std::{
 };
 use tauri::{ipc::Channel, AppHandle, Emitter, Manager};
 
-/// Initial PTY size, used until the pane reports its measured dimensions via
-/// `service_pty_resize` on mount. A generous default keeps early startup
-/// output (before the first resize lands) from wrapping awkwardly.
+/// Initial PTY size when the start request carries no pane size (no pane is
+/// mounted). A generous default keeps early startup output from wrapping
+/// awkwardly until the pane reports its dimensions via `service_pty_resize`.
 const DEFAULT_PTY_COLS: u16 = 120;
 const DEFAULT_PTY_ROWS: u16 = 30;
+
+/// The pane's measured terminal size, sent with a start request so the PTY
+/// opens at its final geometry. Resizing ConPTY right after spawn makes it
+/// repaint a full screen of blank rows from the cursor, which scrolls the
+/// pane's existing lines into scrollback.
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct ServicePtySize {
+    pub cols: u16,
+    pub rows: u16,
+}
 
 /// A live PTY-backed service's master side. The `writer` feeds the child's
 /// stdin so the UI can answer interactive prompts (Vite's `r`/`u`/`q`, etc.),
@@ -130,12 +140,21 @@ pub fn resize_service_pty(
     let Some(session) = registry.get(service_id) else {
         return Ok(());
     };
-    session
-        .master
-        .lock()
+    let (rows, cols) = (rows.max(1), cols.max(1));
+    let master = session.master.lock();
+    // ConPTY repaints its whole screen on every resize, even to the same size.
+    // The pane re-sends its size on mount, start and visibility changes, so
+    // skip no-op resizes before that repaint scrolls output into scrollback.
+    if master
+        .get_size()
+        .is_ok_and(|size| size.rows == rows && size.cols == cols)
+    {
+        return Ok(());
+    }
+    master
         .resize(PtySize {
-            rows: rows.max(1),
-            cols: cols.max(1),
+            rows,
+            cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -149,6 +168,7 @@ pub fn spawn_service_pty(
     config_dir: &ServicesConfigDir,
     service: ServiceConfig,
     on_output: Channel<ProcessOutputEvent>,
+    size: Option<ServicePtySize>,
 ) -> Result<(), AppError> {
     if registry.is_running(&service.id) {
         return Err(AppError::AlreadyRunning {
@@ -171,8 +191,8 @@ pub fn spawn_service_pty(
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: DEFAULT_PTY_ROWS,
-            cols: DEFAULT_PTY_COLS,
+            rows: size.map_or(DEFAULT_PTY_ROWS, |size| size.rows.max(1)),
+            cols: size.map_or(DEFAULT_PTY_COLS, |size| size.cols.max(1)),
             pixel_width: 0,
             pixel_height: 0,
         })

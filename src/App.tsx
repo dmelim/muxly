@@ -1293,12 +1293,12 @@ export function App() {
       // launchers that remain completely silent. Pipe-mode spawns don't use it.
       const startedService = servicesRef.current.find((s) => s.id === serviceId);
       if (startedService?.usePty) {
-        // The backend opens every PTY at a default 120×30 (it can't know the
-        // pane size until the child exists). The pane already fitted xterm to
-        // its real, narrower geometry on mount, but that resize was a no-op
-        // because the process wasn't running yet — and nothing fires the pane's
-        // ResizeObserver afterwards since its box never changes. Re-push the
-        // measured size now so the PTY's width matches xterm's. Without this the
+        // Without an open pane the backend opens the PTY at a default 120×30,
+        // and the pane may also have resized while the start was in flight.
+        // Its mount-time resize was a no-op because the process wasn't running
+        // yet, and nothing fires the pane's ResizeObserver afterwards since its
+        // box never changes. Re-push the measured size now so the PTY's width
+        // matches xterm's (the backend ignores unchanged sizes). Without this the
         // two disagree and readline-driven REPLs (node, python) compute their
         // cursor-relative redraws against the wrong width, landing echoed input
         // on the wrong row.
@@ -1813,7 +1813,14 @@ export function App() {
       outputChannelsRef.current[service.id] = onOutput;
 
       try {
-        await invoke("start_service", { service, onOutput });
+        // Open the PTY at the pane's measured size: resizing ConPTY after it
+        // starts repaints a screen of blank rows that scrolls the pane.
+        const terminal = terminalsRef.current.get(service.id);
+        const ptySize =
+          service.usePty && terminal && terminal.cols > 0 && terminal.rows > 0
+            ? { cols: terminal.cols, rows: terminal.rows }
+            : null;
+        await invoke("start_service", { service, onOutput, ptySize });
       } catch (error) {
         delete outputChannelsRef.current[service.id];
         // The start never reached PROCESS_STARTED — drop the user-start flag so
