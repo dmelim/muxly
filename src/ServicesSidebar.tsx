@@ -643,14 +643,14 @@ export function ServicesSidebar({
                             openService(service.id);
                           }
                         }}
-                        className={`group/card relative w-full cursor-pointer rounded-md border-l-2 px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${
+                        className={`group/card relative w-full cursor-pointer rounded-md px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${
                           isDragging ? "opacity-40 " : ""
                         }${
                           selected?.id === service.id
-                            ? "border-cyan-400 bg-white/10 text-white"
+                            ? "bg-white/[0.07] text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]"
                             : isOpen
-                              ? "border-cyan-400/40 text-zinc-200 hover:bg-white/5 hover:text-white"
-                              : "border-transparent text-zinc-300 hover:bg-white/5 hover:text-white"
+                              ? "text-zinc-200 hover:bg-white/5 hover:text-white"
+                              : "text-zinc-300 hover:bg-white/5 hover:text-white"
                         }`}
                       >
                         <span className="flex items-center justify-between gap-3 pr-8">

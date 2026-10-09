@@ -141,8 +141,8 @@ Spacing follows Tailwind's 4px scale. Common rhythm: `p-3` (panes, cards),
 
 - **Radius** — `rounded-md` (6px) is the default for buttons, cards, inputs,
   tooltips, and badges. Status dots and avatars are `rounded-full`.
-- **Borders** — 1px `white/10`. Selected/active items use a 2px left accent
-  border instead of a fill where possible.
+- **Borders** — 1px `white/10`. Selected/active items use a subtle fill
+  (with a hairline inset outline where needed), not a coloured side stripe.
 - **Elevation** — the UI is mostly flat. Only floating layers (tooltips) carry
   a shadow (`shadow-lg`). No shadows on buttons or cards.
 
@@ -182,9 +182,10 @@ duplicate tooltip.
 ### Cards (service list)
 
 A card per service. Plain click opens it as the sole pane; `Ctrl/Cmd`-click
-(or the hover split icon) opens it in an additional pane. State: a 2px left
-border — accent when selected, `accent/40` when open elsewhere, transparent
-otherwise. The status dot and name lead; the command shows in muted monospace.
+(or the hover split icon) opens it in an additional pane. State: the selected
+card is a flat `white/7` fill with a 1px inset `white/8` hairline, like native
+list selection; open cards show the accent terminal icon in the top-right
+corner; other cards are transparent until hover. No coloured side stripes. The status dot and name lead; the command shows in muted monospace.
 Project group headers carry the pin action. Pinned projects form a stable group
 at the top of the sidebar while service order inside each project is unchanged.
 Dragging a service card into the terminal workspace opens it as a tab in the

@@ -33,7 +33,7 @@ section, and tag the commit `vX.Y.Z`.
 ### Changed
 
 - Horizontal and vertical scrollbars now share thin square accent thumbs, transparent tracks, and matching hover and pressed colours across sidebars, tabs, terminals, dialogs, and forms.
-- Service cards mark the selected service with an accent left border and other open services with a fainter one, instead of highlighting every open card the same way.
+- Service cards show only the selected service as a filled, outlined row; other open services keep just their open-terminal icon, instead of every open card being highlighted the same way.
 
 ### Fixed
 
