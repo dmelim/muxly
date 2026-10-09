@@ -42,7 +42,7 @@ export function TabsScrollArea({ children, className = "", ...props }: Props) {
       aria-valuemax={Math.round(max)}
       aria-valuenow={Math.round(metrics.left)}
       tabIndex={0}
-      className="absolute inset-x-0 top-full z-10 mt-px h-1.5 cursor-pointer opacity-0 transition-opacity group-hover/tabs:opacity-100 group-focus-within/tabs:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-cyan-400"
+      className="absolute inset-x-0 top-full z-10 mt-px muxly-scrollbar-track-horizontal touch-none cursor-pointer opacity-0 transition-opacity group-hover/tabs:opacity-100 group-focus-within/tabs:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-cyan-400"
       onKeyDown={(event) => {
         const steps: Record<string, number> = { ArrowLeft: metrics.left - 60, ArrowRight: metrics.left + 60, Home: 0, End: max, PageUp: metrics.left - metrics.width, PageDown: metrics.left + metrics.width };
         if (event.key in steps) { event.preventDefault(); scrollTo(steps[event.key]); }
@@ -62,6 +62,6 @@ export function TabsScrollArea({ children, className = "", ...props }: Props) {
       onPointerUp={(event) => { drag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
       onPointerCancel={() => { drag.current = null; }}
       onLostPointerCapture={() => { drag.current = null; }}
-    ><div className="absolute top-[1.25px] h-[3.5px] bg-cyan-400 hover:bg-cyan-300" style={{ width: thumb, transform: `translateX(${max ? metrics.left / max * travel : 0}px)` }} /></div> : null}
+    ><div className="muxly-scrollbar-thumb muxly-scrollbar-thumb-horizontal" style={{ width: thumb, transform: `translateX(${max ? metrics.left / max * travel : 0}px)` }} /></div> : null}
   </div>;
 }

@@ -30,6 +30,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- Horizontal and vertical scrollbars now share thin square accent thumbs, transparent tracks, and matching hover and pressed colours across sidebars, tabs, terminals, dialogs, and forms.
+
 ## [0.6.1] - 2026-10-04
 
 ### Fixed

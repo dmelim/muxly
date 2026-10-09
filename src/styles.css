@@ -48,44 +48,69 @@
   }
 }
 
-/* Custom scrollbars — the app runs in a Chromium-based webview (WebView2 on
-   Windows, WebKit on macOS), so the ::-webkit-scrollbar pseudo-elements apply.
-   The standard scrollbar-* properties are kept as a fallback. */
+/* Shared scrollbar chrome for both axes and every scroll surface. Native
+   views retain their own geometry; custom tracks and xterm use the same tokens. */
+:root {
+  --muxly-scrollbar-track: 10px;
+  --muxly-scrollbar-thumb: 3.5px;
+  --muxly-scrollbar-inset: 3.25px;
+  --muxly-scrollbar-color: var(--color-cyan-400);
+  --muxly-scrollbar-hover: var(--color-cyan-300);
+  --muxly-scrollbar-active: var(--color-cyan-500);
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--muxly-border) transparent;
+  scrollbar-color: var(--muxly-scrollbar-color) transparent;
+}
+
+/* Standard non-auto properties override WebKit pseudo-element styling in
+   Chromium. Opt into that styling so the visible thickness is exactly 3.5px. */
+@supports selector(::-webkit-scrollbar) {
+  * { scrollbar-width: auto; scrollbar-color: auto; }
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: var(--muxly-scrollbar-track);
+  height: var(--muxly-scrollbar-track);
 }
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 ::-webkit-scrollbar-thumb {
-  background: var(--muxly-border);
-  border-radius: 9999px;
-  /* Inset the thumb so it does not touch the panel edges. */
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  --muxly-native-thumb-color: transparent;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(to right, transparent calc(50% - 1.75px), var(--muxly-native-thumb-color) calc(50% - 1.75px) calc(50% + 1.75px), transparent calc(50% + 1.75px));
 }
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--muxly-hover-strong);
-  background-clip: padding-box;
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  --muxly-native-thumb-color: var(--muxly-scrollbar-color);
 }
-
-::-webkit-scrollbar-thumb:active {
-  background: rgba(255, 255, 255, 0.4);
-  background-clip: padding-box;
+::-webkit-scrollbar-thumb:horizontal {
+  background: linear-gradient(to bottom, transparent calc(50% - 1.75px), var(--muxly-native-thumb-color) calc(50% - 1.75px) calc(50% + 1.75px), transparent calc(50% + 1.75px));
 }
+::-webkit-scrollbar-thumb:hover { --muxly-native-thumb-color: var(--muxly-scrollbar-hover); }
+::-webkit-scrollbar-thumb:active { --muxly-native-thumb-color: var(--muxly-scrollbar-active); }
 
-/* Hide the dead corner where vertical and horizontal bars would meet. */
-::-webkit-scrollbar-corner {
-  background: transparent;
+.muxly-scrollbar-thumb {
+  position: absolute;
+  border-radius: 0;
+  background-color: var(--muxly-scrollbar-color);
+}
+.muxly-scrollbar-thumb:hover { background-color: var(--muxly-scrollbar-hover); }
+[role="scrollbar"]:active > .muxly-scrollbar-thumb {
+  background-color: var(--muxly-scrollbar-active);
+}
+.muxly-scrollbar-track-vertical { width: var(--muxly-scrollbar-track); }
+.muxly-scrollbar-track-horizontal { height: var(--muxly-scrollbar-track); }
+.muxly-scrollbar-thumb-vertical {
+  left: var(--muxly-scrollbar-inset);
+  width: var(--muxly-scrollbar-thumb);
+}
+.muxly-scrollbar-thumb-horizontal {
+  top: var(--muxly-scrollbar-inset);
+  height: var(--muxly-scrollbar-thumb);
 }
 
 /* The app owns all scrolling through its own panels — the document root must
@@ -135,10 +160,30 @@ button {
   pointer-events: none !important;
 }
 
-/* Keep xterm's scroll track and thumb length, with a slightly slimmer thumb. */
+/* Preserve xterm's scroll geometry and wheel handling while sharing the
+   same square thumb, hit area and interaction colours as the UI tracks. */
+.xterm .xterm-scrollable-element > .scrollbar.vertical {
+  width: var(--muxly-scrollbar-track) !important;
+}
 .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
-  left: 1px !important;
-  width: calc(100% - 2px) !important;
+  left: var(--muxly-scrollbar-inset) !important;
+  width: var(--muxly-scrollbar-thumb) !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+}
+.xterm:hover .xterm-scrollable-element > .scrollbar.vertical,
+.xterm:focus-within .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1 !important;
+}
+.xterm:hover .xterm-scrollable-element > .scrollbar.vertical > .slider,
+.xterm:focus-within .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  background-color: var(--muxly-scrollbar-color) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider:hover {
+  background-color: var(--muxly-scrollbar-hover) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider.active {
+  background-color: var(--muxly-scrollbar-active) !important;
 }
 
 /* Drop xterm's VS Code scrollbar arrow controls — the slider alone is cleaner. */

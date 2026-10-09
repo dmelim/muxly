@@ -43,7 +43,7 @@ export function SidebarScrollArea({ children, label }: Props) {
         <div ref={track} role="scrollbar" aria-label={`Scroll ${label}`} aria-controls={id}
           aria-orientation="vertical" aria-valuemin={0} aria-valuemax={Math.round(max)}
           aria-valuenow={Math.round(metrics.top)} tabIndex={0}
-          className="absolute inset-y-0 right-0 w-2.5 touch-none cursor-pointer opacity-0 transition-opacity group-hover/sidebar-scroll:opacity-100 group-focus-within/sidebar-scroll:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-cyan-400"
+          className="absolute inset-y-0 right-0 muxly-scrollbar-track-vertical touch-none cursor-pointer opacity-0 transition-opacity group-hover/sidebar-scroll:opacity-100 group-focus-within/sidebar-scroll:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-cyan-400"
           onKeyDown={(event) => {
             const top = viewport.current?.scrollTop ?? 0;
             const steps: Record<string, number> = { ArrowUp: top - 40, ArrowDown: top + 40, Home: 0, End: max, PageUp: top - metrics.height, PageDown: top + metrics.height };
@@ -68,7 +68,7 @@ export function SidebarScrollArea({ children, label }: Props) {
           }}
           onPointerCancel={() => { drag.current = null; }}
           onLostPointerCapture={() => { drag.current = null; }}>
-          <div className="absolute left-[3.25px] w-[3.5px] bg-cyan-400 hover:bg-cyan-300 active:bg-cyan-500"
+          <div className="muxly-scrollbar-thumb muxly-scrollbar-thumb-vertical"
             style={{ height: thumb, transform: `translateY(${max ? metrics.top / max * travel : 0}px)` }} />
         </div>
       ) : null}

@@ -249,9 +249,14 @@ close/reopen for the current app session.
 
 ### Scrollbars
 
-Thin, dark, custom (`scrollbar-width: thin`, 10px webkit fallback). Track
-transparent; thumb `white/14`, `white/28` on hover. No arrow buttons. xterm's
-horizontal scrollbar is hidden — terminal output wraps.
+All horizontal and vertical scrollbars share a square 3.5px accent thumb
+inside a transparent 10px track, with accent/soft hover and accent/strong
+pressed colours. Shared CSS tokens control the dimensions and colours for
+native scroll surfaces, custom sidebar and tab tracks, and xterm. Scrollbars
+reveal on hover or keyboard focus; native fallback uses a thin accent bar.
+Custom sidebar and tab thumbs retain their 30% shorter length with full-track
+travel. Native views and xterm retain their own scroll geometry. No arrow
+buttons. xterm's horizontal scrollbar is hidden because terminal output wraps.
 
 ### Stream mode
 
