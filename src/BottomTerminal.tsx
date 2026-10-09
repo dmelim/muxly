@@ -9,8 +9,7 @@ import { CloseIcon, TerminalIcon } from "./icons";
 import { PTY_CLOSED } from "./events";
 import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
-import { TerminalPrivacy } from "./TerminalPrivacy";
-import { pasteIntoRedactedTerminal, setTerminalConcealed } from "./streamPrivacy";
+import { attachStreamMasks, type StreamMaskController } from "./streamMasks";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { attachMeaningfulTerminalScroll } from "./terminalScroll";
@@ -19,6 +18,8 @@ type PtyOutputEvent = { ptyId: string; chunk: string };
 type PtyClosedEvent = { ptyId: string };
 
 const TERMINAL_OPTIONS = {
+  // Stream mode masks are drawn with xterm markers and decorations.
+  allowProposedApi: true,
   // No `convertEol` — a real PTY emits proper CRLF for us. Forcing it adds an
   // extra `\r` and produces stair-stepped output on Windows shells.
   cursorBlink: true,
@@ -76,11 +77,9 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
   const [shells, setShells] = useState<Array<{ id: string; label: string }>>([]);
   const [pendingShell, setPendingShell] = useState<string | null>(null);
   const [shellError, setShellError] = useState<string | null>(null);
-  const [streamSnapshot, setStreamSnapshot] = useState("");
   const [shellReady, setShellReady] = useState(false);
   useLayoutEffect(() => {
     setShellReady(false);
-    setStreamSnapshot("");
   }, [open, shellId, cwd]);
   useEffect(() => {
     if (!open) { setPendingShell(null); return; }
@@ -91,8 +90,9 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
       .catch(() => { if (!cancelled) setShellError("Shell discovery unavailable. The default shell is still available."); });
     return () => { cancelled = true; };
   }, [open]);
-  const concealedRef = useRef(streamMode);
-  concealedRef.current = streamMode;
+  const streamModeRef = useRef(streamMode);
+  streamModeRef.current = streamMode;
+  const masksRef = useRef<StreamMaskController | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -103,16 +103,12 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
   redactStreamOutputRef.current = redactStreamOutput;
 
   useLayoutEffect(() => {
-    if (shellReady && !streamMode) terminalRef.current?.focus();
-  }, [shellReady, streamMode]);
+    if (shellReady) terminalRef.current?.focus();
+  }, [shellReady]);
 
+  // Masks apply in the React commit, before paint, over the live shell.
   useLayoutEffect(() => {
-    if (terminalRef.current) {
-      setTerminalConcealed(terminalRef.current, streamMode);
-      if (streamMode) {
-        setStreamSnapshot(redactStreamOutput(terminalBufferText(terminalRef.current)));
-      }
-    }
+    masksRef.current?.setRedactor(streamMode ? redactStreamOutput : null);
   }, [redactStreamOutput, streamMode, open]);
 
   useEffect(() => {
@@ -134,9 +130,8 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
     const ptyId = `shell-${Math.random().toString(36).slice(2, 10)}`;
     ptyIdRef.current = ptyId;
 
-    const terminal = new Terminal({ ...TERMINAL_OPTIONS, theme: xtermTheme(themeRef.current), disableStdin: concealedRef.current });
+    const terminal = new Terminal({ ...TERMINAL_OPTIONS, theme: xtermTheme(themeRef.current) });
     terminalRef.current = terminal;
-    terminal.attachCustomKeyEventHandler(() => !concealedRef.current);
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(
@@ -144,7 +139,8 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
         // Route through the backend `open_url` command — `window.open` from a
         // Tauri webview doesn't reliably hand off to the system browser.
         event.preventDefault();
-        if (concealedRef.current) return;
+        // Links sit under Stream mode masks; never open a hidden target.
+        if (streamModeRef.current) return;
         void invoke("open_url", { url: uri }).catch(() => {});
       })
     );
@@ -164,9 +160,6 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
         firstShellTextParsed = true;
         window.clearTimeout(revealTimer);
         setShellReady(true);
-      }
-      if (concealedRef.current) {
-        setStreamSnapshot(redactStreamOutputRef.current(terminalBufferText(terminal)));
       }
     });
 
@@ -212,6 +205,9 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
       if (disposed) return;
       terminal.open(host);
       disposeScroll = attachMeaningfulTerminalScroll(terminal);
+      const masks = attachStreamMasks(terminal);
+      masks.setRedactor(streamModeRef.current ? redactStreamOutputRef.current : null);
+      masksRef.current = masks;
       safeFit();
 
       const onOutput = new Channel<PtyOutputEvent>();
@@ -273,6 +269,8 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
       closeListener?.();
       onDataCleanup.dispose();
       disposeScroll?.();
+      masksRef.current?.dispose();
+      masksRef.current = null;
       window.clearTimeout(revealTimer);
       writeParsedDisposable.dispose();
       // Wait for the open IPC to settle before closing. Without this chain,
@@ -333,26 +331,22 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
         </div>
       </div>
       {shellError ? <p role="status" className="px-3 pt-2 text-xs text-amber-300">{redactStreamOutput(shellError)}</p> : null}
-      <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden p-3" aria-busy={!shellReady}>
+      <div
+        ref={wrapRef}
+        className="relative min-h-0 flex-1 overflow-hidden p-3"
+        aria-busy={!shellReady}
+        onCopyCapture={(event) => {
+          // Stream mode copies carry the same redaction the masks show.
+          const masks = masksRef.current;
+          if (!streamMode || !masks || !terminalRef.current?.hasSelection()) return;
+          event.clipboardData.setData("text/plain", masks.copySelection());
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
         {!shellReady ? <p role="status" className="absolute left-3 top-3 text-xs text-zinc-500">Starting shell…</p> : null}
         <div className="h-full w-full" style={{ visibility: shellReady ? "visible" : "hidden" }} inert={!shellReady || undefined}>
-        <TerminalPrivacy
-          redacted={streamMode}
-          content={streamSnapshot}
-          interactive
-          ariaLabel="Redacted shell output"
-          onData={(data) => {
-            const ptyId = ptyIdRef.current;
-            if (!ptyId) return;
-            void invoke("pty_write", { ptyId, data }).catch(() => {});
-          }}
-          onPaste={(text) => {
-            const terminal = terminalRef.current;
-            if (terminal) pasteIntoRedactedTerminal(terminal, text);
-          }}
-        >
           <div ref={hostRef} className="h-full w-full overflow-hidden" />
-        </TerminalPrivacy>
         </div>
       </div>
       {pendingShell ? <ConfirmDialog

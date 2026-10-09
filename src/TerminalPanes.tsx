@@ -17,8 +17,7 @@ import type { MuxlyTheme } from "./theme";
 import { xtermTheme } from "./theme";
 import { fuzzySearchPattern } from "./search";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
-import { TerminalPrivacy } from "./TerminalPrivacy";
-import { pasteIntoRedactedTerminal, setTerminalConcealed } from "./streamPrivacy";
+import { attachStreamMasks, type StreamMaskController } from "./streamMasks";
 import { attachMeaningfulTerminalScroll } from "./terminalScroll";
 
 const statusDots: Record<ServiceStatus, string> = {
@@ -58,15 +57,15 @@ const TERMINAL_OPTIONS = {
 
 const EMPTY_WORKSPACE_DROP_TARGET = "__empty_workspace__";
 
-function setServiceTerminalInput(terminal: Terminal, interactive: boolean, concealed: boolean) {
-  terminal.options.disableStdin = concealed || !interactive;
+function setServiceTerminalInput(terminal: Terminal, interactive: boolean) {
+  terminal.options.disableStdin = !interactive;
   terminal.options.cursorBlink = interactive;
   terminal.options.cursorInactiveStyle = interactive ? "outline" : "none";
   // A transparent cursor is blended into an opaque background by xterm.
   // Keep read-only terminals unfocused instead, so the renderer omits the
   // cursor without painting over the underlying cell's ANSI colours.
-  if (!interactive || concealed) terminal.blur();
-  if (terminal.textarea) terminal.textarea.disabled = !interactive || concealed;
+  if (!interactive) terminal.blur();
+  if (terminal.textarea) terminal.textarea.disabled = !interactive;
 }
 
 // xterm 6 defers renderer resizes while a terminal is off-screen, but its
@@ -78,24 +77,12 @@ function resyncScrollbar(terminal: Terminal) {
     ._core?._viewport?.queueSync?.();
 }
 
-function terminalBufferText(terminal: Terminal): string {
-  const buffer = terminal.buffer.active;
-  let text = "";
-  for (let index = 0; index < buffer.length; index += 1) {
-    const line = buffer.getLine(index);
-    if (!line) continue;
-    if (index > 0 && !line.isWrapped) text += "\n";
-    text += line.translateToString(true);
-  }
-  return text;
-}
-
 type TerminalPanesProps = {
   /** Services shown as panes, left-to-right. */
   paneServices: ServiceConfig[];
   /** The focused pane's service id — drives the toolbar/inspector. */
   focusedId: string | null;
-  /** Shows redacted terminal mirrors and masks sensitive service names. */
+  /** Masks private values over each terminal and masks sensitive service names. */
   streamMode: boolean;
   /** Project group name → stable alias for masked UI labels. */
   projectNameAliases: Record<string, string>;
@@ -810,18 +797,16 @@ function PaneView({
   // the flicker: if the observer watched the same element xterm draws into,
   // `fit()` would perturb that element's box and re-trigger the observer in a
   // self-sustaining loop.
-  const concealed = streamMode;
   const interactive = Boolean(service.usePty && running && !adopted);
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
-  const concealedRef = useRef(concealed);
-  concealedRef.current = concealed;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   // The SearchAddon is held in state (not just a ref) so the PaneSearchBar
   // re-renders once it becomes available after the deferred terminal open.
   const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
-  const [streamSnapshot, setStreamSnapshot] = useState("");
+  // Stream mode paints masks over the live terminal rather than replacing it.
+  const masksRef = useRef<StreamMaskController | null>(null);
   // The deferred terminal setup reads current privacy state through refs.
   const streamModeRef = useRef(streamMode);
   streamModeRef.current = streamMode;
@@ -844,9 +829,8 @@ function PaneView({
     onFocus();
     menuFocusRef.current = document.activeElement as HTMLElement | null;
     const terminal = terminalsRef.current.get(service.id);
-    const selection = concealed
-      ? window.getSelection()?.toString() ?? ""
-      : terminal?.getSelection() ?? "";
+    // Copies in Stream mode carry the same redaction the masks show.
+    const selection = masksRef.current?.copySelection() ?? terminal?.getSelection() ?? "";
     const run = (action: () => Promise<unknown>) => {
       setPaneActionError(null);
       void action().catch((error) => setPaneActionError(errorMessage(error)));
@@ -859,24 +843,13 @@ function PaneView({
         const text = await navigator.clipboard.readText();
         const current = terminalsRef.current.get(service.id);
         if (!current || !interactiveRef.current) return;
-        // Clipboard access is async: use the current privacy mode, and return
-        // focus to the visible input surface after the menu closes.
-        if (concealedRef.current) {
-          pasteIntoRedactedTerminal(current, text);
-          wrapRef.current?.querySelector<HTMLElement>("[data-terminal-mirror]")?.focus({ preventScroll: true });
-        } else {
-          current.paste(text);
-          current.focus();
-        }
+        current.paste(text);
+        current.focus();
       }) },
-      { id: "select-all", label: "Select all", disabled: concealed, action: () => terminal?.selectAll() },
+      { id: "select-all", label: "Select all", action: () => terminal?.selectAll() },
       { id: "clear", label: "Clear output", action: onClear }
     ] });
   };
-
-  const updateStreamSnapshot = useCallback((terminal: Terminal) => {
-    setStreamSnapshot(redactStreamOutputRef.current(terminalBufferText(terminal)));
-  }, []);
 
   const renderSnapshot = useCallback(
     (terminal: Terminal, nextStreamMode: boolean, nextAlias: string) => {
@@ -893,14 +866,16 @@ function PaneView({
       ].join("");
 
       terminal.write(snapshot, () => {
-        if (streamModeRef.current) updateStreamSnapshot(terminal);
+        // The write callback runs before xterm's parse event; mask the replay
+        // now so it is never painted without masks.
+        masksRef.current?.sync();
         if (renderedPrivacyRef.current === null) {
           renderedPrivacyRef.current = key;
           onPrivacyRendered(service.id, key);
         }
       });
     },
-    [logsRef, onPrivacyRendered, onPrivacySnapshotStart, service, updateStreamSnapshot]
+    [logsRef, onPrivacyRendered, onPrivacySnapshotStart, service]
   );
 
   // One terminal per pane, created once. The pane is keyed by service id in the
@@ -923,7 +898,7 @@ function PaneView({
       theme: xtermTheme(theme),
       cursorBlink: interactiveRef.current,
       cursorInactiveStyle: interactiveRef.current ? "outline" : "none",
-      disableStdin: concealedRef.current || !interactiveRef.current
+      disableStdin: !interactiveRef.current
     });
     const fitAddon = new FitAddon();
     const search = new SearchAddon();
@@ -936,7 +911,8 @@ function PaneView({
         // webview isn't reliably routed to the system browser across OSes —
         // the OS-shell call is.
         event.preventDefault();
-        if (concealedRef.current) return;
+        // Links sit under Stream mode masks; never open a hidden target.
+        if (streamModeRef.current) return;
         void invoke("open_url", { url: uri }).catch(() => {
           /* nothing useful to surface to the user here */
         });
@@ -954,17 +930,13 @@ function PaneView({
     // back through the normal output stream, so we don't echo locally.
     let dataDisposable: { dispose: () => void } | null = null;
     let disposeScroll: (() => void) | null = null;
-    const writeParsedDisposable = terminal.onWriteParsed(() => {
-      if (streamModeRef.current) updateStreamSnapshot(terminal);
-    });
     if (isPty) {
       terminal.attachCustomKeyEventHandler((event) => {
-        if (concealedRef.current) return false;
         if (event.type !== "keydown" || event.key.toLowerCase() !== "c") {
           return true;
         }
         if (event.ctrlKey && event.shiftKey && terminal.hasSelection()) {
-          void navigator.clipboard.writeText(terminal.getSelection());
+          void navigator.clipboard.writeText(masksRef.current?.copySelection() ?? terminal.getSelection());
           return false;
         }
         return true;
@@ -1017,8 +989,11 @@ function PaneView({
       }
       terminal.open(host);
       disposeScroll = attachMeaningfulTerminalScroll(terminal);
-      setTerminalConcealed(terminal, concealedRef.current);
-      setServiceTerminalInput(terminal, interactiveRef.current, concealedRef.current);
+      // Masks attach before the replay is written so no frame shows it bare.
+      const masks = attachStreamMasks(terminal);
+      masks.setRedactor(streamModeRef.current ? redactStreamOutputRef.current : null);
+      masksRef.current = masks;
+      setServiceTerminalInput(terminal, interactiveRef.current);
       safeFit();
       // Sync the freshly-measured size to the PTY (the backend spawns at a
       // default 120x30 until we know the pane's real dimensions).
@@ -1060,7 +1035,8 @@ function PaneView({
       visibilityObserver?.disconnect();
       dataDisposable?.dispose();
       disposeScroll?.();
-      writeParsedDisposable.dispose();
+      masksRef.current?.dispose();
+      masksRef.current = null;
       terminalsRef.current.delete(service.id);
       setSearchAddon(null);
       terminal.dispose();
@@ -1068,21 +1044,21 @@ function PaneView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Switch to the redacted mirror in the React commit before paint. No reset
-  // or replay: ConPTY state and queued raw writes stay intact underneath.
+  // Apply Stream mode masks in the React commit, before paint. The live
+  // terminal is never reset or replayed: ConPTY state, scroll position,
+  // selection and input all carry across the toggle.
   useLayoutEffect(() => {
     const terminal = terminalsRef.current.get(service.id);
     if (!terminal) return;
-    setTerminalConcealed(terminal, concealed);
-    setServiceTerminalInput(terminal, interactive, concealed);
+    masksRef.current?.setRedactor(streamMode ? redactStreamOutput : null);
+    setServiceTerminalInput(terminal, interactive);
     terminal.options.theme = xtermTheme(theme);
-    if (streamMode) updateStreamSnapshot(terminal);
     const key = privacySnapshotKey(service, streamMode, alias);
     if (renderedPrivacyRef.current !== key) {
       renderedPrivacyRef.current = key;
       onPrivacyRendered(service.id, key);
     }
-  }, [alias, concealed, interactive, onPrivacyRendered, redactStreamOutput, searchAddon, service, streamMode, terminalsRef, theme, updateStreamSnapshot]);
+  }, [alias, interactive, onPrivacyRendered, redactStreamOutput, searchAddon, service, streamMode, terminalsRef, theme]);
 
   const paneActions = (
         <span
@@ -1125,7 +1101,7 @@ function PaneView({
                 ? "text-cyan-300 bg-cyan-500/15 hover:bg-cyan-500/20"
                 : "text-zinc-200 hover:bg-white/10 hover:text-white"
             }
-            disabled={concealed}
+            disabled={streamMode}
             onClick={searchOpen ? onCloseSearch : onOpenSearch}
           >
             <SearchIcon className="size-3.5" />
@@ -1226,12 +1202,11 @@ function PaneView({
         className="relative isolate z-0 min-h-0 flex-1 overflow-hidden p-3"
         onCopyCapture={(event) => {
           const target = event.target as HTMLElement;
-          // The redacted mirror owns its native DOM selection. Never copy
-          // the underlying raw terminal while that privacy surface is active.
-          if (concealed || !target.closest("[data-terminal-content]")) return;
+          if (!target.closest("[data-terminal-content]")) return;
           const terminal = terminalsRef.current.get(service.id);
           if (!terminal?.hasSelection()) return;
-          event.clipboardData.setData("text/plain", terminal.getSelection());
+          // Stream mode copies carry the same redaction the masks show.
+          event.clipboardData.setData("text/plain", masksRef.current?.copySelection() ?? terminal.getSelection());
           event.preventDefault();
           event.stopPropagation();
         }}
@@ -1239,8 +1214,7 @@ function PaneView({
           // Copy selected text; otherwise send ^C to a PTY or stop a
           // pipe-backed service, which has no terminal input channel.
           const target = event.target as HTMLElement;
-          const surface = target.closest("[data-terminal-content], [data-terminal-mirror]");
-          const mirror = target.closest("[data-terminal-mirror]");
+          const surface = target.closest("[data-terminal-content]");
           const selection = surface ? window.getSelection() : null;
           const selectedDomText =
             selection &&
@@ -1256,9 +1230,8 @@ function PaneView({
             event.key.toLowerCase() !== "c" ||
             !surface
           ) return;
-          if (mirror && selectedDomText && !isMac) return;
           const terminal = terminalsRef.current.get(service.id);
-          const selectedText = !mirror && terminal?.hasSelection()
+          const selectedText = terminal?.hasSelection()
             ? terminal.getSelection()
             : selectedDomText;
           if (selectedText && !isMac) {
@@ -1282,42 +1255,26 @@ function PaneView({
           }
         }}
       >
-        <TerminalPrivacy
-          redacted={concealed}
-          content={streamSnapshot}
-          interactive={interactive}
-          ariaLabel={`${displayServiceName(service, streamMode)} redacted terminal output`}
-          onData={(data) => {
-            if (!interactiveRef.current) return;
-            void invoke("service_pty_write", { serviceId: service.id, data }).catch(() => {
-              /* stopped or session gone */
-            });
-          }}
-          onPaste={(text) => {
-            if (!interactiveRef.current) return;
-            const terminal = terminalsRef.current.get(service.id);
-            if (terminal) pasteIntoRedactedTerminal(terminal, text);
-          }}
-        >
+        <div className="h-full w-full" data-terminal-content>
           <div
             ref={hostRef}
-            tabIndex={!interactive && !concealed ? 0 : undefined}
+            tabIndex={!interactive ? 0 : undefined}
             onMouseDownCapture={(event) => {
               // Read-only xterm textareas are disabled to hide the cursor.
               // Keep keyboard copy routed through this pane after selection.
-              if (!interactive && !concealed) {
+              if (!interactive) {
                 event.currentTarget.focus({ preventScroll: true });
               }
             }}
             className="h-full w-full overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"
           />
-        </TerminalPrivacy>
+        </div>
         {startHealth ? (
           <StartHealthNotice startHealth={startHealth} />
         ) : awaitingOutput ? (
           <WaitingForOutput />
         ) : null}
-        {!concealed && searchOpen && searchAddon ? (
+        {!streamMode && searchOpen && searchAddon ? (
           <PaneSearchBar
             searchAddon={searchAddon}
             seed={searchSeed}

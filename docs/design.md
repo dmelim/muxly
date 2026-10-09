@@ -265,15 +265,24 @@ Stream mode is an in-place audience filter, not a separate workspace. The
 normal service layout, status, controls, logs, and bottom shell stay visible so
 the operator can continue working while sharing the Muxly window.
 
-Each terminal keeps its raw xterm instance mounted for ANSI parsing, cursor
-movement, process state, and scrollback. Before paint, Stream mode hides that raw
-surface and shows a selectable plain-text mirror built from xterm's parsed
-buffer. The mirror masks absolute and home-relative paths, email addresses,
-external URLs, and configured sensitive identities. PTY mirrors forward
-keyboard and paste input to the existing process. Turning Stream mode off
-reveals the untouched terminal again without restarting or replaying it.
-The mirror inherits the workspace panel surface and does not draw an inner
-border or rounded card inside the terminal.
+The real terminal stays on screen in Stream mode, with its colours, font,
+spacing, wrapping, scrollbar, selection, and input unchanged. Only the sensitive
+values are covered. Each value that the stream redactor would replace (absolute
+and home-relative paths, email addresses, external URLs, and configured
+sensitive identities) gets a cell-aligned xterm decoration. The decoration
+paints a flat `white/7` fill over the terminal background and shows the
+redaction label, such as `[private path]`, in the muted terminal colour. The
+masks are painted in the same frame as the text they cover. Values that wrap
+across rows get one mask per row. Copying a selection copies what the masks
+show: masks are worked out from the whole line, so selecting any part of a
+hidden value copies its label rather than the fragment.
+
+Masking fails closed: if a change can't be traced back to exact cells, the whole
+changed span is covered, and if the redactor fails, the whole line is covered.
+Full-screen programs that use the alternate screen are covered entirely, because
+cursor-addressed output can't be read reliably line by line. Link opening and
+Find in pane are disabled while Stream mode is on. Turning Stream mode off
+removes the masks without restarting or replaying the terminal.
 
 Sensitive service and project labels must fail closed while aliases load. Use a
 generic private label rather than briefly displaying the real identity.

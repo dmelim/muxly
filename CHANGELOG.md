@@ -34,13 +34,13 @@ section, and tag the commit `vX.Y.Z`.
 
 - Horizontal and vertical scrollbars now share thin square accent thumbs, transparent tracks, and matching hover and pressed colours across sidebars, tabs, terminals, dialogs, and forms.
 - Service cards show only the selected service as a filled, outlined row; other open services keep just their open-terminal icon, instead of every open card being highlighted the same way.
+- Stream mode now keeps the real terminal on screen, with its colours, font, wrapping, scrollbar, selection, and input, and covers only sensitive values with labelled masks, instead of swapping in a plain-text mirror. Copied text matches the masks, even when only part of a hidden value is selected; full-screen programs are covered entirely, and links and Find in pane are disabled while Stream mode is on.
 
 ### Fixed
 
 - Button text now uses its intended size and weight; a global style had forced every button to 16px regular text.
 - Switching Settings tabs opens the new tab at the top instead of keeping the previous tab's scroll position.
 - Service cards show the cyan keyboard focus ring instead of the browser's default outline.
-- Stream mode's redacted terminal mirror lines up with the terminal text instead of shifting inward.
 - The New service form no longer shows a validation error before anything has been entered.
 - Restart is disabled in a stopped service's context menu, and the timestamps setting notes that pseudo-terminal output is not stamped.
 - Escape closes an open Appearance colour picker instead of the whole Settings screen.
