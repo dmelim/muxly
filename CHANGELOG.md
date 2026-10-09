@@ -34,6 +34,10 @@ section, and tag the commit `vX.Y.Z`.
 
 - Horizontal and vertical scrollbars now share thin square accent thumbs, transparent tracks, and matching hover and pressed colours across sidebars, tabs, terminals, dialogs, and forms.
 
+### Fixed
+
+- Button text now uses its intended size and weight; a global style had forced every button to 16px regular text.
+
 ## [0.6.1] - 2026-10-04
 
 ### Fixed

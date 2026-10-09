@@ -125,10 +125,6 @@ body {
   overflow: hidden;
 }
 
-button {
-  font: inherit;
-}
-
 .xterm {
   height: 100%;
 }
