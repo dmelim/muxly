@@ -33,10 +33,16 @@ section, and tag the commit `vX.Y.Z`.
 ### Changed
 
 - Horizontal and vertical scrollbars now share thin square accent thumbs, transparent tracks, and matching hover and pressed colours across sidebars, tabs, terminals, dialogs, and forms.
+- Service cards mark the selected service with an accent left border and other open services with a fainter one, instead of highlighting every open card the same way.
 
 ### Fixed
 
 - Button text now uses its intended size and weight; a global style had forced every button to 16px regular text.
+- Switching Settings tabs opens the new tab at the top instead of keeping the previous tab's scroll position.
+- Service cards show the cyan keyboard focus ring instead of the browser's default outline.
+- Stream mode's redacted terminal mirror lines up with the terminal text instead of shifting inward.
+- The New service form no longer shows a validation error before anything has been entered.
+- Restart is disabled in a stopped service's context menu, and the timestamps setting notes that pseudo-terminal output is not stamped.
 
 ## [0.6.1] - 2026-10-04
 

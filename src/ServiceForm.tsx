@@ -48,6 +48,10 @@ export function ServiceForm({
   const [deletePromptOpen, setDeletePromptOpen] = useState(false);
 
   const validationError = useMemo(() => validate(draft, existingIds), [draft, existingIds]);
+  // Hold validation messages on a blank new form until the user edits
+  // something. Every edit replaces the draft object.
+  const [pristineDraft] = useState(draft);
+  const visibleError = error ?? (initial || draft !== pristineDraft ? validationError : null);
 
   // Heuristic nudge: when the command looks like a dev server / watcher but PTY
   // mode is still off, suggest turning it on (see `looksLikeDevServer`). Purely
@@ -305,9 +309,9 @@ export function ServiceForm({
           </div>
         ) : null}
 
-        {error || validationError ? (
+        {visibleError ? (
           <p className="rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-            {error ?? validationError}
+            {visibleError}
           </p>
         ) : null}
         {onDelete ? (

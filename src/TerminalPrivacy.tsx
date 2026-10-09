@@ -239,7 +239,7 @@ export function TerminalPrivacy({
           onFocus={focusInput}
           onMouseUp={focusInput}
           data-terminal-mirror
-          className="absolute inset-0 overflow-auto overscroll-contain bg-[var(--muxly-terminal-bg)] p-3 font-mono text-[13px] leading-[1.45] text-zinc-300 outline-none select-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40 group-focus-within/terminal-input:ring-2 group-focus-within/terminal-input:ring-inset group-focus-within/terminal-input:ring-cyan-400/40"
+          className="absolute inset-0 overflow-auto overscroll-contain bg-[var(--muxly-terminal-bg)] p-0 font-mono text-[13px] leading-[1.45] text-zinc-300 outline-none select-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40 group-focus-within/terminal-input:ring-2 group-focus-within/terminal-input:ring-inset group-focus-within/terminal-input:ring-cyan-400/40"
         >
           {content}
         </pre>
@@ -253,7 +253,7 @@ export function TerminalPrivacy({
             autoCorrect="off"
             autoComplete="off"
             data-terminal-mirror
-            className="xterm-helper-textarea pointer-events-none absolute left-3 top-3 h-px w-px resize-none border-0 bg-transparent p-0 opacity-0 outline-none"
+            className="xterm-helper-textarea pointer-events-none absolute left-0 top-0 h-px w-px resize-none border-0 bg-transparent p-0 opacity-0 outline-none"
             onKeyDown={handleMirrorKeyDown}
             onCopy={handleMirrorCopy}
             onPaste={handleMirrorPaste}

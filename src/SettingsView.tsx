@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppSettings, EditorCandidate, ServiceConfig } from "./types";
 import { displayServiceName, maskSensitiveName } from "./types";
@@ -169,6 +169,13 @@ export function SettingsView({
     settingsQuery.trim()
       ? sectionMatches(settingsQuery, title, SETTINGS_SEARCH_METADATA[title])
       : SETTINGS_TAB_SECTIONS[activeTab].includes(title);
+
+  // Each tab opens at the top rather than inheriting the previous tab's
+  // scroll offset.
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    contentScrollRef.current?.scrollTo({ top: 0 });
+  }, [activeTab]);
 
   // Keep untouched form fields aligned with async settings loads, while still
   // preserving in-progress edits when other settings (like privacy) are saved.
@@ -500,7 +507,7 @@ export function SettingsView({
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 pb-24 pt-6">
           {!settingsHasResults ? (
             <div className="py-10 text-center">
@@ -754,7 +761,8 @@ export function SettingsView({
                   Adds a dim <code className="font-mono">[HH:MM:SS]</code>{" "}
                   marker to the start of every line of service output. Applies
                   to new output only — existing log lines keep whatever marker
-                  (or lack of one) they had when they arrived.
+                  (or lack of one) they had when they arrived. Services that
+                  run in a pseudo-terminal are not stamped.
                 </span>
               </span>
             </label>

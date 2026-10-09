@@ -182,7 +182,7 @@ export function ServicesSidebar({
       { id: "panel", label: "New Panel", action: () => onServiceMenuAction("panel", service) },
       { id: "s1", separator: true },
       { id: "start-stop", label: live ? "Stop" : "Start", disabled: busy, action: () => onServiceMenuAction(live ? "stop" : "start", service) },
-      { id: "restart", label: "Restart", disabled: busy, action: () => onServiceMenuAction("restart", service) },
+      { id: "restart", label: "Restart", disabled: busy || !live, action: () => onServiceMenuAction("restart", service) },
       { id: "s2", separator: true },
       { id: "edit", label: "Edit Service", action: () => onServiceMenuAction("edit", service) },
       { id: "duplicate", label: "Duplicate Service", action: () => onServiceMenuAction("duplicate", service) },
@@ -195,7 +195,7 @@ export function ServicesSidebar({
         ...profiles.map((profile, index) => ({ id: `profile-${profile.id}`, label: streamMode && service.sensitive ? `Profile ${index + 1}` : profile.name, checked: service.profile === profile.id, disabled: service.profile === profile.id, action: () => onServiceMenuAction("profile", service, profile.id) }))
       ] },
       { id: "s3", separator: true },
-      { id: "editor", label: "Open in configured Editor", action: () => onServiceMenuAction("editor", service) },
+      { id: "editor", label: "Open in Configured Editor", action: () => onServiceMenuAction("editor", service) },
       { id: "reveal", label: "Reveal in File Manager", action: () => onServiceMenuAction("reveal", service) },
       { id: "browser", label: "Open in Browser", disabled: !validUrl, reason: "This service has no valid port", action: () => onServiceMenuAction("browser", service) },
       { id: "copy", label: "Copy", children: [
@@ -643,12 +643,14 @@ export function ServicesSidebar({
                             openService(service.id);
                           }
                         }}
-                        className={`group/card relative w-full cursor-pointer rounded-md px-3 py-3 text-left transition ${
+                        className={`group/card relative w-full cursor-pointer rounded-md border-l-2 px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 ${
                           isDragging ? "opacity-40 " : ""
                         }${
-                          selected?.id === service.id || isOpen
-                            ? "bg-white/10 text-white"
-                            : "text-zinc-300 hover:bg-white/5 hover:text-white"
+                          selected?.id === service.id
+                            ? "border-cyan-400 bg-white/10 text-white"
+                            : isOpen
+                              ? "border-cyan-400/40 text-zinc-200 hover:bg-white/5 hover:text-white"
+                              : "border-transparent text-zinc-300 hover:bg-white/5 hover:text-white"
                         }`}
                       >
                         <span className="flex items-center justify-between gap-3 pr-8">
