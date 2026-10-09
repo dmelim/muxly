@@ -43,6 +43,8 @@ section, and tag the commit `vX.Y.Z`.
 - Stream mode's redacted terminal mirror lines up with the terminal text instead of shifting inward.
 - The New service form no longer shows a validation error before anything has been entered.
 - Restart is disabled in a stopped service's context menu, and the timestamps setting notes that pseudo-terminal output is not stamped.
+- Escape closes an open Appearance colour picker instead of the whole Settings screen.
+- Tab and Shift+Tab stay inside the command palette, global search, New profile, and confirmation dialogs instead of reaching controls behind the overlay.
 
 ## [0.6.1] - 2026-10-04
 

@@ -53,6 +53,8 @@ export function ColorPicker({
 
   useEffect(() => {
     if (!open) return;
+    // Focus inside the dialog so Escape closes the picker, not Settings.
+    popoverRef.current?.focus({ preventScroll: true });
 
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as Node | null;
@@ -99,8 +101,9 @@ export function ColorPicker({
               ref={popoverRef}
               role="dialog"
               aria-label={`${label} colour picker`}
+              tabIndex={-1}
               style={{ top: popoverPos.top, left: popoverPos.left, width: POPOVER_WIDTH }}
-              className="muxly-color-picker fixed z-50 rounded-md border border-white/10 bg-[#18181b] p-3 shadow-lg"
+              className="muxly-color-picker fixed z-50 rounded-md border border-white/10 bg-[#18181b] p-3 shadow-lg outline-none"
             >
               <div className="mb-3 flex items-center justify-between gap-2">
                 <span className="truncate text-xs font-medium text-zinc-200">{label}</span>

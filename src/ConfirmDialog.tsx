@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "./Button";
+import { useFocusTrap } from "./focusTrap";
 
 type Props = {
   title: string;
@@ -27,6 +28,9 @@ export function ConfirmDialog({
   onConfirm,
   onClose
 }: Props) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (busy) return;
@@ -48,6 +52,7 @@ export function ConfirmDialog({
       onClick={busy ? undefined : onClose}
     >
       <div
+        ref={panelRef}
         className="w-[420px] overflow-hidden rounded-lg border border-white/10 bg-[#15181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
         role="dialog"

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFocusTrap } from "./focusTrap";
 import { fuzzySearchScore } from "./search";
 
 /** A single palette action. `run` is invoked on selection; the palette closes
@@ -28,6 +29,8 @@ export function CommandPalette({ commands, onClose }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -73,6 +76,7 @@ export function CommandPalette({ commands, onClose }: Props) {
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         className="flex max-h-[60vh] w-[560px] flex-col overflow-hidden rounded-lg border border-white/10 bg-[#15181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >

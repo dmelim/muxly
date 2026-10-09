@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ServiceConfig } from "./types";
 import { groupKey } from "./appUtils";
+import { useFocusTrap } from "./focusTrap";
 import type { ServiceHits } from "./logSearchCache";
 import { StreamLogSearchCache } from "./streamLogSearchCache";
 import { fuzzySearchPattern } from "./search";
@@ -41,6 +42,8 @@ export function GlobalSearch({
   const [tick, setTick] = useState(0);
   const cacheRef = useRef(new StreamLogSearchCache());
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -89,6 +92,7 @@ export function GlobalSearch({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         className="flex max-h-[68vh] w-[640px] flex-col overflow-hidden rounded-lg border border-white/10 bg-[#15181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >

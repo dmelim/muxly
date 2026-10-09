@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
+import { useFocusTrap } from "./focusTrap";
 
 type Props = {
   // Existing profile names, for the case-insensitive duplicate check.
@@ -17,6 +18,8 @@ export function ProfilePrompt({ existingNames, onCreate, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -50,6 +53,7 @@ export function ProfilePrompt({ existingNames, onCreate, onClose }: Props) {
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         className="w-[420px] overflow-hidden rounded-lg border border-white/10 bg-[#15181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
