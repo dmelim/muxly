@@ -13,6 +13,8 @@ import { attachStreamMasks, type StreamMaskController } from "./streamMasks";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { attachMeaningfulTerminalScroll } from "./terminalScroll";
+import { handleTerminalCopyKey } from "./terminalCopy";
+import { isMac } from "./appUtils";
 
 type PtyOutputEvent = { ptyId: string; chunk: string };
 type PtyClosedEvent = { ptyId: string };
@@ -335,6 +337,9 @@ export function BottomTerminal({ open, cwd = null, defaultShellId = "default", h
         ref={wrapRef}
         className="relative min-h-0 flex-1 overflow-hidden p-3"
         aria-busy={!shellReady}
+        onKeyDownCapture={(event) => {
+          if (!isMac) handleTerminalCopyKey(event, terminalRef.current?.hasSelection() ?? false);
+        }}
         onCopyCapture={(event) => {
           // Stream mode copies carry the same redaction the masks show.
           const masks = masksRef.current;

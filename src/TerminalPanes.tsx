@@ -19,6 +19,7 @@ import { fuzzySearchPattern } from "./search";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { attachStreamMasks, type StreamMaskController } from "./streamMasks";
 import { attachMeaningfulTerminalScroll } from "./terminalScroll";
+import { handleTerminalCopyKey } from "./terminalCopy";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -931,16 +932,6 @@ function PaneView({
     let dataDisposable: { dispose: () => void } | null = null;
     let disposeScroll: (() => void) | null = null;
     if (isPty) {
-      terminal.attachCustomKeyEventHandler((event) => {
-        if (event.type !== "keydown" || event.key.toLowerCase() !== "c") {
-          return true;
-        }
-        if (event.ctrlKey && event.shiftKey && terminal.hasSelection()) {
-          void navigator.clipboard.writeText(masksRef.current?.copySelection() ?? terminal.getSelection());
-          return false;
-        }
-        return true;
-      });
       dataDisposable = terminal.onData((data) => {
         if (!interactiveRef.current) return;
         void invoke("service_pty_write", { serviceId: service.id, data }).catch(() => {
@@ -1222,6 +1213,11 @@ function PaneView({
             (surface?.contains(selection.anchorNode) || surface?.contains(selection.focusNode))
               ? selection.toString()
               : "";
+          const terminal = terminalsRef.current.get(service.id);
+          const selectedText = terminal?.hasSelection()
+            ? terminal.getSelection()
+            : selectedDomText;
+          if (surface && !isMac && handleTerminalCopyKey(event, Boolean(selectedText))) return;
           if (
             !event.ctrlKey ||
             event.metaKey ||
@@ -1230,17 +1226,6 @@ function PaneView({
             event.key.toLowerCase() !== "c" ||
             !surface
           ) return;
-          const terminal = terminalsRef.current.get(service.id);
-          const selectedText = terminal?.hasSelection()
-            ? terminal.getSelection()
-            : selectedDomText;
-          if (selectedText && !isMac) {
-            // Let the trusted keyboard gesture dispatch a native copy event.
-            // Cancelling it and using navigator.clipboard can silently fail
-            // in the desktop webview. Stop xterm from sending an interrupt.
-            event.stopPropagation();
-            return;
-          }
           if (!running) return;
           event.preventDefault();
           event.stopPropagation();

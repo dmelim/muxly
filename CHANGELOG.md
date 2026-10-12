@@ -38,6 +38,7 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- Selected text in the built-in shell copies with Ctrl+C instead of interrupting the process; Ctrl+Shift+C uses the same redacted copy handling in shells and service panes.
 - Button text now uses its intended size and weight; a global style had forced every button to 16px regular text.
 - Switching Settings tabs opens the new tab at the top instead of keeping the previous tab's scroll position.
 - Service cards show the cyan keyboard focus ring instead of the browser's default outline.

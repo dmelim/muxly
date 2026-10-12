@@ -22,6 +22,7 @@ async function moduleUrl(url) {
 }
 const load = async (file) => import(await moduleUrl(new URL(`./src/${file}.ts`, import.meta.url)));
 
+const { handleTerminalCopyKey } = await load("terminalCopy");
 const { StreamLogSearchCache } = await load("streamLogSearchCache");
 const { findRedactions, fitMaskLabel, maskedSelectionText } = await load("streamMasks");
 const { redactStreamText, redactStreamWorkspaceText } = await load("types");
@@ -150,4 +151,18 @@ test("mask labels fit their cells", () => {
   assert.equal(fitMaskLabel("[private path]", 20), "[private path]");
   assert.equal(fitMaskLabel("[private path]", 6), "[priv…");
   assert.equal(fitMaskLabel("[private path]", 1), "…");
+});
+
+test("selected Ctrl+C and Ctrl+Shift+C copy without forwarding an interrupt", () => {
+  for (const shiftKey of [false, true]) {
+    for (const selected of [false, true]) {
+      const calls = [];
+      const event = { key: "c", ctrlKey: true, metaKey: false, altKey: false, shiftKey,
+        stopPropagation: () => calls.push("stop"), preventDefault: () => calls.push("prevent") };
+      const handled = handleTerminalCopyKey(event, selected, () => { calls.push("copy"); return true; });
+      if (!handled) calls.push("pty");
+      else if (!shiftKey) calls.push("native-copy");
+      assert.deepEqual(calls, selected ? (shiftKey ? ["stop", "prevent", "copy"] : ["stop", "native-copy"]) : ["pty"]);
+    }
+  }
 });
