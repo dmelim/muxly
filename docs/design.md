@@ -270,10 +270,15 @@ spacing, wrapping, scrollbar, selection, and input unchanged. Only the sensitive
 values are covered. Each value that the stream redactor would replace (absolute
 and home-relative paths, email addresses, external URLs, and configured
 sensitive identities) gets a cell-aligned xterm decoration. The decoration
-paints a flat `white/7` fill over the terminal background and shows the
-redaction label, such as `[private path]`, in the muted terminal colour. The
-masks are painted in the same frame as the text they cover. Values that wrap
-across rows get one mask per row. Copying a selection copies what the masks
+paints the plain terminal background, with no tint, and shows the redaction
+label, such as `[private path]`, in the muted terminal colour. A tint would
+join adjacent masks into blocks that read as a selection highlight. The masks
+are painted in the same frame as the text they cover. Values that wrap across
+rows get one mask per row. The label goes on the first piece unless only a
+later, wider piece fits it. xterm's DOM renderer draws the rest of a row off
+the cell grid after a cell that holds several code points (an emoji joined with
+ZWJ, a combining accent), so masks on such a row are widened by a few cells on
+each side. Copying a selection copies what the masks
 show: masks are worked out from the whole line, so selecting any part of a
 hidden value copies its label rather than the fragment.
 

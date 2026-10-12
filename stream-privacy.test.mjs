@@ -22,10 +22,10 @@ async function moduleUrl(url) {
 }
 const load = async (file) => import(await moduleUrl(new URL(`./src/${file}.ts`, import.meta.url)));
 
-const { handleTerminalCopyKey } = await load("terminalCopy");
 const { StreamLogSearchCache } = await load("streamLogSearchCache");
-const { findRedactions, fitMaskLabel, maskedSelectionText } = await load("streamMasks");
-const { redactStreamText, redactStreamWorkspaceText } = await load("types");
+const { findRedactions, fitMaskLabel, maskSpans, maskedSelectionText, readMaskedLogicalLine } = await load("streamMasks");
+const { handleTerminalCopyKey } = await load("terminalCopy");
+const { redactStreamText, redactStreamWorkspaceText, redactSensitive } = await load("types");
 const service = { id: "private", name: "SecretApp", cwd: "C:\\Users\\QASecret", program: "node", args: [], sensitive: true };
 test("sensitive search excludes all chunk splits, cached hits and cursor-positioned fragments", () => {
   for (const raw of ["C:\\Users\\QASecret\\private\\file.txt\r\n", "C:\\Users\r\n\x1b[2;1HQASecret\\private\\file.txt"]) {
@@ -147,10 +147,69 @@ test("copying part of a masked value copies its label, not the fragment", () => 
   assert.equal(maskedSelectionText(line, [], selectColumns(from, from + 9)), "quarterly");
 });
 
+test("masks widen on rows where joined emoji can shift the drawn text", () => {
+  const range = { start: 0, end: 0, label: "[private path]" };
+  const plain = logicalLine("x /home/random-user/notes.md ok");
+  const plainRange = { ...range, ...findRedactions(plain.text, redactors.generic)[0] };
+  assert.deepEqual([...maskSpans(plain, plainRange, 80)], [[0, { start: 2, end: 28 }]]);
+  // A lone astral emoji is drawn to fit its cell; only multi-code-point cells drift.
+  const astral = logicalLine("😀 /home/random-user/notes.md ok");
+  const astralRange = { ...range, ...findRedactions(astral.text, redactors.generic)[0] };
+  assert.deepEqual([...maskSpans(astral, astralRange, 80)], [[0, { start: 2, end: 28 }]]);
+  // xterm puts a ZWJ in the cell before it, so "👩‍💻" is two cells: "👩‍" and "💻".
+  const text = "👩‍💻 /home/random-user/notes.md ok";
+  const cells = [{ row: 0, column: 0, width: 1, start: 0, end: 3 }, { row: 0, column: 1, width: 1, start: 3, end: 5 }];
+  for (let offset = 5, column = 2; offset < text.length; offset += 1, column += 1) {
+    cells.push({ row: 0, column, width: 1, start: offset, end: offset + 1 });
+  }
+  const joined = { text, cells, nextRow: 1 };
+  const joinedRange = findRedactions(text, redactors.generic)[0];
+  assert.deepEqual([...maskSpans(joined, joinedRange, 80)], [[0, { start: 0, end: 32 }]]);
+  assert.deepEqual([...maskSpans(joined, joinedRange, 29)], [[0, { start: 0, end: 29 }]]);
+});
+
 test("mask labels fit their cells", () => {
   assert.equal(fitMaskLabel("[private path]", 20), "[private path]");
   assert.equal(fitMaskLabel("[private path]", 6), "[priv…");
   assert.equal(fitMaskLabel("[private path]", 1), "…");
+});
+
+test("host hard wraps keep Unicode path suffixes masked in display and partial copies", () => {
+  const prefix = "Long path: C:\\Users\\Example Person\\Documents\\very-long-folder-name\\another-long-folder-name\\yet-another-folder\\café\\";
+  const suffix = "漢字\\project.txt PUBLIC-END";
+  const makeTerminal = (rows, cols) => ({ cols, buffer: { active: {
+    length: rows.length,
+    getLine: (row) => rows[row] === undefined ? undefined : {
+      isWrapped: false,
+      translateToString: () => rows[row],
+      getCell: (column) => ({ getChars: () => rows[row][column] ?? "", getWidth: () => row === 1 && column === 0 ? 2 : 1 })
+    }
+  } } });
+  const rangesFor = (text) => findRedactions(text, redactors.generic);
+  for (const cols of [prefix.length, prefix.length + 1]) {
+    const line = readMaskedLogicalLine(makeTerminal([prefix, suffix], cols), 0, rangesFor);
+    const ranges = rangesFor(line.text);
+    assert.equal(line.nextRow, 2);
+    assert.equal(maskedSelectionText(line, ranges, (row) => row === 1), "[private path] PUBLIC-END");
+    assert.equal(maskedSelectionText(line, ranges, (row, column) => row === 1 && column < 2), "[private path]");
+    const spans = maskSpans(line, ranges[0], cols);
+    assert.equal(spans.get(1).start, 0);
+    assert.equal(spans.get(1).end, "漢字\\project.txt".length);
+  }
+  assert.equal(readMaskedLogicalLine(makeTerminal([prefix, suffix], prefix.length + 5), 0, rangesFor).nextRow, 1);
+  assert.equal(readMaskedLogicalLine(makeTerminal([prefix, "ordinary public sentence"], prefix.length), 0, rangesFor).nextRow, 1);
+});
+
+test("aliases containing spaces cannot expose the tail of an absolute path", () => {
+  const text = "open C:\\Users\\Example Person\\Documents\\café\\漢字\\project.txt done";
+  const services = [{ ...service, name: "café", cwd: "C:\\Users\\Example Person\\Documents\\café", group: "private" }];
+  const redact = (value) => redactStreamWorkspaceText(value, services, { private: "public alias" }, {}, true);
+  assert.equal(redact(text), "open [private path] done");
+  assert.equal(applyRanges(text, findRedactions(text, redact)), "open [private path] done");
+  const spaced = { ...service, name: "db", cwd: "C:\\Private Folder\\secret", group: "private" };
+  const raw = "open C:\\Private Folder\\secret\\db\\漢字\\report.txt done";
+  assert.equal(redactSensitive(raw, spaced, "public alias", true), "open [private path] done");
+  assert.equal(redactStreamWorkspaceText(raw, [spaced], { private: "public alias" }, {}, true), "open [private path] done");
 });
 
 test("selected Ctrl+C and Ctrl+Shift+C copy without forwarding an interrupt", () => {

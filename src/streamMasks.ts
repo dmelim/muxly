@@ -191,7 +191,7 @@ export function maskedSelectionText(
 
 // Read one logical (unwrapped) line starting at `row`, recording which buffer
 // cell each UTF-16 offset of its text came from.
-function readLogicalLine(terminal: Terminal, row: number): LogicalLine {
+export function readLogicalLine(terminal: Terminal, row: number): LogicalLine {
   const buffer = terminal.buffer.active;
   let text = "";
   const cells: CellSpan[] = [];
@@ -218,6 +218,76 @@ function readLogicalLine(terminal: Terminal, row: number): LogicalLine {
     row += 1;
   } while (row < buffer.length && buffer.getLine(row)?.isWrapped);
   return { text, cells, nextRow: row };
+}
+
+// Some hosts hard-wrap at the screen edge instead of setting xterm's
+// isWrapped flag. Recover path context only for an edge-reaching private
+// path followed immediately by a path-shaped token, never ordinary prose.
+const PATH_FRAGMENT = /^[^\s"'<>|\x1b]*[\\/][^\s"'<>|\x1b]*/;
+
+function pathContinuationBoundary(terminal: Terminal, row: number): boolean {
+  const previous = terminal.buffer.active.getLine(row - 1);
+  const next = terminal.buffer.active.getLine(row);
+  if (!previous || !next || !PATH_FRAGMENT.test(next.translateToString(true))) return false;
+  let column = terminal.cols - 1;
+  while (column >= 0 && !previous.getCell(column)?.getChars() && previous.getCell(column)?.getWidth() !== 0) column -= 1;
+  return column >= terminal.cols - (next.getCell(0)?.getWidth() === 2 ? 2 : 1);
+}
+
+function contextualStart(terminal: Terminal, row: number): number {
+  while (row > 0 && (terminal.buffer.active.getLine(row)?.isWrapped || pathContinuationBoundary(terminal, row))) row -= 1;
+  return row;
+}
+
+export function readMaskedLogicalLine(
+  terminal: Terminal,
+  row: number,
+  rangesFor: (text: string) => RedactionRange[]
+): LogicalLine {
+  const line = readLogicalLine(terminal, row);
+  while (line.nextRow < terminal.buffer.active.length && pathContinuationBoundary(terminal, line.nextRow)) {
+    const trimmed = line.text.trimEnd();
+    const tail = rangesFor(trimmed).find((range) => range.end === trimmed.length && /path\]/.test(range.label));
+    if (!tail) break;
+    const next = readLogicalLine(terminal, line.nextRow);
+    // Drop only the unused end-of-row padding before a wide glyph.
+    line.cells = line.cells.filter((cell) => cell.start < trimmed.length);
+    line.cells.push(...next.cells.map((cell) => ({ ...cell, start: cell.start + trimmed.length, end: cell.end + trimmed.length })));
+    line.text = trimmed + next.text;
+    line.nextRow = next.nextRow;
+  }
+  return line;
+}
+
+// How far, in cells, text may drift past one cell that holds several code points.
+const DRIFT_CELLS = 3;
+
+/**
+ * The cells each row of `range` covers. xterm's DOM renderer fits a glyph to
+ * its cell with letter-spacing, which it gets wrong for a cell that holds
+ * several code points (an emoji joined with ZWJ, a combining accent): the rest
+ * of that row is drawn shifted off the cell grid. Masks on such a row are
+ * widened on both sides so the shifted text still lands under them.
+ */
+export function maskSpans(line: LogicalLine, range: RedactionRange, cols: number): Map<number, { start: number; end: number }> {
+  const spans = new Map<number, { start: number; end: number }>();
+  for (const cell of line.cells) {
+    if (cell.end <= range.start || cell.start >= range.end) continue;
+    const span = spans.get(cell.row);
+    if (span) span.end = cell.column + cell.width;
+    else spans.set(cell.row, { start: cell.column, end: cell.column + cell.width });
+  }
+  for (const [row, span] of spans) {
+    let clusters = 0;
+    for (const cell of line.cells) {
+      if (cell.row === row && cell.column < span.end && cell.end - cell.start > 1 &&
+        Array.from(line.text.slice(cell.start, cell.end)).length > 1) clusters += 1;
+    }
+    if (!clusters) continue;
+    span.start = Math.max(0, span.start - clusters * DRIFT_CELLS);
+    span.end = Math.min(cols, span.end + clusters * DRIFT_CELLS);
+  }
+  return spans;
 }
 
 type MaskedLine = { marker: IMarker; resources: Array<{ dispose(): void }> };
@@ -309,22 +379,25 @@ export function attachStreamMasks(terminal: Terminal): StreamMaskController {
 
   const maskLine = (line: LogicalLine, ranges: RedactionRange[]) => {
     for (const range of ranges) {
-      const spans = new Map<number, { start: number; end: number }>();
-      for (const cell of line.cells) {
-        if (cell.end <= range.start || cell.start >= range.end) continue;
-        const span = spans.get(cell.row);
-        if (span) span.end = cell.column + cell.width;
-        else spans.set(cell.row, { start: cell.column, end: cell.column + cell.width });
+      const spans = maskSpans(line, range, terminal.cols);
+      // Label the first piece of a wrapped value, unless the label only fits
+      // a later one: the first may be a cell or two at the end of a row.
+      let labelRow = -1;
+      let labelWidth = 0;
+      for (const [row, span] of spans) {
+        if (labelWidth >= Array.from(range.label).length) break;
+        if (span.end - span.start > labelWidth) {
+          labelRow = row;
+          labelWidth = span.end - span.start;
+        }
       }
-      let first = true;
       for (const [row, span] of spans) {
         const marker = markRow(row);
         if (!marker) continue;
         const entry: MaskedLine = { marker, resources: [marker] };
         lines.push(entry);
         const width = span.end - span.start;
-        const label = first ? fitMaskLabel(range.label, width) : "";
-        first = false;
+        const label = row === labelRow ? fitMaskLabel(range.label, width) : "";
         const decoration: IDecoration | undefined = terminal.registerDecoration({
           marker,
           x: span.start,
@@ -335,7 +408,11 @@ export function attachStreamMasks(terminal: Terminal): StreamMaskController {
         entry.resources.push(decoration);
         entry.resources.push(decoration.onRender((element) => {
           const { background, muted } = themeColors();
-          element.style.background = `linear-gradient(rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.07)), ${background}`;
+          // Plain terminal background: a tint joins adjacent masks into
+          // blocks that read as a selection highlight.
+          element.style.background = background;
+          // Glyphs can overhang their cell by a fraction of a pixel; cover it.
+          element.style.boxShadow = `1px 0 0 ${background}, -1px 0 0 ${background}`;
           element.style.color = muted;
           element.style.overflow = "hidden";
           element.style.whiteSpace = "pre";
@@ -351,11 +428,11 @@ export function attachStreamMasks(terminal: Terminal): StreamMaskController {
   const scanFrom = (fromRow: number) => {
     const buffer = terminal.buffer.active;
     let row = Math.max(0, Math.min(fromRow, buffer.length - 1));
-    while (row > 0 && buffer.getLine(row)?.isWrapped) row -= 1;
+    row = contextualStart(terminal, row);
     clearFrom(row);
     if (redact) {
       while (row < buffer.length) {
-        const line = readLogicalLine(terminal, row);
+        const line = readMaskedLogicalLine(terminal, row, (text) => rangesFor(text, redact!));
         if (line.text) maskLine(line, rangesFor(line.text, redact));
         row = line.nextRow;
       }
@@ -390,12 +467,14 @@ export function attachStreamMasks(terminal: Terminal): StreamMaskController {
       (row < end.y || (row === end.y && column < end.x));
     const buffer = terminal.buffer.active;
     let row = start.y;
-    while (row > 0 && buffer.getLine(row)?.isWrapped) row -= 1;
+    row = contextualStart(terminal, row);
     const copied: string[] = [];
     while (row <= end.y && row < buffer.length) {
-      const line = readLogicalLine(terminal, row);
+      const line = readMaskedLogicalLine(terminal, row, (text) => rangesFor(text, redact!));
       const ranges = line.text ? rangesFor(line.text, redact) : [];
-      copied.push(maskedSelectionText(line, ranges, isSelected).replace(/\u00a0/g, " "));
+      if (line.cells.some((cell) => isSelected(cell.row, cell.column)) || row >= start.y) {
+        copied.push(maskedSelectionText(line, ranges, isSelected).replace(/\u00a0/g, " "));
+      }
       row = line.nextRow;
     }
     return copied.join(raw.includes("\r\n") ? "\r\n" : "\n");

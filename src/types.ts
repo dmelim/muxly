@@ -262,21 +262,43 @@ export function sensitiveCwdSegments(cwd: string | undefined): string[] {
 
 // Path segments are delimited identities: match them only on token
 // boundaries so a folder such as "api" does not alter the word "rapid".
+const STREAM_LABEL = String.raw`\[(?:private path|network path|email|external URL|URL|local identity|private)\]`;
+const isStreamLabel = (text: string) => new RegExp(`^${STREAM_LABEL}$`, "i").test(text);
+
 function replaceBoundedIdentity(text: string, identity: string, replacement: string): string {
   const bounded = new RegExp(
-    `(^|[^\\p{L}\\p{N}_])${escapeRegExp(identity)}(?=$|[^\\p{L}\\p{N}_])`,
+    `${STREAM_LABEL}|(^|[^\\p{L}\\p{N}_])${escapeRegExp(identity)}(?=$|[^\\p{L}\\p{N}_])`,
     "giu"
   );
-  return text.replace(bounded, (_match, prefix) => `${prefix}${replacement}`);
+  return text.replace(bounded, (match, prefix) => isStreamLabel(match) ? match : `${prefix}${replacement}`);
 }
 
 function replacePrivateIdentity(text: string, identity: string, replacement: string): string {
   const name = identity.trim();
   if (!name) return text;
   if (name.length > 2) {
-    return text.replace(new RegExp(escapeRegExp(name), "gi"), () => replacement);
+    return text.replace(new RegExp(`${STREAM_LABEL}|${escapeRegExp(name)}`, "gi"), (match) => isStreamLabel(match) ? match : replacement);
   }
   return replaceBoundedIdentity(text, name, replacement);
+}
+
+// Known cwd prefixes may contain spaces that an unquoted generic path cannot
+// distinguish from prose. Replace those prefixes with a path-safe value first.
+function redactKnownCwdPaths(text: string, services: readonly ServiceConfig[]): string {
+  const prefixes = new Map<string, string>();
+  for (const service of services) {
+    const parsed = service.cwd?.trim() ? parseAbsolutePath(service.cwd.trim()) : null;
+    if (!parsed) continue;
+    for (const sep of ["\\", "/"] as const) {
+      for (let depth = parsed.segments.length; depth >= 1; depth -= 1) {
+        prefixes.set(parsed.base + sep + parsed.segments.slice(0, depth).join(sep), parsed.base + sep + "private-path");
+      }
+    }
+  }
+  for (const [prefix, replacement] of [...prefixes].sort(([a], [b]) => b.length - a.length)) {
+    text = text.replace(new RegExp(escapeRegExp(prefix), "gi"), () => replacement);
+  }
+  return text;
 }
 
 function streamUrlLabel(raw: string): string {
@@ -313,7 +335,7 @@ export function redactStreamText(text: string, streamMode: boolean): string {
     .replace(/(^|\n)[A-Z0-9._-]+@[A-Z0-9._-]+(?=[:\s])/gi, "$1[local identity]");
 }
 
-/** Apply every configured private identity before the generic Stream filter. */
+/** Hide complete paths before applying configured private identity aliases. */
 export function redactStreamWorkspaceText(
   text: string,
   services: readonly ServiceConfig[],
@@ -351,13 +373,15 @@ export function redactStreamWorkspaceText(
   // the shorter group identity "acme" can leave "-portal" behind.
   identities.sort((left, right) => right.identity.length - left.identity.length);
 
-  let out = text;
+  // Consume complete paths before an identity alias can introduce spaces
+  // inside them and leave an unrecognisable private suffix behind.
+  let out = redactStreamText(redactKnownCwdPaths(text, services.filter((service) => service.sensitive)), true);
   for (const { identity, replacement, bounded } of identities) {
     out = bounded
       ? replaceBoundedIdentity(out, identity, replacement)
       : replacePrivateIdentity(out, identity, replacement);
   }
-  return redactStreamText(out, true);
+  return out;
 }
 
 // Stream mode is a display transform. Raw configuration, process data and log
@@ -371,6 +395,7 @@ export function redactSensitive(
   streamMode: boolean
 ): string {
   if (!streamMode) return text;
+  text = redactStreamText(redactKnownCwdPaths(text, [service]), true);
 
   // Privacy must not depend on alias generation having completed. A missing
   // alias can happen briefly while settings/services are loading, and showing
@@ -381,23 +406,10 @@ export function redactSensitive(
 
   const pairs: Array<{ needle: string; replacement: string; bounded?: boolean }> = [];
 
-  // The cwd plus every ancestor directory, in both separator styles (tools
-  // print "\" or "/" interchangeably on Windows). Matching is case-insensitive
-  // — drive letters and Windows paths are, and tools sometimes lowercase the
-  // drive.
+  // Known cwd prefixes were consumed before generic filtering, including
+  // paths containing spaces. Keep their identifying segments for prompts
+  // and relative paths printed outside those absolute paths.
   const cwd = service.cwd?.trim();
-  const parsed = cwd ? parseAbsolutePath(cwd) : null;
-  if (parsed && parsed.segments.length > 0) {
-    for (const sep of ["\\", "/"] as const) {
-      const root = parsed.base + sep; // "C:\", "C:/", or "/"
-      for (let depth = parsed.segments.length; depth >= 1; depth -= 1) {
-        pairs.push({
-          needle: parsed.base + sep + parsed.segments.slice(0, depth).join(sep),
-          replacement: root + safeAlias
-        });
-      }
-    }
-  }
 
   // The real group and service names, deduped case-insensitively. Short names
   // use token boundaries so an identity such as "db" does not alter words.
@@ -408,8 +420,7 @@ export function redactSensitive(
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    if (name.length <= 2) text = replacePrivateIdentity(text, name, safeAlias);
-    else pairs.push({ needle: name, replacement: safeAlias });
+    pairs.push({ needle: name, replacement: safeAlias, bounded: name.length <= 2 });
   }
   if (service.sensitive) {
     for (const segment of sensitiveCwdSegments(cwd)) {
@@ -417,17 +428,15 @@ export function redactSensitive(
     }
   }
 
-  // Longest needles first so a child path keeps its tail, a replaced prefix is
-  // never re-matched by a shorter ancestor rule, and a name embedded in a path
-  // is consumed by the path rule before the bare-name rule runs.
+  // Consume the longest identifying name before shorter overlapping names.
   pairs.sort((a, b) => b.needle.length - a.needle.length);
 
   let out = text;
   for (const { needle, replacement, bounded } of pairs) {
     out = bounded
       ? replaceBoundedIdentity(out, needle, replacement)
-      : out.replace(new RegExp(escapeRegExp(needle), "gi"), () => replacement);
+      : replacePrivateIdentity(out, needle, replacement);
   }
 
-  return redactStreamText(out, true);
+  return out;
 }
