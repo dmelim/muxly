@@ -30,6 +30,8 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-13
+
 ### Changed
 
 - Horizontal and vertical scrollbars now share thin square accent thumbs, transparent tracks, and matching hover and pressed colours across sidebars, tabs, terminals, dialogs, and forms.
@@ -49,11 +51,6 @@ section, and tag the commit `vX.Y.Z`.
 - Restart is disabled in a stopped service's context menu, and the timestamps setting notes that pseudo-terminal output is not stamped.
 - Escape closes an open Appearance colour picker instead of the whole Settings screen.
 - Tab and Shift+Tab stay inside the command palette, global search, New profile, and confirmation dialogs instead of reaching controls behind the overlay.
-
-## [0.6.1] - 2026-10-04
-
-### Fixed
-
 - The Services sidebar now shares the custom scrollbar with Details, avoiding inconsistent native scrollbar visibility.
 - The Details sidebar uses a slim custom scrollbar whose visible thumb reaches both ends even when content barely overflows; Run history no longer adds a duplicate section gap.
 - Terminal action buttons stay above the scrollbar and remain clickable.
