@@ -38,6 +38,7 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- Terminal tabs use pointer dragging so macOS supports reordering and moving tabs between panels, with stable insertion markers and edge scrolling for overflowing strips.
 - Selected text in the built-in shell copies with Ctrl+C instead of interrupting the process; Ctrl+Shift+C uses the same redacted copy handling in shells and service panes.
 - Stream mode masks and copied text retain path redaction across host-inserted line breaks at the terminal edge and aliases containing spaces.
 - Stream mode masks cover glyph drift around joined emoji and combining accents, keep wrapped labels readable, and use the terminal background so masks do not resemble selected text.

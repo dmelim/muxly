@@ -1,5 +1,5 @@
 import { TabsScrollArea } from "./TabsScrollArea";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DragEvent, MouseEvent as ReactMouseEvent, MutableRefObject, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,6 +20,7 @@ import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { attachStreamMasks, type StreamMaskController } from "./streamMasks";
 import { attachMeaningfulTerminalScroll } from "./terminalScroll";
 import { handleTerminalCopyKey } from "./terminalCopy";
+import { attachTabDragging, type TabDropTarget } from "./tabDrag";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -189,9 +190,9 @@ export function TerminalPanes({
   const panelHostsRef = useRef(new Map<string, HTMLDivElement>());
   const [renderedPrivacy, setRenderedPrivacy] = useState<Record<string, string>>({});
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
-  const [draggedTabSourcePanelId, setDraggedTabSourcePanelId] = useState<string | null>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const draggedTabIdRef = useRef<string | null>(null);
-  const [tabDropTarget, setTabDropTarget] = useState<{ panelId: string; index: number } | null>(null);
+  const [tabDropTarget, setTabDropTarget] = useState<TabDropTarget | null>(null);
   const [sidebarDropTarget, setSidebarDropTarget] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const tabMenuTargetRef = useRef<HTMLElement | null>(null);
@@ -206,25 +207,25 @@ export function TerminalPanes({
     );
   }, []);
 
-  const showTabDropTarget = useCallback((panelId: string, index: number) => {
-    if (!draggedTabIdRef.current) return;
-    setTabDropTarget((current) =>
-      current?.panelId === panelId && current.index === index ? current : { panelId, index }
-    );
-  }, []);
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace || !tabMode) return;
+    return attachTabDragging(workspace, (drag) => {
+      draggedTabIdRef.current = drag?.serviceId ?? null;
+      setDraggedTabId(drag?.serviceId ?? null);
+      setTabDropTarget((current) => {
+        const next = drag?.target ?? null;
+        return current?.panelId === next?.panelId && current?.index === next?.index &&
+          current?.x === next?.x && current?.top === next?.top && current?.height === next?.height ? current : next;
+      });
+    }, onTabMove);
+  }, [tabMode, paneServices.length === 0, onTabMove]);
 
-  const finishTabDrag = useCallback(() => {
-    draggedTabIdRef.current = null;
-    setDraggedTabId(null);
-    setDraggedTabSourcePanelId(null);
-    setTabDropTarget(null);
-  }, []);
-
-  const dropTab = useCallback((panelId: string, index: number) => {
-    const serviceId = draggedTabIdRef.current;
-    if (serviceId) onTabMove(serviceId, panelId, index);
-    finishTabDrag();
-  }, [finishTabDrag, onTabMove]);
+  const activeTabsKey = panels.map((panel) => `${panel.id}:${panel.activeTabId}`).join("|");
+  useLayoutEffect(() => {
+    workspaceRef.current?.querySelectorAll<HTMLElement>('[role="tab"][aria-selected="true"]')
+      .forEach((tab) => tab.scrollIntoView({ block: "nearest", inline: "nearest" }));
+  }, [activeTabsKey, tabMode]);
 
   const showSidebarDropTarget = useCallback(
     (event: DragEvent<HTMLElement>, panelId: string) => {
@@ -279,46 +280,9 @@ export function TerminalPanes({
   // instead of leaving empty cells. Past the cap we wrap to a new row.
   const cols = Math.max(1, Math.min(gridColumns, panels.length));
   const serviceById = new Map(paneServices.map((service) => [service.id, service]));
-  const draggedService = draggedTabId ? serviceById.get(draggedTabId) : null;
-  const renderTabDropPlaceholder = (panelId: string, index: number) => {
-    if (
-      !draggedService ||
-      draggedTabSourcePanelId === panelId ||
-      tabDropTarget?.panelId !== panelId ||
-      tabDropTarget.index !== index
-    ) {
-      return null;
-    }
-    return (
-      <div
-        key={`tab-drop-${panelId}-${index}`}
-        aria-hidden="true"
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
-          showTabDropTarget(panelId, index);
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          dropTab(panelId, index);
-        }}
-        className="flex min-w-0 items-center gap-1 rounded-t-md border border-b-0 border-white/15 bg-white/5 px-2 py-1 text-xs text-zinc-500 opacity-85"
-      >
-        <span className="flex min-w-0 max-w-48 items-center gap-1.5 truncate">
-          <span className="size-1.5 shrink-0 rounded-full bg-zinc-600" />
-          <span className="truncate">{displayServiceName(draggedService, streamMode)}</span>
-        </span>
-        <span className="rounded p-0.5 text-zinc-600">
-          <CloseIcon className="size-3" />
-        </span>
-      </div>
-    );
-  };
-
   return (
     <div
+      ref={workspaceRef}
       className="relative min-h-0 flex-1"
       onDragOverCapture={(event) => {
         if (!sidebarDragIdRef.current || draggedTabIdRef.current) return;
@@ -362,29 +326,19 @@ export function TerminalPanes({
             <div className="flex min-w-0 shrink-0 items-end">
             <TabsScrollArea role="tablist"
               aria-label="Panel tabs"
-              onDragOver={(event) => {
-                if (!draggedTabIdRef.current) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                showTabDropTarget(panel.id, panel.tabIds.length);
-              }}
-              onDrop={(event) => {
-                if (!draggedTabIdRef.current) return;
-                event.preventDefault();
-                dropTab(panel.id, panel.tabIds.length);
-              }}
+              data-tab-strip={panel.id}
               onWheel={(event) => {
                 if (event.deltaY && !event.deltaX && !event.ctrlKey) event.currentTarget.scrollLeft += event.deltaY;
               }}
               className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-1.5"
             >
-              {panel.tabIds.map((serviceId, tabIndex) => {
+              {panel.tabIds.map((serviceId) => {
                 const service = serviceById.get(serviceId);
                 if (!service) return null;
                 return (
-                  <Fragment key={service.id}>
-                    {renderTabDropPlaceholder(panel.id, tabIndex)}
                     <div
+                      key={service.id}
+                      data-terminal-tab={service.id}
                       role="presentation"
                       className={`relative flex w-36 shrink-0 items-center gap-1 rounded-t-md border border-b-0 px-2 text-xs ${
                         service.id === panel.activeTabId
@@ -395,10 +349,8 @@ export function TerminalPanes({
                       <button
                         type="button"
                         role="tab"
-                        ref={(node) => {
-                          if (node && service.id === panel.activeTabId) node.scrollIntoView({ block: "nearest", inline: "nearest" });
-                        }}
-                        draggable
+                        data-tab-drag-handle={service.id}
+                        draggable={false}
                         aria-selected={service.id === panel.activeTabId}
                         aria-label={`${displayServiceName(service, streamMode)}, ${statusLabels[statuses[service.id] ?? "stopped"]}`}
                         onContextMenu={(event) => {
@@ -425,36 +377,7 @@ export function TerminalPanes({
                           event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: rect.left + 12, clientY: rect.bottom }));
                         }}
                         onClick={() => onTabFocus(panel.id, service.id)}
-                        onDragStart={(event) => {
-                          draggedTabIdRef.current = service.id;
-                          setDraggedTabId(service.id);
-                          setDraggedTabSourcePanelId(panel.id);
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", service.id);
-                        }}
-                        onDragOver={(event) => {
-                          if (!draggedTabIdRef.current) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                          const bounds = event.currentTarget.getBoundingClientRect();
-                          const index = event.clientX < bounds.left + bounds.width / 2
-                            ? tabIndex
-                            : tabIndex + 1;
-                          showTabDropTarget(panel.id, index);
-                        }}
-                        onDrop={(event) => {
-                          if (!draggedTabIdRef.current) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          const bounds = event.currentTarget.getBoundingClientRect();
-                          const index = event.clientX < bounds.left + bounds.width / 2
-                            ? tabIndex
-                            : tabIndex + 1;
-                          dropTab(panel.id, index);
-                        }}
-                        onDragEnd={finishTabDrag}
-                        className="flex min-w-0 flex-1 self-stretch cursor-grab items-center gap-1.5 truncate py-1 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                        className="flex min-w-0 flex-1 self-stretch touch-none select-none cursor-grab items-center gap-1.5 truncate py-1 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
                       >
                         <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${statusDots[statuses[service.id] ?? "stopped"]}`} />
                         <span className="truncate">{displayServiceName(service, streamMode)}</span>
@@ -464,10 +387,8 @@ export function TerminalPanes({
                         <CloseIcon className="size-3" />
                       </button>
                     </div>
-                  </Fragment>
                 );
               })}
-              {renderTabDropPlaceholder(panel.id, panel.tabIds.length)}
             </TabsScrollArea>
             </div>
           ) : null}
@@ -481,6 +402,11 @@ export function TerminalPanes({
         </section>
       ))}
       </div>
+      {tabDropTarget ? createPortal(
+        <div aria-hidden="true" className="pointer-events-none fixed z-50 w-0.5 bg-cyan-400"
+          style={{ left: tabDropTarget.x, top: tabDropTarget.top, height: tabDropTarget.height }} />,
+        document.body
+      ) : null}
       {paneServices.map((service) => {
         const panel = panels.find((candidate) => candidate.tabIds.includes(service.id));
         if (!panel) return null;
