@@ -822,6 +822,8 @@ function PaneView({
     const terminal = new Terminal({
       ...TERMINAL_OPTIONS,
       convertEol: !isPty,
+      // Fresh PTY screens and application clears preserve earlier output.
+      scrollOnEraseInDisplay: true,
       theme: xtermTheme(theme),
       cursorBlink: interactiveRef.current,
       cursorInactiveStyle: interactiveRef.current ? "outline" : "none",

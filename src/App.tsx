@@ -1768,6 +1768,7 @@ export function App() {
         `\r\n\x1b[36m[manager] starting ${formatCommand(service)}\x1b[0m\r\n`
       );
 
+      let needsPtyScreen = service.usePty ?? false;
       const onOutput = new Channel<ProcessOutputEvent>();
       onOutput.onmessage = (msg) => {
         const { serviceId, runToken, stream, chunk } = msg;
@@ -1807,6 +1808,15 @@ export function App() {
           }
           sawPtyOutputRef.current[serviceId] = runToken;
           delete ptyRecycleRef.current[serviceId];
+        }
+        if (needsPtyScreen && chunk.length > 0) {
+          needsPtyScreen = false;
+          // A new PTY addresses a fresh screen from row 1. Archive the old
+          // screen before its first byte, including any manager startup notes.
+          // Store the boundary in history too so pane replay behaves identically.
+          // Cancel unfinished escapes, leave the alternate screen, reset modes
+          // and margins, then erase into scrollback and home the new cursor.
+          appendLog(serviceId, "\x18\x1b[?1049l\x1b[!p\x1b[r\x1b[2J\x1b[H");
         }
         appendLog(serviceId, stream === "stderr" ? `\x1b[31m${chunk}\x1b[0m` : chunk);
       };

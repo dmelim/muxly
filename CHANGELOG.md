@@ -30,6 +30,10 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Restarting a pseudo-terminal service preserves previous output in scrollback and starts a fresh screen, preventing startup cursor positioning from overwriting earlier runs.
+
 ## [0.6.1] - 2026-10-13
 
 ### Changed
