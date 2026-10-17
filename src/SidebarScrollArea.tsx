@@ -1,4 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { isMac } from "./appUtils";
+import { isPrimaryPress } from "./inputEvents";
 
 type Props = { children: ReactNode; label: string };
 
@@ -50,7 +52,7 @@ export function SidebarScrollArea({ children, label }: Props) {
             if (event.key in steps) { event.preventDefault(); scrollTo(steps[event.key]); }
           }}
           onPointerDown={(event) => {
-            if (event.button !== 0 || !track.current) return;
+            if (!isPrimaryPress(event, isMac) || !track.current) return;
             event.preventDefault();
             event.currentTarget.focus({ preventScroll: true });
             const offset = event.clientY - track.current.getBoundingClientRect().top;

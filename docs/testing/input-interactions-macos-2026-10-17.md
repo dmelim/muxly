@@ -1,11 +1,12 @@
 # Native macOS input test results — 2026-10-17
 
-**Outcome: two remaining failures found.** The original menu-dismissal symptom
+**Outcome: both failures found in the initial run are now fixed and retested.**
+See the follow-up below for the tested fixes. The original menu-dismissal symptom
 was not reproduced with the supported Control-click or right-click gestures.
 Some held-input subcases remain blocked by the computer-use API. Windows was
 **NOT RUN**; this report makes no claim about WebView2.
 
-## Tested build and environment
+## Initial tested build and environment
 
 - Branch: `release/0.6.2`.
 - Base commit: `cbb77289e50ada78b1f391dda971453b4f66cce9`.
@@ -30,7 +31,7 @@ Some held-input subcases remain blocked by the computer-use API. Windows was
   stopped and replaced with the packaged app. The unrelated dev instance was
   left alone.
 
-## Results by test ID
+## Initial results by test ID
 
 | ID | Status | Observed result / limitation |
 | --- | --- | --- |
@@ -90,6 +91,40 @@ not only an accessibility-index click. Repeating Select all visibly reselected
 the text; ordinary right-click again preserved an enabled Copy item. This is a
 selection-loss issue, distinct from the original immediate menu dismissal.
 
+## Follow-up — F1 and F2 fixed and retested
+
+The same native QA app was rebuilt on `release/0.6.2` after commit `c6679c2`,
+with the application fixes in the working tree. This section supersedes the
+initial F1/F2 failures; the initial observations above remain as reproduction
+evidence. The environment, fixture, and build command were unchanged.
+
+Source-tree SHA-256: `b6933faff259a7780a436c0e43c0464ba6e704e0281a83ff8b3e808c46a1e291`.
+For this digest, paths are repository-relative, including the `src/` prefix;
+sort the files and hash each path, NUL, file bytes, NUL.
+
+| Finding / regression | Result | Native observation |
+| --- | --- | --- |
+| F1 / M02 group focus | PASS | From service search, Tab to Reorder Interaction QA, then Shift+F10 and Escape restored focus to Reorder. Repeated from Collapse and Pin project; Escape restored each exact initiating button. |
+| F2 / M04 read-only log selection | PASS | Start QA 01, Select all, right-click inside selected output: Copy enabled. Escape, then Control-click at the same coordinate held for 500 ms: menu remained open after release and Copy remained enabled. |
+| F2 / M04 interactive PTY selection | PASS | Start QA 02, Select all, then 500 ms Control-click inside selected output: menu remained open, Copy and Paste both enabled. |
+| Ordinary primary click | PASS | After dismissing the log menu, an ordinary click cleared the selection; reopening with Control-click correctly showed Copy disabled. |
+| Cleanup | PASS | Both fixture services stopped and the isolated QA app quit. |
+
+Implementation: group menus retain the actual initiating control for focus
+restoration, and keyboard invocation opens the menu directly. The group wrapper
+is programmatically focusable as a fallback. On macOS, the terminal capture
+handler stops Control-primary mousedown before xterm can clear its selection,
+while preserving the native context-menu default action and interactive focus.
+
+Additional checks: all 25 Node tests passed; TypeScript/Vite and native app build
+passed. The component browser regression runner also passed, including group
+keyboard and pointer focus restoration, nested split-button activation,
+Cancel/Confirm, opening-release suppression, and menu ownership. These component
+checks supplement the native run; they are not Windows/WebView2 evidence.
+
+Windows and the unsupported held-input subcases remain untested/blocked as
+recorded above. No full-suite rerun is claimed for this targeted follow-up.
+
 ## Tool limitations and interpretation
 
 - Native gestures were performed through computer use, not injected DOM events.
@@ -109,5 +144,5 @@ selection-loss issue, distinct from the original immediate menu dismissal.
 - Screenshots were inspected in the computer-use transcript. This report stores
   the relevant observations and accessibility excerpts; no screenshot binaries
   or machine-specific generated service configuration are committed.
-- The source fixes were left unchanged during testing, so F1 and F2 are still
-  open findings against the recorded source digest.
+- The initial run left source unchanged and recorded F1/F2 against its digest.
+  The follow-up above rebuilt and verified their fixes against a new digest.

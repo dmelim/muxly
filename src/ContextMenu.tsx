@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { RefObject } from "react";
+import { suppressContextMenuOpeningClick } from "./contextMenuOpeningClick";
 
 export type ContextMenuItem = {
   id: string;
@@ -155,6 +156,7 @@ export function ContextMenu({ x, y, items, onClose, restoreFocusRef }: Props) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
+    const removeOpeningClickGuard = suppressContextMenuOpeningClick(window);
     const closeOthers = () => { suppressRestoreRef.current = true; closeRef.current(); };
     window.dispatchEvent(new CustomEvent("muxly-context-menu-open"));
     window.addEventListener("muxly-context-menu-open", closeOthers);
@@ -170,6 +172,7 @@ export function ContextMenu({ x, y, items, onClose, restoreFocusRef }: Props) {
     window.addEventListener("scroll", scroll, true);
     window.addEventListener("resize", close);
     return () => {
+      removeOpeningClickGuard();
       window.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("scroll", scroll, true);
       window.removeEventListener("resize", close);

@@ -1,4 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState, type HTMLAttributes } from "react";
+import { isMac } from "./appUtils";
+import { isPrimaryPress } from "./inputEvents";
 
 type Props = HTMLAttributes<HTMLDivElement>;
 
@@ -48,7 +50,7 @@ export function TabsScrollArea({ children, className = "", ...props }: Props) {
         if (event.key in steps) { event.preventDefault(); scrollTo(steps[event.key]); }
       }}
       onPointerDown={(event) => {
-        if (event.button !== 0 || !track.current) return;
+        if (!isPrimaryPress(event, isMac) || !track.current) return;
         event.preventDefault();
         const offset = event.clientX - track.current.getBoundingClientRect().left;
         const start = max ? metrics.left / max * travel : 0;

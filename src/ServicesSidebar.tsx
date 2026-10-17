@@ -163,7 +163,9 @@ export function ServicesSidebar({
   const showMenu = (event: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>, items: ContextMenuItem[]) => {
     event.preventDefault();
     event.stopPropagation();
-    menuTargetRef.current = event.currentTarget;
+    // Preserve the actual initiating button, including nested group controls.
+    const target = (event.target as HTMLElement).closest<HTMLElement>("button:not(:disabled), [tabindex]");
+    menuTargetRef.current = target && event.currentTarget.contains(target) ? target : event.currentTarget;
     const rect = event.currentTarget.getBoundingClientRect();
     const mouse = "clientX" in event && event.clientX > 0;
     setMenu({ x: mouse ? event.clientX : rect.left + 12, y: mouse ? event.clientY : rect.bottom, items });
@@ -366,6 +368,14 @@ export function ServicesSidebar({
           const groupPinned = settings.pinnedProjectNames?.[groupName] ?? false;
           const groupHidden = settings.hiddenProjectNames[groupName] ?? false;
           const groupSensitive = settings.sensitiveProjectNames[groupName] ?? false;
+          const groupMenuItems: ContextMenuItem[] = [
+            { id: "start", label: "Start All", action: () => onGroupMenuAction("start", groupName) },
+            { id: "stop", label: "Stop All", disabled: !anyStoppable, action: () => onGroupMenuAction("stop", groupName) },
+            { id: "add", label: "Add Service Here", action: () => onGroupMenuAction("add", groupName) },
+            { id: "pin", label: groupPinned ? "Unpin" : "Pin", action: () => onGroupMenuAction("pin", groupName) },
+            { id: "collapse", label: collapsed ? "Expand" : "Collapse", action: () => onGroupMenuAction("collapse", groupName) },
+            { id: "sensitive", label: groupSensitive ? "Unmark Sensitive" : "Mark Sensitive", action: () => onGroupMenuAction("sensitive", groupName) }
+          ];
           const displayGroupName = displayProjectName(groupName);
           // A service drag onto this header appends to the group (end-of-group);
           // a group drag onto it reorders whole groups (before/after this one).
@@ -398,19 +408,11 @@ export function ServicesSidebar({
                 }`}
               />
               <div
-                onContextMenu={(event) => showMenu(event, [
-                  { id: "start", label: "Start All", action: () => onGroupMenuAction("start", groupName) },
-                  { id: "stop", label: "Stop All", disabled: !anyStoppable, action: () => onGroupMenuAction("stop", groupName) },
-                  { id: "add", label: "Add Service Here", action: () => onGroupMenuAction("add", groupName) },
-                  { id: "pin", label: groupPinned ? "Unpin" : "Pin", action: () => onGroupMenuAction("pin", groupName) },
-                  { id: "collapse", label: collapsed ? "Expand" : "Collapse", action: () => onGroupMenuAction("collapse", groupName) },
-                  { id: "sensitive", label: groupSensitive ? "Unmark Sensitive" : "Mark Sensitive", action: () => onGroupMenuAction("sensitive", groupName) }
-                ])}
+                tabIndex={-1}
+                onContextMenu={(event) => showMenu(event, groupMenuItems)}
                 onKeyDown={(event) => {
                   if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-                  event.preventDefault();
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: rect.left + 12, clientY: rect.bottom }));
+                  showMenu(event, groupMenuItems);
                 }}
                 onDragOver={(event) => {
                   if (isFiltering) return;
@@ -638,6 +640,8 @@ export function ServicesSidebar({
                             showMenu(event, serviceItems(service));
                             return;
                           }
+                          // Nested buttons own Enter/Space and their native click.
+                          if (event.target !== event.currentTarget) return;
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
                             openService(service.id);

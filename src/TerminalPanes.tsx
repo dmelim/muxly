@@ -21,6 +21,7 @@ import { attachStreamMasks, type StreamMaskController } from "./streamMasks";
 import { attachMeaningfulTerminalScroll } from "./terminalScroll";
 import { handleTerminalCopyKey } from "./terminalCopy";
 import { attachTabDragging, type TabDropTarget } from "./tabDrag";
+import { hasOwnContextMenu } from "./inputEvents";
 
 const statusDots: Record<ServiceStatus, string> = {
   stopped: "bg-zinc-600",
@@ -750,7 +751,7 @@ function PaneView({
 
   const showPaneMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
     // Search fields retain their editing menu; xterm's hidden textarea uses this menu.
-    if ((event.target as HTMLElement).closest("input, [contenteditable='true']")) return;
+    if (hasOwnContextMenu(event.target as HTMLElement)) return;
     event.preventDefault();
     event.stopPropagation();
     onFocus();
@@ -1053,6 +1054,7 @@ function PaneView({
       onContextMenuCapture={showPaneMenu}
       onKeyDownCapture={(event) => {
         if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        if (hasOwnContextMenu(event.target as HTMLElement)) return;
         event.preventDefault();
         const rect = event.currentTarget.getBoundingClientRect();
         event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: rect.left + 12, clientY: rect.top + 12 }));
@@ -1177,6 +1179,13 @@ function PaneView({
               // Keep keyboard copy routed through this pane after selection.
               if (!interactive) {
                 event.currentTarget.focus({ preventScroll: true });
+              }
+              // WKWebView sends a primary mousedown before Control-click's
+              // contextmenu. Keep it away from xterm's selection/mouse handlers,
+              // without preventing the native contextmenu default action.
+              if (isMac && event.ctrlKey && event.button === 0) {
+                if (interactive) terminalsRef.current.get(service.id)?.focus();
+                event.stopPropagation();
               }
             }}
             className="h-full w-full overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40"

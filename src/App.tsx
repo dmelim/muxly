@@ -54,12 +54,14 @@ import {
   groupServices,
   isServiceInProfile,
   isWindows,
+  isMac,
   isAppModifier,
   modKey,
   sameAliases,
   sameServiceOrder,
   visibleForProfile
 } from "./appUtils";
+import { isPrimaryPress } from "./inputEvents";
 import {
   AlertTriangleIcon,
   CommandIcon,
@@ -2340,6 +2342,7 @@ export function App() {
   // The drawer grows as the handle is dragged upward — `delta` is inverted.
   const startTerminalDrag = useCallback(
     (event: React.MouseEvent) => {
+      if (!isPrimaryPress(event, isMac)) return;
       event.preventDefault();
       const startY = event.clientY;
       const startHeight = terminalHeight;
@@ -2369,6 +2372,7 @@ export function App() {
   // the pointer leaves the thin handle.
   const startSidebarDrag = useCallback(
     (side: "left" | "right", event: React.MouseEvent) => {
+      if (!isPrimaryPress(event, isMac)) return;
       event.preventDefault();
       const startX = event.clientX;
       const startWidth = side === "left" ? leftWidth : rightWidth;

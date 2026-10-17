@@ -33,11 +33,15 @@ export function ConfirmDialog({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (busy) return;
+      if (busy || event.defaultPrevented) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
       } else if (event.key === "Enter") {
+        // Let the focused button activate itself, especially Cancel. Holding
+        // Enter must not confirm a dialog opened by the same key press.
+        if (event.repeat) { event.preventDefault(); return; }
+        if ((event.target as Element | null)?.closest?.("button")) return;
         event.preventDefault();
         onConfirm();
       }
