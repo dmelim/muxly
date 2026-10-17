@@ -24,6 +24,7 @@ docs/*
 !docs/design.md
 !docs/macos-alpha-launch.md
 !docs/services-config.md
+!docs/testing/
 
 # Environment and local overrides
 .env

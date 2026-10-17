@@ -1,0 +1,20 @@
+{
+  "productName": "Muxly Interaction QA",
+  "identifier": "com.diethos.muxly.interactiontest",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --port 1431",
+    "devUrl": "http://localhost:1431"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "Muxly Interaction QA",
+      "visible": false,
+      "width": 1280,
+      "height": 820,
+      "minWidth": 1024,
+      "minHeight": 680,
+      "dragDropEnabled": false
+    }]
+  }
+}

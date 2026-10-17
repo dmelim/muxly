@@ -1,5 +1,8 @@
 # Muxly 0.5.6 preview manual test
 
+For native context-menu, keyboard, resize, and scrollbar regressions, use the
+[paired Windows/macOS computer-use procedure](docs/testing/input-interactions.md).
+
 Test this checklist from the `preview/roadmap` working tree. Use disposable
 services and repositories where a test can interrupt a process or switch a Git
 branch. Never use a repository with uncommitted work for destructive-looking
@@ -189,9 +192,33 @@ branch tests.
 
 ## Regression smoke test
 
+- [ ] On macOS, Control-click a service, group, terminal tab, and terminal pane.
+      Release the mouse and Control in either order: the menu must stay open
+      without opening a service or activating a menu item. Confirm a subsequent
+      click selects an item, an outside press dismisses, and Escape closes.
+- [ ] Focus a service's "Open in new panel" button and press Enter or Space.
+      Confirm it opens only in a new panel. The service card itself should still
+      open normally with Enter or Space.
+- [ ] In a confirmation dialog, focus Cancel and press Enter: it must cancel.
+      Focus Confirm and press Enter: it must confirm only once.
+- [ ] In a terminal search field, Shift+F10 must retain the editing context menu.
+      In terminal content, Shift+F10 must open the pane menu. Invoking it from an
+      already-open pane menu must not replace that menu.
+- [ ] Right-click resize handles and Control-click them on macOS: the sidebars
+      and bottom terminal must not resize. Control-click custom scrollbars on
+      macOS must not jump or drag their scroll position. Ordinary dragging works.
 - [ ] Create, edit, delete, import, start, stop, and restart a service.
 - [ ] Exercise pipe and PTY output, terminal resize/input/search, global search,
       port conflict recovery, runtime warnings, profiles, Stream mode, bottom
       terminal, drag reorder without a service search, and window close cleanup.
 - [ ] Confirm an older `settings.json` without workspace, tab, or theme fields
       still loads and is upgraded only through optional/defaulted fields.
+
+### Automated interaction checks
+
+Run `node --test tests/*.test.mjs` for the event-controller regressions.
+Run `node tests/browser-interactions.mjs` with an existing Playwright runtime
+and Chromium installation for component keyboard, click, and focus checks.
+If Playwright is provided outside the project, set `PLAYWRIGHT_MODULE` to its
+absolute `index.mjs` path. The browser checks start a local Vite server on port
+5189 and remove their temporary fixture when finished.
