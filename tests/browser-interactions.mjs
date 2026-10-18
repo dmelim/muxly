@@ -57,6 +57,9 @@ window.checkOwnership = () => Array.from(document.querySelector('#targets').chil
   await server.listen();
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  await page.addInitScript(() => {
+    Element.prototype.requestPointerLock = () => Promise.resolve();
+  });
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(server.resolvedUrls.local[0] + dir.split('/').at(-1) + '/index.html');
@@ -88,6 +91,29 @@ window.checkOwnership = () => Array.from(document.querySelector('#targets').chil
   await page.keyboard.press('Enter');
   assert.equal((await counts()).normal, 1);
   console.log('PASS service card keyboard activation');
+  await card.focus();
+  await page.keyboard.down('ContextMenu');
+  const openMenus = page.locator('[role="menu"][tabindex="-1"]');
+  await openMenus.waitFor();
+  await page.keyboard.up('ContextMenu');
+  // Observe cancellation directly: headless Chromium cannot expose WebView2's
+  // native menu UI, but these events must be cancelled before it can open.
+  const checkMenuDefaults = async () => openMenus.first().evaluate(menu => {
+    const target = menu.querySelector('[role="menuitem"]') ?? menu;
+    return [
+      new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true, cancelable: true }),
+      new KeyboardEvent('keyup', { key: 'ContextMenu', bubbles: true, cancelable: true }),
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    ].map(event => { target.dispatchEvent(event); return event.defaultPrevented; });
+  });
+  assert.deepEqual(await checkMenuDefaults(), [true, true, true, true]);
+  await page.keyboard.press('Shift+F10');
+  assert.equal(await openMenus.count(), 1);
+  await page.keyboard.press('Escape');
+  assert.equal(await openMenus.count(), 0);
+  assert.equal(await card.evaluate(el => el === document.activeElement), true);
+  console.log('PASS Menu-key release and repeated Shift+F10 cancel native defaults, with one Escape to close');
   await page.locator('#dialog').click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).focus();
   await page.keyboard.press('Enter');
@@ -100,6 +126,7 @@ window.checkOwnership = () => Array.from(document.querySelector('#targets').chil
   console.log('PASS Cancel and Confirm activate the focused button exactly once');
   await page.locator('#trigger').dispatchEvent('contextmenu', { button: 0, ctrlKey: true });
   await page.getByRole('menuitem', { name: 'First action', exact: true }).waitFor();
+  assert.deepEqual(await checkMenuDefaults(), [true, true, true, true]);
   await page.locator('#trigger').dispatchEvent('click', { button: 0, detail: 1 });
   assert.equal((await counts()).normal, 1);
   assert.equal(await page.getByRole('menuitem', { name: 'First action', exact: true }).count(), 1);

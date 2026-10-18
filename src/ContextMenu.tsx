@@ -76,8 +76,25 @@ function MenuLevel({ items, x, y, onClose, root, dismissAll, flipX, returnFocus 
         tabIndex={-1}
         className="fixed z-[100] max-h-[calc(100vh-12px)] min-w-52 max-w-[calc(100vw-12px)] overflow-y-auto rounded-md border border-white/10 bg-zinc-900 p-1 text-sm text-zinc-200 shadow-lg focus:outline-none"
         style={position}
+        onContextMenu={(event) => {
+          // WebView2 may emit this after keyboard focus moves into our menu.
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onKeyUp={(event) => {
+          // Windows opens the Menu-key native menu on release, after the
+          // trigger's keydown has already opened and focused this menu.
+          if (event.key === "ContextMenu" || event.key === "F10") {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
         onKeyDown={(event) => {
           event.stopPropagation();
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+            event.preventDefault();
+            return;
+          }
           const choices = enabled(items);
           const cursor = choices.indexOf(active);
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {

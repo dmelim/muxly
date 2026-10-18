@@ -36,6 +36,7 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- Windows context menus no longer open a native WebView2 menu over Muxly's menu when repeating Shift+F10 or releasing the Menu key after opening a service menu.
 - Service-pane search replaces the floating toolbar while open and stays on one compact row within narrow panels, avoiding extra terminal-text overlap and clipping beside a wide sidebar.
 - Restarting a pseudo-terminal service preserves previous output in scrollback and starts a fresh screen, preventing startup cursor positioning from overwriting earlier runs.
 
