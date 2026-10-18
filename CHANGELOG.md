@@ -3,20 +3,13 @@
 All notable changes to Muxly are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and release versions are chosen by the maintainer.
 
 ## Versioning policy
 
-- **MAJOR** — breaking changes to the `services.json` schema or app behaviour.
-  While the version is `0.x`, breaking changes still bump **MINOR** (the `0.`
-  prefix signals "not yet stable"); the first `1.0.0` is a deliberate stability
-  commitment, made only when explicitly chosen, never as a reflex to a breaking
-  change.
-- **MINOR** — new features, backwards-compatible.
-- **PATCH** — bug fixes and internal changes with no user-visible feature change.
-
-Cut a **PATCH** as soon as a fix or small cluster of fixes lands in
-`[Unreleased]`; do not hold bug fixes for the next feature release.
+The maintainer chooses each release version and its timing. Changelog categories
+(`Added`, `Changed`, and `Fixed`) describe the contents and do not prescribe a
+major, minor, or patch bump. Routine changes do not alter the version.
 
 The version is declared in **four files that must always match**:
 

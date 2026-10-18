@@ -25,25 +25,17 @@ documented in `agents.md`):
 After changing `Cargo.toml`, run a Cargo command so the root package entry in
 `src-tauri/Cargo.lock` is refreshed too.
 
-Follow [Semantic Versioning](https://semver.org/):
+The user chooses the release version and when to release. Use the version
+already established for the release; ask only if none has been chosen. Do not
+infer or require a major, minor, or patch bump from changelog categories, commit
+types, or the scope of a change.
 
-- **MAJOR** — breaking change to the `services.json` schema or app behaviour.
-  While at `0.x`, breaking changes still bump **MINOR** — the `0.` prefix signals
-  "not yet stable". The first `1.0.0` is a deliberate stability commitment, made
-  only when explicitly chosen, not as a reflex to a breaking change.
-- **MINOR** — new feature, backwards-compatible
-- **PATCH** — bug fix or internal change with no user-visible feature change
+`Added`, `Changed`, and `Fixed` describe the release contents, not its version.
+Routine work does not change version numbers.
 
-### Release cadence
-
-Cut a **PATCH** (`0.3.N`) as soon as a fix or small cluster of fixes lands in
-`[Unreleased]`; do not hold bug fixes for the next feature release. Corollary:
-do not let a finished feature sit unreleased on `main` while fixes pile up
-behind it — release the pending fixes as a **PATCH** before merging the next
-feature.
-
-When you bump the version, also move every `[Unreleased]` entry in
-`CHANGELOG.md` into a new dated section, e.g. `## [0.2.0] - 2026-05-24`.
+When preparing the chosen version, move its `[Unreleased]` entries into a dated
+section. If that section already exists, continue preparing that release instead
+of inventing another bump.
 
 ## Path A — Manual release (current default)
 
