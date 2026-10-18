@@ -266,3 +266,29 @@ input.form-input[type="number"]::-webkit-outer-spin-button {
    entire track. Keep wheel and keyboard scrolling on the native viewport. */
 .muxly-custom-sidebar-viewport { scrollbar-width: none; }
 .muxly-custom-sidebar-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* Transform-only search transitions leave terminal geometry unchanged. */
+.muxly-pane-search {
+  transform-origin: right center;
+  animation: muxly-pane-search-in 150ms ease-out both;
+}
+
+.muxly-pane-search[data-closing="true"] {
+  pointer-events: none;
+  animation: muxly-pane-search-out 150ms ease-in both;
+}
+
+@keyframes muxly-pane-search-in {
+  from { opacity: 0; transform: translateX(6px) scaleX(0.98); }
+  to { opacity: 1; transform: translateX(0) scaleX(1); }
+}
+
+@keyframes muxly-pane-search-out {
+  from { opacity: 1; transform: translateX(0) scaleX(1); }
+  to { opacity: 0; transform: translateX(6px) scaleX(0.98); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .muxly-pane-search { animation: none; }
+  .muxly-pane-search[data-closing="true"] { animation: none; visibility: hidden; }
+}

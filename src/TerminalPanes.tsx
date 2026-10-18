@@ -733,6 +733,17 @@ function PaneView({
   // The SearchAddon is held in state (not just a ref) so the PaneSearchBar
   // re-renders once it becomes available after the deferred terminal open.
   const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
+  const searchVisible = searchOpen && !streamMode && Boolean(searchAddon);
+  const [retainSearch, setRetainSearch] = useState(false);
+  useEffect(() => {
+    if (searchVisible) {
+      setRetainSearch(true);
+      return;
+    }
+    // Keep the outgoing bar mounted for its exit animation. Reopening cancels it.
+    const timer = window.setTimeout(() => setRetainSearch(false), 150);
+    return () => window.clearTimeout(timer);
+  }, [searchVisible]);
   // Stream mode paints masks over the live terminal rather than replacing it.
   const masksRef = useRef<StreamMaskController | null>(null);
   // The deferred terminal setup reads current privacy state through refs.
@@ -1106,7 +1117,11 @@ function PaneView({
         {paneActions}
       </div> : null}
       {!showIdentity ? (
-        <div className="absolute right-3 top-2 z-10 rounded-md bg-[var(--muxly-bg-surface)]/10 p-1 backdrop-blur-[2px]">
+        <div
+          inert={searchVisible}
+          aria-hidden={searchVisible}
+          className={`absolute right-3 top-2 z-10 rounded-md bg-[var(--muxly-bg-surface)]/10 p-1 backdrop-blur-[2px] transition-[opacity,transform,visibility] duration-150 motion-reduce:transition-none ${searchVisible ? "invisible translate-x-1 opacity-0" : "visible translate-x-0 opacity-100"}`}
+        >
           {paneActions}
         </div>
       ) : null}
@@ -1196,9 +1211,10 @@ function PaneView({
         ) : awaitingOutput ? (
           <WaitingForOutput />
         ) : null}
-        {!streamMode && searchOpen && searchAddon ? (
+        {!streamMode && (searchVisible || retainSearch) && searchAddon ? (
           <PaneSearchBar
             searchAddon={searchAddon}
+            closing={!searchVisible}
             seed={searchSeed}
             onClose={onCloseSearch}
           />
@@ -1214,10 +1230,12 @@ function PaneView({
 // jumps to the next match, Shift+Enter jumps to the previous.
 function PaneSearchBar({
   searchAddon,
+  closing,
   seed,
   onClose
 }: {
   searchAddon: SearchAddon;
+  closing: boolean;
   seed: { query: string; nonce: number } | null;
   onClose: () => void;
 }) {
@@ -1257,9 +1275,10 @@ function PaneSearchBar({
   } as const;
 
   useEffect(() => {
+    if (closing) return;
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, []);
+  }, [closing]);
 
   useEffect(() => {
     const handle = searchAddon.onDidChangeResults((event) => {
@@ -1340,75 +1359,82 @@ function PaneSearchBar({
 
   return (
     <div
-      className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md border border-white/10 bg-[#15181d]/95 px-2 py-1 shadow-lg backdrop-blur"
+      inert={closing}
+      aria-hidden={closing}
+      data-closing={closing}
+      className="muxly-pane-search absolute right-3 top-2 z-10 flex w-[22rem] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-white/10 bg-[var(--muxly-bg-surface)]/95 px-2 py-1 shadow-lg backdrop-blur"
       onMouseDown={(event) => {
         // Keep clicks inside the bar from focusing the underlying pane
         // (which would steal focus back into xterm).
         event.stopPropagation();
       }}
     >
-      <SearchIcon className="size-3.5 text-zinc-500" />
-      <input
-        ref={inputRef}
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            onClose();
-            return;
-          }
-          if (event.key === "Enter") {
-            event.preventDefault();
-            event.stopPropagation();
-            if (event.shiftKey) findPrev();
-            else findNext();
-          }
-        }}
-        placeholder="Find in pane…"
-        className="w-44 bg-transparent text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
-        aria-label="Find in pane"
-      />
-      <span className="min-w-[3.5rem] text-right font-mono text-[11px] text-zinc-500">
-        {counter}
-      </span>
-      <Tooltip label="Previous (Shift+Enter)">
-        <button
-          type="button"
-          onClick={findPrev}
-          disabled={!query || results.resultCount === 0}
-          aria-label="Previous match"
-          className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3" aria-hidden="true">
-            <path d="m15 18-6-6 6-6" />
-          </svg>
-        </button>
-      </Tooltip>
-      <Tooltip label="Next (Enter)">
-        <button
-          type="button"
-          onClick={findNext}
-          disabled={!query || results.resultCount === 0}
-          aria-label="Next match"
-          className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3" aria-hidden="true">
-            <path d="m9 18 6-6-6-6" />
-          </svg>
-        </button>
-      </Tooltip>
-      <Tooltip label="Close (Esc)">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close search"
-          className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
-        >
-          <CloseIcon className="size-3" />
-        </button>
-      </Tooltip>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <SearchIcon className="size-3.5 shrink-0 text-zinc-500" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              onClose();
+              return;
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              if (event.shiftKey) findPrev();
+              else findNext();
+            }
+          }}
+          placeholder="Find in pane…"
+          className="min-w-0 flex-1 bg-transparent text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+          aria-label="Find in pane"
+        />
+      </div>
+      <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
+        <span className="min-w-0 truncate text-right font-mono text-[11px] text-zinc-500">
+          {counter}
+        </span>
+        <Tooltip label="Previous (Shift+Enter)">
+          <button
+            type="button"
+            onClick={findPrev}
+            disabled={!query || results.resultCount === 0}
+            aria-label="Previous match"
+            className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+        </Tooltip>
+        <Tooltip label="Next (Enter)">
+          <button
+            type="button"
+            onClick={findNext}
+            disabled={!query || results.resultCount === 0}
+            aria-label="Next match"
+            className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3" aria-hidden="true">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </button>
+        </Tooltip>
+        <Tooltip label="Close (Esc)">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close search"
+            className="rounded p-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+          >
+            <CloseIcon className="size-3" />
+          </button>
+        </Tooltip>
+      </div>
     </div>
   );
 }

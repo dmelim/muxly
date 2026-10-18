@@ -30,8 +30,13 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- Pane search and its floating toolbar fade and slide when opening or closing search, with reduced-motion support and no terminal layout shift.
+
 ### Fixed
 
+- Service-pane search replaces the floating toolbar while open and stays on one compact row within narrow panels, avoiding extra terminal-text overlap and clipping beside a wide sidebar.
 - Restarting a pseudo-terminal service preserves previous output in scrollback and starts a fresh screen, preventing startup cursor positioning from overwriting earlier runs.
 
 ## [0.6.1] - 2026-10-13
