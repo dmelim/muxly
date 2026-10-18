@@ -31,6 +31,12 @@ section, and tag the commit `vX.Y.Z`.
 
 ### Fixed
 
+- macOS Control-click keeps terminal text selected when opening a context menu; releasing the opening click no longer activates the trigger or a menu item.
+- Resize handles reject secondary mouse buttons, and macOS Control-click no longer resizes panels or moves custom scrollbars.
+- Closing a group context menu with Escape restores keyboard focus to the button that opened it.
+- Enter and Space on a service's split button open only the new pane without also activating the service card.
+- Enter on a confirmation dialog's Cancel button cancels instead of confirming, and held Enter does not confirm a newly opened dialog.
+- Terminal search fields retain their editing context menus, and an already-open menu owns its keyboard context-menu events.
 - Windows context menus no longer open a native WebView2 menu over Muxly's menu when repeating Shift+F10 or releasing the Menu key after opening a service menu.
 - Service-pane search replaces the floating toolbar while open and stays on one compact row within narrow panels, avoiding extra terminal-text overlap and clipping beside a wide sidebar.
 - Restarting a pseudo-terminal service preserves previous output in scrollback and starts a fresh screen, preventing startup cursor positioning from overwriting earlier runs.
