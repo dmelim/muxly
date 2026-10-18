@@ -4,7 +4,7 @@ For native context-menu, keyboard, resize, and scrollbar regressions, use the
 [paired Windows/macOS computer-use procedure](docs/testing/input-interactions.md).
 
 Test this checklist from the `release/0.6.2` working tree. The release target
-is 0.6.2; the configured app version remains 0.6.1 until the release version bump.
+and configured app version are 0.6.2.
 Record the tested commit and any uncommitted changes with the results.
 
 Use disposable
