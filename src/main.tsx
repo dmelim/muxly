@@ -16,6 +16,16 @@ function BootHandoff({ children }: { children: ReactNode }) {
 }
 
 startupMark("frontend module loaded");
+
+// Dev-only console helpers: `muxlyLayoutAudit()` checks the current layout,
+// `muxlyLayoutAudit.watch()` keeps checking while panels are resized.
+if (import.meta.env.DEV) {
+  void import("./layoutAudit").then(({ reportLayout, watchLayout }) => {
+    Object.assign(window, {
+      muxlyLayoutAudit: Object.assign(() => reportLayout(), { watch: () => watchLayout() })
+    });
+  });
+}
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <BootHandoff>

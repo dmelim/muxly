@@ -1228,7 +1228,7 @@ function PaneView({
 // this is just a small overlay that drives it and surfaces the live result
 // count via `onDidChangeResults`. Esc closes (clearing decorations), Enter
 // jumps to the next match, Shift+Enter jumps to the previous.
-function PaneSearchBar({
+export function PaneSearchBar({
   searchAddon,
   closing,
   seed,

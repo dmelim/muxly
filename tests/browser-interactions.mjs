@@ -17,6 +17,8 @@ import { ConfirmDialog } from '/src/ConfirmDialog';
 import { ContextMenu } from '/src/ContextMenu';
 import { DEFAULT_SETTINGS } from '/src/appUtils';
 import { hasOwnContextMenu } from '/src/inputEvents';
+import { PaneSearchBar } from '/src/TerminalPanes';
+import { auditLayout } from '/src/layoutAudit';
 import '/src/styles.css';
 const noop = () => {};
 const service = { id: 'demo', name: 'Demo', program: 'echo', args: ['demo'], cwd: '/tmp' };
@@ -33,6 +35,25 @@ const props = {
  reorderService:noop, beginGroupDrag:noop, endGroupDrag:noop, reorderGroup:noop,
  onServiceMenuAction:noop, onGroupMenuAction:noop, onDeleteService:noop
 };
+// Sidebar + pane stand-in for layout sweeps: the pane clips like the real one,
+// and the sidebar button must stay clickable whatever the pane width.
+let emitResults = noop;
+const fakeSearchAddon = {
+ onDidChangeResults: cb => { emitResults = cb; return { dispose: noop }; },
+ findNext: noop, findPrevious: noop, clearDecorations: noop
+};
+function LayoutFixture() {
+ const [paneWidth,setPaneWidth] = useState(640);
+ window.setPaneWidth = setPaneWidth;
+ return <div id="layout-fixture" style={{position:'fixed',left:400,top:320,height:240,display:'flex',background:'#111'}}>
+  <div style={{width:160,padding:8}}><button id="sidebar-control">Sidebar control</button></div>
+  <div id="layout-pane" className="relative overflow-hidden" style={{width:paneWidth}}>
+   <PaneSearchBar searchAddon={fakeSearchAddon} closing={false} seed={{query:'searchable',nonce:1}} onClose={noop}/>
+  </div>
+ </div>;
+}
+window.emitSearchResults = event => emitResults(event);
+window.layoutIssues = () => auditLayout(document.querySelector('#layout-fixture')).map(i => i.kind + ': ' + i.detail);
 function App() {
  const [normal,setNormal] = useState(0), [split,setSplit] = useState(0), [confirmed,setConfirmed] = useState(0), [cancelled,setCancelled] = useState(0);
  const [dialog,setDialog] = useState(false), [menu,setMenu] = useState(false), [action,setAction] = useState(0);
@@ -48,6 +69,7 @@ function App() {
  ]}/>}
  <div id="targets"><input/><textarea/><textarea className="xterm-helper-textarea"/><div contentEditable/><div role="menu"><button>Menu item</button></div><div className="terminal"/></div>
  <output id="ownership">{''}</output>
+ <LayoutFixture/>
  </>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
@@ -139,6 +161,24 @@ window.checkOwnership = () => Array.from(document.querySelector('#targets').chil
   assert.equal(await page.locator('#trigger').evaluate(el => el === document.activeElement), true);
   assert.deepEqual(await page.evaluate(() => window.checkOwnership()), [true,true,false,true,true,false]);
   console.log('PASS Escape focus restoration and context-menu ownership');
+  // Width sweep: floating UI must stay inside its pane and never cover a
+  // neighbouring control, from the narrowest usable pane to a wide one.
+  const bar = page.locator('#layout-pane > :first-child');
+  await page.evaluate(() => window.emitSearchResults({ resultIndex: 998, resultCount: 1000 }));
+  for (const width of [160, 220, 300, 420, 640]) {
+    await page.evaluate(w => window.setPaneWidth(w), width);
+    await page.waitForTimeout(200); // let the 150 ms entrance animation settle
+    const [paneBox, barBox] = await Promise.all([page.locator('#layout-pane').boundingBox(), bar.boundingBox()]);
+    assert.ok(barBox.x >= paneBox.x && barBox.x + barBox.width <= paneBox.x + paneBox.width, `search bar fits a ${width}px pane`);
+    assert.deepEqual(await page.evaluate(() => window.layoutIssues()), [], `layout issues at ${width}px`);
+  }
+  // Prove the audit catches the original regression: an unbounded bar.
+  await bar.evaluate(el => { el.style.maxWidth = 'none'; });
+  await page.evaluate(() => window.setPaneWidth(160));
+  await page.waitForTimeout(50);
+  assert.ok((await page.evaluate(() => window.layoutIssues())).some(issue => issue.startsWith('clipped:')));
+  await bar.evaluate(el => { el.style.maxWidth = ''; });
+  console.log('PASS pane search stays inside its pane across a width sweep');
   assert.deepEqual(errors, []);
 } finally {
   await browser?.close();

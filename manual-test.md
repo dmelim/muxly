@@ -211,6 +211,13 @@ branch tests.
 - [ ] Right-click resize handles and Control-click them on macOS: the sidebars
       and bottom terminal must not resize. Control-click custom scrollbars on
       macOS must not jump or drag their scroll position. Ordinary dragging works.
+- [ ] Floating UI at narrow widths: with the left sidebar dragged as wide as it
+      goes and panes split until narrow, open every overlay a pane or panel can
+      show (in-pane search, pane actions, banners, menus, tooltips). Each must
+      stay inside its own panel and never hide a neighbour's controls. In a dev
+      build, run `muxlyLayoutAudit()` in DevTools for each state, or
+      `muxlyLayoutAudit.watch()` once while dragging; it must report no
+      clipped overlays or covered controls.
 - [ ] Create, edit, delete, import, start, stop, and restart a service.
 - [ ] Exercise pipe and PTY output, terminal resize/input/search, global search,
       port conflict recovery, runtime warnings, profiles, Stream mode, bottom
@@ -224,5 +231,7 @@ Run `node --test tests/*.test.mjs` for the event-controller regressions.
 Run `node tests/browser-interactions.mjs` with an existing Playwright runtime
 and Chromium installation for component keyboard, click, and focus checks.
 If Playwright is provided outside the project, set `PLAYWRIGHT_MODULE` to its
-absolute `index.mjs` path. The browser checks start a local Vite server on port
-5189 and remove their temporary fixture when finished.
+absolute `index.mjs` path (a `file:///C:/...` URL on Windows). The browser
+checks also sweep the in-pane search across pane widths with the layout audit
+from `src/layoutAudit.ts`; add new floating UI to that sweep. They start a
+local Vite server on port 5189 and remove their temporary fixture when finished.
