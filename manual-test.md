@@ -1,9 +1,13 @@
-# Muxly 0.5.6 preview manual test
+# Muxly 0.6.2 release-candidate manual test
 
 For native context-menu, keyboard, resize, and scrollbar regressions, use the
 [paired Windows/macOS computer-use procedure](docs/testing/input-interactions.md).
 
-Test this checklist from the `preview/roadmap` working tree. Use disposable
+Test this checklist from the `release/0.6.2` working tree. The release target
+is 0.6.2; the configured app version remains 0.6.1 until the release version bump.
+Record the tested commit and any uncommitted changes with the results.
+
+Use disposable
 services and repositories where a test can interrupt a process or switch a Git
 branch. Never use a repository with uncommitted work for destructive-looking
 branch tests.
