@@ -53,10 +53,13 @@ function LayoutFixture() {
  </div>;
 }
 window.emitSearchResults = event => emitResults(event);
+window.pageIssues = () => auditLayout(document.body).map(i => i.kind + ': ' + i.detail);
 window.layoutIssues = () => auditLayout(document.querySelector('#layout-fixture')).map(i => i.kind + ': ' + i.detail);
 function App() {
  const [normal,setNormal] = useState(0), [split,setSplit] = useState(0), [confirmed,setConfirmed] = useState(0), [cancelled,setCancelled] = useState(0);
  const [dialog,setDialog] = useState(false), [menu,setMenu] = useState(false), [action,setAction] = useState(0);
+ const [edgeMenu,setEdgeMenu] = useState(null);
+ window.openEdgeMenu = (x, y) => setEdgeMenu({ x, y });
  const trigger = useRef(null);
  return <><output id="counts">{JSON.stringify({normal,split,confirmed,cancelled,action})}</output>
  <button id="dialog" onClick={()=>setDialog(true)}>Show dialog</button>
@@ -70,6 +73,11 @@ function App() {
  <div id="targets"><input/><textarea/><textarea className="xterm-helper-textarea"/><div contentEditable/><div role="menu"><button>Menu item</button></div><div className="terminal"/></div>
  <output id="ownership">{''}</output>
  <LayoutFixture/>
+ {edgeMenu && <ContextMenu x={edgeMenu.x} y={edgeMenu.y} restoreFocusRef={trigger} onClose={()=>setEdgeMenu(null)} items={[
+ {id:'edge-one',label:'Edge action with a fairly long label',action:noop},
+ {id:'edge-two',label:'Second edge action',action:noop},
+ {id:'edge-three',label:'Third edge action',action:noop}
+ ]}/>}
  </>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
@@ -179,6 +187,16 @@ window.checkOwnership = () => Array.from(document.querySelector('#targets').chil
   assert.ok((await page.evaluate(() => window.layoutIssues())).some(issue => issue.startsWith('clipped:')));
   await bar.evaluate(el => { el.style.maxWidth = ''; });
   console.log('PASS pane search stays inside its pane across a width sweep');
+  // Menus opened at the window edges must flip or clamp back into view.
+  const { width: vw, height: vh } = page.viewportSize();
+  for (const [x, y] of [[vw - 4, 100], [500, vh - 4], [vw - 4, vh - 4]]) {
+    await page.evaluate(([px, py]) => window.openEdgeMenu(px, py), [x, y]);
+    await page.getByRole('menuitem', { name: 'Second edge action', exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.pageIssues()), [], `layout issues for a menu at ${x},${y}`);
+    await page.keyboard.press('Escape');
+    await page.getByRole('menuitem', { name: 'Second edge action', exact: true }).waitFor({ state: 'detached' });
+  }
+  console.log('PASS context menus at the window edges stay inside the viewport');
   assert.deepEqual(errors, []);
 } finally {
   await browser?.close();
