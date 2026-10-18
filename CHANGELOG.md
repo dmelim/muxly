@@ -30,6 +30,8 @@ section, and tag the commit `vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-18
+
 ### Changed
 
 - Pane search and its floating toolbar fade and slide when opening or closing search, with reduced-motion support and no terminal layout shift.
